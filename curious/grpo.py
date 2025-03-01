@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
+import wandb
 
 class GRPOPolicyNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_size=64):
@@ -73,7 +74,9 @@ def train_grpo(env, policy_net, optimizer, num_episodes=1000, gamma=0.99, lam=0.
             # If you also have a separate value function:
             # value_estimate = value_net(state_tensor)
             # Store value_estimate.item() or similar.
-            
+            # Log reward
+            wandb.log({"reward": reward})
+
             next_state, reward, done, _info = env.step(action.item())
             rewards.append(reward)
             states.append(state)

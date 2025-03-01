@@ -15,6 +15,7 @@ torch = "^2.6.0"
 reasoning-gym = "^0.1.12"
 transformers = "^4.49.0"
 toml = "^0.10.2"
+wandb = "^0.19.7"
 
 
 [tool.poetry.group.dev.dependencies]
