@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "curious"
+version = "0.1.0"
+description = "A curious llm"
+authors = ["RobbenRibery <runodng.liu@outlook.com>"]
+license = "Apache-2.0"
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python-dotenv = "^1.0.1"
+python = "^3.11.0"
+packaging = ">=23.2"
+torch = "^2.6.0"
+reasoning-gym = "^0.1.12"
+transformers = "^4.49.0"
+toml = "^0.10.2"
+
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.5"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
