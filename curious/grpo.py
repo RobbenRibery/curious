@@ -1,119 +1,372 @@
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import numpy as np
+from collections.abc import Callable
+import json
+from pathlib import Path
+import random
+import re
+from typing import Any, Iterator, Optional
 import wandb
+import torch
+import torch.optim as optim
+import torch.nn.functional as F
+from torch.nn.utils import clip_grad_norm_
+from torch.utils.data import DataLoader
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    PreTrainedTokenizer,
+    GenerationConfig,
+    PreTrainedModel, 
+    PreTrainedTokenizer, 
+)
+from curious.loss import GRPOLoss, approx_kl_divergence
+from curious.buffer import ReplayBuffer, Experience, join_experience_batch
+from curious.prompt import system_prompt
+from curious.reward import RewardModel
+from dataclasses import dataclass
+from lightning.pytorch import seed_everything
 
-class GRPOPolicyNetwork(nn.Module):
-    def __init__(self, state_dim, action_dim, hidden_size=64):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(state_dim, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, action_dim)
-        )
-    
-    def forward(self, x):
-        # Converts raw output (logits) to probabilities via softmax
-        logits = self.net(x)
-        return torch.distributions.Categorical(logits=logits)
+def load_model_tokenizer(
+    model_name_or_path: str,
+    trust_remote_code: bool = False,
+    bf16: bool = True,
+    device_map: Optional[str] = "auto",
+) -> tuple[PreTrainedModel, PreTrainedTokenizer]:
+    """
+    Loads a pre-trained model and its tokenizer.
 
-def compute_returns_and_advantages(rewards, values, gamma=0.99, lam=0.95):
-    """
-    Example advantage computation (GAE-like). 
-    For each state, compute the discounted return and advantage estimate.
-    values: estimated state-values from a value function (if you have one). 
-    If not, you can omit advantage and just use reward-to-go.
-    """
-    advantages = []
-    gae = 0
-    returns = []
-    running_return = 0
+    Args:
+        model_name_or_path (str): The name or path of the pre-trained model.
+        trust_remote_code (bool): Whether to trust remote code.
+        bf16 (bool): Whether to use bfloat16 precision.
+        device_map (str): The device map to use for the model.
 
-    # Process from last step to first
-    for step in reversed(range(len(rewards))):
-        delta = rewards[step] + (gamma * values[step + 1] if step < len(rewards) - 1 else 0) - values[step]
-        gae = delta + gamma * lam * gae
-        advantages.append(gae)
-        running_return = rewards[step] + (gamma * running_return)
-        returns.append(running_return)
-    
-    advantages.reverse()
-    returns.reverse()
-    advantages = torch.tensor(advantages, dtype=torch.float32)
-    returns = torch.tensor(returns, dtype=torch.float32)
-    return returns, advantages
+    Returns:
+        tuple: A tuple containing the model and its tokenizer.
+    """
+    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+    tokenizer.pad_token = tokenizer.eos_token
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name_or_path,
+        trust_remote_code=trust_remote_code,
+        attn_implementation="flash_attention_2",
+        torch_dtype=torch.bfloat16 if bf16 else "auto",
+        device_map=device_map,
+    )
+    return model, tokenizer
 
-def train_grpo(env, policy_net, optimizer, num_episodes=1000, gamma=0.99, lam=0.95):
+
+def create_inputs(
+    tokenizer: PreTrainedTokenizer,
+    task: str,
+    ) -> dict[str, torch.Tensor]:
+    chat_messages = [
+        {
+            "role": "system",
+            "content": system_prompt,
+        },
+        {
+            "role": "user",
+            "content": task,
+        },
+    ]
+    chat_prompt = tokenizer.apply_chat_template(
+        chat_messages, tokenize=False, add_generation_prompt=True
+    )
+    model_inputs = tokenizer(
+        [chat_prompt],
+        return_tensors="pt",
+        padding=True,
+        padding_side="left",
+        return_attention_mask=True,
+    ).to("cuda")    
+    return model_inputs
+
+@torch.no_grad()
+def rollout(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizer,
+    batch_inputs: dict[str, torch.Tensor],
+    oracle_answer: str,
+    generation_config: GenerationConfig,
+) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
     """
-    Main training loop for the GRPO-like algorithm.
-    env: a gym-like environment
-    policy_net: policy network
-    optimizer: optimizer for policy network
+    Performs a rollout of the model.
+
+    Args:
+        model (AutoModelForCausalLM): The model to rollout.
+        tokenizer (PreTrainedTokenizer): The tokenizer to use for the model.
+        inputs (dict[str, torch.Tensor]): The inputs to the model.
+        oracle_answer (str): The oracle answer to the task.
+        generation_config (GenerationConfig): The generation configuration to use for the rollout.
+
+    Returns:
+        tuple: A tuple containing the sequence ids, the returns, the action mask, and the completions.
     """
-    for episode in range(num_episodes):
-        state = env.reset()
-        log_probs = []
-        rewards = []
-        values = []
-        states = []
-        actions = []
+    num_samples = batch_inputs["input_ids"].shape[0]
+    num_return_sequences = generation_config.num_return_sequences
+    num_rollouts = num_samples * num_return_sequences
+
+    model.eval()
+
+    pad_token_id = tokenizer.eos_token_id
+    sequence_ids = model.generate(**batch_inputs, generation_config=generation_config)
+    completions = tokenizer.batch_decode(
+        sequence_ids[:, batch_inputs["input_ids"].shape[1] :], skip_special_tokens=True
+    )
+
+    action_mask = torch.zeros_like(sequence_ids, dtype=torch.bool)
+    action_mask[:, batch_inputs["input_ids"].shape[1] :] = True
+    action_mask[sequence_ids == pad_token_id] = False
+    action_mask = action_mask[:, 1:] #TODO: check if this is correct, why from pos 1? 
+
+
+    returns = torch.zeros(
+        (num_samples, num_return_sequences), 
+        dtype=torch.float
+    )
+
+    # TODO: parallelize this via concurrent futures
+    for i in range(0, num_rollouts, num_return_sequences):
+
+        group_completions = completions[i:i+num_return_sequences]
         
-        done = False
-        while not done:
-            state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
-            dist = policy_net(state_tensor)
-            action = dist.sample()
-            
-            log_prob = dist.log_prob(action)
-            log_probs.append(log_prob)
-            actions.append(action)
+        outcome_reward = RewardModel.outcome_reward(group_completions, oracle_answer) 
+        process_reward, think_start, think_end = RewardModel.process_reward(group_completions)
 
-            # If you also have a separate value function:
-            # value_estimate = value_net(state_tensor)
-            # Store value_estimate.item() or similar.
-            # Log reward
-            wandb.log({"reward": reward})
+        reward = outcome_reward + process_reward
 
-            next_state, reward, done, _info = env.step(action.item())
-            rewards.append(reward)
-            states.append(state)
-            
-            state = next_state
+        # TODO: map the process reward from the string space into the token space 
+        returns[i] = reward
 
-        # For simplicity, use zero for values. If you have a critic, use it here.
-        values = [0]*len(rewards)
-        values.append(0)  # next state value, we set it to 0 for last step
-        returns, advantages = compute_returns_and_advantages(rewards, values, gamma, lam)
+    return sequence_ids, returns.to(sequence_ids.device), action_mask, completions
 
-        # Combine log_probs and advantages
-        log_probs_tensor = torch.stack(log_probs)
-        
-        # Policy gradient objective: sum of log_probs * advantage
-        loss = -(log_probs_tensor * advantages).mean()
-        
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
 
-        if (episode + 1) % 50 == 0:
-            print(f"Episode {episode + 1}/{num_episodes}, Loss: {loss.item():.4f}")
+def group_advantages(returns: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """
+    Normalizes the advantages of a group of returns.
+
+    Args:
+        returns (torch.Tensor): The returns to normalize.
+        eps (float): The epsilon value to add to the standard deviation to prevent division by zero.
+
+    Returns:
+        torch.Tensor: The normalized advantages.
+    """
+    return (returns - returns.mean()) / (returns.std() + eps)
+
+
+def sequence_log_probs_from_logits(
+    logits: torch.Tensor, 
+    output_ids: torch.Tensor
+) -> torch.Tensor:
+    """
+    Computes the log probabilities of the output ids from the logits.
+
+    Args:
+        logits (torch.Tensor): The logits of the model.
+        output_ids (torch.Tensor): The output ids to compute the log probabilities for.
+
+    Returns:
+        torch.Tensor: The log probabilities of the output ids.
+    """
+    log_prob = F.log_softmax(logits, dim=-1)
+    return log_prob.gather(
+        dim=-1, 
+        index=output_ids.unsqueeze(-1)
+    ).squeeze(-1)
+
+
+def sequences_log_probs(
+    model: AutoModelForCausalLM,
+    sequence_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+) -> torch.Tensor:
+    position_ids = attention_mask.long().cumsum(dim=-1) - 1
+    position_ids.masked_fill_(mask=(attention_mask == 0), value=1)
+    output = model.forward(
+        input_ids=sequence_ids,
+        attention_mask=attention_mask,
+        position_ids=position_ids,
+        use_cache=False,
+    )
+    logits = output["logits"]
+    log_probs = sequence_log_probs_from_logits(
+        logits=logits[:, :-1].to(torch.float32),
+        output_ids=sequence_ids[:, 1:],
+    )
+    return log_probs
+
 
 def main():
-    # Example usage:
-    import reasoning_gym  # imaginary environment
-    env = reasoning_gym.make("SomeEnvironment-v0")  # hypothetical environment
+    seed = 42
+    wandb_project = None  # "tiny_grpo"
+    device_index = 0
+    model_name = "deepseek/math-instruct-v1.0"
+    checkpoint_path = Path("./output")
+    checkpoint_interval = 20
+    train_batch_size = 16
+    lr = 5e-6
+    kl_weight = 0.01
+    clip_eps = 0.2
+
+    group_size = 12
+    rollouts_per_step = 32
+    epochs_per_step = 1
+    max_norm = 1.0  # gradient clipping
+
+    # rollout params
+    max_length = 1024
+    top_p = 1.0
+    temperature = 1.0
+
+    device = torch.device("cuda", device_index)
+    cpu_device = torch.device("cpu")
     
-    # Dummy state_dim, action_dim - adapt to your real env
-    state_dim = env.observation_space.shape[0]
-    action_dim = env.action_space.n
-    
-    policy_net = GRPOPolicyNetwork(state_dim, action_dim)
-    optimizer = optim.Adam(policy_net.parameters(), lr=1e-3)
-    
-    train_grpo(env, policy_net, optimizer)
+    seed_everything(seed)
+
+    reference_model, _ = load_model(model_name, device_map=device)
+    model, tokenizer = load_model(model_name, device_map=device)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+
+    reference_model.eval()
+    model.gradient_checkpointing_enable(
+        gradient_checkpointing_kwargs={"use_reentrant": False}
+    )
+
+    pad_token_id = tokenizer.eos_token_id
+
+    prompts = read_prompts(
+        "data/math_tasks.jsonl",
+        predicate=lambda x: len(x["question"]) < 128
+        and x["num_terms"] <= 3
+        and x["num_digits"] <= 3,
+        max_rows=64 * 1024,
+    )
+    print(f"found {len(prompts)} matching prompts")
+    prompt_loader = DataLoader(
+        prompts,
+        batch_size=rollouts_per_step,
+        shuffle=True,
+        drop_last=True,
+        pin_memory=False,
+    )
+
+    replay_buffer = ReplayBuffer()
+    objective = GRPOLoss(clip_eps=clip_eps, kl_weight=kl_weight)
+
+    if wandb_project is None:
+        wandb.init(mode="disabled")
+    else:
+        wandb.init(project=wandb_project)
+
+    for k, prompt_batch in enumerate(prompt_loader):
+        rollout_returns = []
+
+        replay_buffer.clear()
+
+        questions = prompt_batch["question"]
+        answers = prompt_batch["answer"]
+
+        with torch.no_grad():
+            for q, a in zip(questions, answers):
+                sequence_ids, returns, action_mask, completions = rollout(
+                    model,
+                    tokenizer,
+                    q,
+                    a,
+                    num_rollouts=group_size,
+                    max_length=max_length,
+                    temperature=temperature,
+                    top_p=top_p,
+                )
+
+                print(
+                    f"rollout q='{q}', a='{a}', returns={returns.sum().item():.2f}, replay_buffer_size={len(replay_buffer)}, sequence_ids={sequence_ids.shape}"
+                )
+                rollout_returns.append(returns.cpu())
+
+                advantages = group_advantages(returns)
+                attention_mask = sequence_ids != pad_token_id
+
+                log_probs = sequences_log_probs(
+                    model=model,
+                    sequence_ids=sequence_ids,
+                    attention_mask=attention_mask,
+                )
+                log_probs_ref = sequences_log_probs(
+                    model=reference_model,
+                    sequence_ids=sequence_ids,
+                    attention_mask=attention_mask,
+                )
+                kl = approx_kl_divergence(
+                    log_probs=log_probs,
+                    log_probs_ref=log_probs_ref,
+                    action_mask=action_mask,
+                )
+
+                experience = Experience(
+                    sequences=sequence_ids,
+                    action_log_probs=log_probs,
+                    log_probs_ref=log_probs_ref,
+                    returns=returns,
+                    advantages=advantages,
+                    attention_mask=attention_mask,
+                    action_mask=action_mask,
+                    kl=kl,
+                )
+                replay_buffer.append(experience.to(cpu_device))
+
+        torch.cuda.empty_cache()
+        episode_return_sum = torch.stack(rollout_returns).sum()
+        print(f"returns of step {k}: {episode_return_sum:.4f}")
+        wandb.log({"returns": episode_return_sum})
+
+        experience_sampler = DataLoader(
+            replay_buffer,
+            batch_size=train_batch_size,
+            shuffle=True,
+            drop_last=True,
+            collate_fn=join_experience_batch,
+        )
+
+        for step_epoch in range(epochs_per_step):
+            model.train()
+
+            for exp in experience_sampler:
+                exp: Experience
+
+                exp = exp.to(device)
+
+                optimizer.zero_grad()
+
+                log_probs = sequences_log_probs(
+                    model, sequence_ids=exp.sequences, attention_mask=exp.attention_mask
+                )
+
+                loss, kl = objective(log_probs=log_probs, experience=exp)
+
+                if not loss.isfinite():
+                    print(f"Loss not finite, skipping backward, loss={loss}")
+                    print(f"experience.advantages={experience.advantages}")
+                    continue
+
+                loss.backward()
+                grad_norm = clip_grad_norm_(model.parameters(), max_norm=max_norm)
+                print(f"{step_epoch}: kl={kl: .4f}, grad_norm={grad_norm: .4f}")
+                wandb.log({"kl": kl, "grad_norm": grad_norm})
+
+                optimizer.step()
+
+        if (
+            checkpoint_path is not None
+            and checkpoint_interval is not None
+            and (k + 1) % checkpoint_interval == 0
+        ):
+            model.save_pretrained(checkpoint_path / f"step_{k}")
+
+    if checkpoint_path is not None:
+        model.save_pretrained(checkpoint_path / f"step_{k}")
+
 
 if __name__ == "__main__":
     main()
