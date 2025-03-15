@@ -1,5 +1,5 @@
 import re
-from concurrent.futures import ThreadPoolExecutor, Future
+from typing import List
 
 class RewardModel:
 
@@ -33,7 +33,8 @@ class RewardModel:
                 reward = 0.5
             else:
                 reward = 0.01
-        return reward, 
+
+        return reward
 
     @classmethod
     def process_reward(cls, completion: str) -> tuple[float, int|None, int|None]:
@@ -63,4 +64,15 @@ class RewardModel:
         return reward, think_start, think_end
         
     
-    
+    @classmethod
+    def reward_batch(cls, completions: List[str], oracle_answers: List[str]) -> List[float]:
+        """
+        Computes the outcome reward for a batch of completions and oracle answers.
+        """
+        rewards = []
+        for completion, oracle_answer in zip(completions, oracle_answers):
+            outcome_reward = cls.outcome_reward(completion, oracle_answer)
+            process_reward, _, _ = cls.process_reward(completion)
+            reward = outcome_reward + process_reward
+            rewards.append(reward)
+        return rewards

@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import random
 import re
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator, Optional, List
 import wandb
 import torch
 import torch.optim as optim
@@ -18,16 +18,16 @@ from transformers import (
     PreTrainedModel, 
     PreTrainedTokenizer, 
 )
+from curious.utils import tokenize_questions
 from curious.loss import GRPOLoss, approx_kl_divergence
 from curious.buffer import ReplayBuffer, Experience, join_experience_batch
-from curious.prompt import system_prompt
 from curious.reward import RewardModel
 from dataclasses import dataclass
 from lightning.pytorch import seed_everything
 
 def load_model_tokenizer(
     model_name_or_path: str,
-    trust_remote_code: bool = False,
+    trust_remote_code: bool = True,
     bf16: bool = True,
     device_map: Optional[str] = "auto",
 ) -> tuple[PreTrainedModel, PreTrainedTokenizer]:
@@ -43,9 +43,10 @@ def load_model_tokenizer(
     Returns:
         tuple: A tuple containing the model and its tokenizer.
     """
-    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+    tokenizer:PreTrainedTokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
     tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForCausalLM.from_pretrained(
+
+    model:PreTrainedModel = AutoModelForCausalLM.from_pretrained(
         model_name_or_path,
         trust_remote_code=trust_remote_code,
         attn_implementation="flash_attention_2",
@@ -55,38 +56,12 @@ def load_model_tokenizer(
     return model, tokenizer
 
 
-def create_inputs(
-    tokenizer: PreTrainedTokenizer,
-    task: str,
-    ) -> dict[str, torch.Tensor]:
-    chat_messages = [
-        {
-            "role": "system",
-            "content": system_prompt,
-        },
-        {
-            "role": "user",
-            "content": task,
-        },
-    ]
-    chat_prompt = tokenizer.apply_chat_template(
-        chat_messages, tokenize=False, add_generation_prompt=True
-    )
-    model_inputs = tokenizer(
-        [chat_prompt],
-        return_tensors="pt",
-        padding=True,
-        padding_side="left",
-        return_attention_mask=True,
-    ).to("cuda")    
-    return model_inputs
-
 @torch.no_grad()
 def rollout(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizer,
     batch_inputs: dict[str, torch.Tensor],
-    oracle_answer: str,
+    oracle_answers: List[str],
     generation_config: GenerationConfig,
 ) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
     """
@@ -102,43 +77,41 @@ def rollout(
     Returns:
         tuple: A tuple containing the sequence ids, the returns, the action mask, and the completions.
     """
+    model.eval()
+
+    # get the batch size
     num_samples = batch_inputs["input_ids"].shape[0]
     num_return_sequences = generation_config.num_return_sequences
     num_rollouts = num_samples * num_return_sequences
 
-    model.eval()
-
+    # get the parallel rollouts
     pad_token_id = tokenizer.eos_token_id
     sequence_ids = model.generate(**batch_inputs, generation_config=generation_config)
     completions = tokenizer.batch_decode(
-        sequence_ids[:, batch_inputs["input_ids"].shape[1] :], skip_special_tokens=True
+        sequence_ids[:, batch_inputs["input_ids"].shape[1] :], 
+        skip_special_tokens=True
     )
 
+    # action mask (state that has performed an action = 1)
     action_mask = torch.zeros_like(sequence_ids, dtype=torch.bool)
-    action_mask[:, batch_inputs["input_ids"].shape[1] :] = True
+    action_mask[:, batch_inputs["input_ids"].shape[1]:] = True
     action_mask[sequence_ids == pad_token_id] = False
-    action_mask = action_mask[:, 1:] #TODO: check if this is correct, why from pos 1? 
-
-
+    action_mask = action_mask[:, 1:] 
+    
+    # compute the rewards
     returns = torch.zeros(
         (num_samples, num_return_sequences), 
         dtype=torch.float
     )
 
-    # TODO: parallelize this via concurrent futures
     for i in range(0, num_rollouts, num_return_sequences):
-
         group_completions = completions[i:i+num_return_sequences]
-        
-        outcome_reward = RewardModel.outcome_reward(group_completions, oracle_answer) 
-        process_reward, think_start, think_end = RewardModel.process_reward(group_completions)
-
-        reward = outcome_reward + process_reward
-
+        # compute the reward
+        rewards = RewardModel.reward_batch(group_completions, oracle_answers)
         # TODO: map the process reward from the string space into the token space 
-        returns[i] = reward
+        returns[i] = torch.tensor(rewards, dtype=torch.float, device=sequence_ids.device)
 
-    return sequence_ids, returns.to(sequence_ids.device), action_mask, completions
+    return sequence_ids, returns, action_mask, completions
 
 
 def group_advantages(returns: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:

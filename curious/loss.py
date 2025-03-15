@@ -12,8 +12,14 @@ def approx_kl_divergence(
 ) -> torch.Tensor:
     """
     Monte-Carlo approximation of KL divergence, k3 estimator, see: http://joschu.net/blog/kl-approx.html
-    """
+    Args:
+        log_probs (torch.Tensor): The log probabilities of the current model.
+        log_probs_ref (torch.Tensor): The log probabilities of the reference model.
+        action_mask (Optional[torch.Tensor]): The action mask.
 
+    Returns:
+        torch.Tensor: The KL divergence.
+    """
     log_ratio = log_probs_ref.float() - log_probs.float()
     if action_mask is not None:
         log_ratio = log_ratio * action_mask
