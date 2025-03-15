@@ -1,5 +1,7 @@
 import re
-from typing import List
+from typing import List, Tuple
+
+SOLVED_REWARD = 1.0
 
 class RewardModel:
 
@@ -28,7 +30,7 @@ class RewardModel:
         reward = 0
         if answer is not None:
             if answer == oracle_answer:
-                reward = 1.0
+                reward = SOLVED_REWARD
             elif oracle_answer in answer:
                 reward = 0.5
             else:
@@ -65,14 +67,18 @@ class RewardModel:
         
     
     @classmethod
-    def reward_batch(cls, completions: List[str], oracle_answers: List[str]) -> List[float]:
+    def reward_batch(cls, completions: List[str], oracle_answers: List[str]) -> Tuple[List[float], float]:
         """
         Computes the outcome reward for a batch of completions and oracle answers.
         """
         rewards = []
+        sovled_times = 0
         for completion, oracle_answer in zip(completions, oracle_answers):
             outcome_reward = cls.outcome_reward(completion, oracle_answer)
+            sovled_times += 1 if outcome_reward == SOLVED_REWARD  else 0
             process_reward, _, _ = cls.process_reward(completion)
+
             reward = outcome_reward + process_reward
             rewards.append(reward)
-        return rewards
+
+        return rewards, sovled_times/len(completions)

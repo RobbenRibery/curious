@@ -11,8 +11,8 @@ from curious.grpo import rollout
 
 EACH_DATASET_SIZE = 100
 SEED = 42
+BATCH_SIZE = 2
 MODEL_NAME = "Qwen/Qwen2-0.5B-Instruct"
-
 
 datasets = [
     "complex_arithmetic",
@@ -66,13 +66,13 @@ generation_config = GenerationConfig(
     top_p=0.9,
     top_k=50,
     temperature=0.7,
-    num_return_sequences=4,
+    num_return_sequences=2,
 )
 
 encodings["input_ids"] = encodings["input_ids"].to(model.device)
 encodings["attention_mask"] = encodings["attention_mask"].to(model.device)
 
-seq_ids, returns, action_mask, completions = rollout(
+seq_ids, returns, solved_rate, action_mask, completions = rollout(
     model,
     tokenizer,
     batch_inputs=encodings,

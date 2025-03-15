@@ -18,43 +18,12 @@ from transformers import (
     PreTrainedModel, 
     PreTrainedTokenizer, 
 )
-from curious.utils import tokenize_questions
+from curious.utils import tokenize_questions, load_model_tokenizer
 from curious.loss import GRPOLoss, approx_kl_divergence
 from curious.buffer import ReplayBuffer, Experience, join_experience_batch
 from curious.reward import RewardModel
 from dataclasses import dataclass
 from lightning.pytorch import seed_everything
-
-def load_model_tokenizer(
-    model_name_or_path: str,
-    trust_remote_code: bool = True,
-    bf16: bool = True,
-    device_map: Optional[str] = "auto",
-) -> tuple[PreTrainedModel, PreTrainedTokenizer]:
-    """
-    Loads a pre-trained model and its tokenizer.
-
-    Args:
-        model_name_or_path (str): The name or path of the pre-trained model.
-        trust_remote_code (bool): Whether to trust remote code.
-        bf16 (bool): Whether to use bfloat16 precision.
-        device_map (str): The device map to use for the model.
-
-    Returns:
-        tuple: A tuple containing the model and its tokenizer.
-    """
-    tokenizer:PreTrainedTokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
-    tokenizer.pad_token = tokenizer.eos_token
-
-    model:PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-        model_name_or_path,
-        trust_remote_code=trust_remote_code,
-        attn_implementation="flash_attention_2",
-        torch_dtype=torch.bfloat16 if bf16 else "auto",
-        device_map=device_map,
-    )
-    return model, tokenizer
-
 
 @torch.no_grad()
 def rollout(
@@ -77,7 +46,7 @@ def rollout(
     Returns:
         tuple: A tuple containing the sequence ids, the returns, the action mask, and the completions.
     """
-    model.eval()
+    # assume model.eval()
 
     # get the batch size
     num_samples = batch_inputs["input_ids"].shape[0]
@@ -101,17 +70,24 @@ def rollout(
     # compute the rewards
     returns = torch.zeros(
         (num_samples, num_return_sequences), 
-        dtype=torch.float
+        dtype=torch.float,
+        device=sequence_ids.device
+    )
+    sovled_rate = torch.zeros(
+        (num_samples, 1), 
+        dtype=torch.float,
+        device=sequence_ids.device
     )
 
     for i in range(0, num_rollouts, num_return_sequences):
         group_completions = completions[i:i+num_return_sequences]
         # compute the reward
-        rewards = RewardModel.reward_batch(group_completions, oracle_answers)
+        rewards, solved_rate = RewardModel.reward_batch(group_completions, oracle_answers)
         # TODO: map the process reward from the string space into the token space 
         returns[i] = torch.tensor(rewards, dtype=torch.float, device=sequence_ids.device)
+        sovled_rate[i] = torch.tensor(solved_rate, dtype=torch.float, device=sequence_ids.device)
 
-    return sequence_ids, returns, action_mask, completions
+    return sequence_ids, returns, solved_rate, action_mask, completions
 
 
 def group_advantages(returns: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
@@ -128,21 +104,18 @@ def group_advantages(returns: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     return (returns - returns.mean()) / (returns.std() + eps)
 
 
-def sequence_log_probs_from_logits(
-    logits: torch.Tensor, 
-    output_ids: torch.Tensor
-) -> torch.Tensor:
+def sequence_log_probs_from_logits(logits: torch.Tensor, output_ids: torch.Tensor) -> torch.Tensor:
     """
     Computes the log probabilities of the output ids from the logits.
 
     Args:
-        logits (torch.Tensor): The logits of the model.
-        output_ids (torch.Tensor): The output ids to compute the log probabilities for.
+        logits (torch.Tensor): The logits of the model. (num_samples, seq_len, vocab_size)
+        output_ids (torch.Tensor): The output ids to compute the log probabilities for. (num_samples, seq_len)
 
     Returns:
-        torch.Tensor: The log probabilities of the output ids.
+        torch.Tensor: The log probabilities of the output ids.(num_samples, seq_len)
     """
-    log_prob = F.log_softmax(logits, dim=-1)
+    log_prob = F.log_softmax(logits, dim=-1) # (num_samples, seq_len, vocab_size)
     return log_prob.gather(
         dim=-1, 
         index=output_ids.unsqueeze(-1)
@@ -150,22 +123,35 @@ def sequence_log_probs_from_logits(
 
 
 def sequences_log_probs(
-    model: AutoModelForCausalLM,
+    model: PreTrainedModel,
     sequence_ids: torch.Tensor,
     attention_mask: torch.Tensor,
 ) -> torch.Tensor:
+    """
+    Computes the log probabilities of the output ids from the logits.
+
+    Args:
+        model (PreTrainedModel): The model to compute the log probabilities for.
+        sequence_ids (torch.Tensor): The sequence ids to compute the log probabilities for.
+        attention_mask (torch.Tensor): The attention mask to compute the log probabilities for.
+
+    Returns:
+        torch.Tensor: The log probabilities of the output ids.
+    """
     position_ids = attention_mask.long().cumsum(dim=-1) - 1
     position_ids.masked_fill_(mask=(attention_mask == 0), value=1)
-    output = model.forward(
+    output = model(
         input_ids=sequence_ids,
         attention_mask=attention_mask,
         position_ids=position_ids,
         use_cache=False,
     )
     logits = output["logits"]
+
+    # logits: [batch_size * num_rollouts, seq_len, vocab_size]
     log_probs = sequence_log_probs_from_logits(
-        logits=logits[:, :-1].to(torch.float32),
-        output_ids=sequence_ids[:, 1:],
+        logits=logits[:, :-1],
+        output_ids=sequence_ids[:, 1:],#right shift 1 block to get the actual output ids
     )
     return log_probs
 
@@ -242,7 +228,7 @@ def main():
 
         with torch.no_grad():
             for q, a in zip(questions, answers):
-                sequence_ids, returns, action_mask, completions = rollout(
+                sequence_ids, returns, solved_rate, action_mask, completions = rollout(
                     model,
                     tokenizer,
                     q,
@@ -254,7 +240,10 @@ def main():
                 )
 
                 print(
-                    f"rollout q='{q}', a='{a}', returns={returns.sum().item():.2f}, replay_buffer_size={len(replay_buffer)}, sequence_ids={sequence_ids.shape}"
+                    f"rollout q='{q}', a='{a}', returns={returns.sum().item():.2f}, \
+                    solved_rate={solved_rate.item():.2f}, \
+                    replay_buffer_size={len(replay_buffer)}, \
+                    sequence_ids={sequence_ids.shape}"
                 )
                 rollout_returns.append(returns.cpu())
 
