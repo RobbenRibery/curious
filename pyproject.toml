@@ -23,6 +23,7 @@ tree-sitter = "^0.24.0"
 lightning = "^2.5.0.post0"
 ipython = "8.22.0"
 accelerate = ">=0.26.0"
+tyro = "^0.9.17"
 
 
 [tool.poetry.group.dev.dependencies]

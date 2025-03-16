@@ -11,7 +11,7 @@ class ReasoningGymDataset(Dataset):
     def __init__(
         self,
         datasets_name: List[str], 
-        size: int, 
+        each_dataset_size: int, 
         seed: int
     ):
         """
@@ -27,16 +27,16 @@ class ReasoningGymDataset(Dataset):
             The random seed to use when loading the datasets.
         """
         self.datasets_name = datasets_name
-        self.size = size
+        self.each_dataset_size = each_dataset_size
         self.seed = seed
-        self.total_size = len(datasets_name) * size
+        self.total_size = len(datasets_name) * each_dataset_size
         
         # Cache for lazy loading
         self._datasets = {}  
         for dataset_idx in range(len(datasets_name)):
             self._datasets[dataset_idx] = reasoning_gym.create_dataset(
                 name=self.datasets_name[dataset_idx],
-                size=self.size,
+                size=self.each_dataset_size,
                 seed=self.seed
             )
 

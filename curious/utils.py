@@ -1,6 +1,12 @@
-from transformers import PreTrainedTokenizer, PreTrainedModel, AutoTokenizer, AutoModelForCausalLM
+from transformers import (
+    PreTrainedTokenizer, 
+    PreTrainedModel, 
+    AutoTokenizer, 
+    AutoModelForCausalLM,
+)
 from typing import List, Dict, Optional 
 import torch
+
 from curious.prompt import system_prompt
 
 def load_model_tokenizer(
@@ -37,7 +43,7 @@ def tokenize_questions(
     tokenizer: PreTrainedTokenizer, 
     questions: List[str],
     max_length: int = None
-) -> List[Dict]:
+) -> Dict[str, torch.Tensor]:
     """
     Tokenize a list of questions and answers.
     """

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 
@@ -32,8 +32,22 @@ def masked_mean(
     mask: Optional[torch.Tensor] = None,
     dim: int = None,
 ) -> torch.Tensor:
+    """
+    Compute the mean of the tensor over the specified dimension.
+    If mask is None, return the mean of the whole tensor.
+    If dim is None, return the mean of the whole tensor.
+    
+    Args:
+        tensor (torch.Tensor): The tensor to compute the mean of.
+        mask (Optional[torch.Tensor]): The mask to compute the mean of.
+        dim (Optional[int]): The dimension to compute the mean of.
+
+    Returns:
+        torch.Tensor: The mean of the tensor.
+    """
     if mask is None:
         return tensor.mean(axis=dim)
+    # when dim == None, return the mean of the whole tensor
     return (tensor * mask).sum(axis=dim) / mask.sum(axis=dim)
 
 
@@ -49,7 +63,7 @@ class GRPOLoss(nn.Module):
         self,
         log_probs: torch.Tensor,
         experience: Experience,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
 
         old_log_probs = experience.action_log_probs
         log_probs_ref = experience.log_probs_ref
