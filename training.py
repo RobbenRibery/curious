@@ -20,11 +20,12 @@ from typing import List
 from dataclasses import dataclass
 from pathlib import Path
 
+from modal_setup import app
+import modal 
 import tyro 
 
 @dataclass
 class CliArgs: 
-    
     # wandb params
     wandb_project: str = None
 
@@ -45,6 +46,7 @@ class CliArgs:
     train_batch_size: int = 16
     epochs_per_step: int = 1
     max_norm: float = 1.0
+
     # sampling params
     max_length: int = 1024
     top_p: float = 0.9
@@ -54,6 +56,10 @@ class CliArgs:
     # data params
     each_dataset_size: int = 100
 
+@modal.function(
+    image=app.image,
+    gpu="A10G",
+)
 def train(args:CliArgs) -> None:
 
     # datasets

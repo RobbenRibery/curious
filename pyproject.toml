@@ -24,6 +24,7 @@ lightning = "^2.5.0.post0"
 ipython = "8.22.0"
 accelerate = ">=0.26.0"
 tyro = "^0.9.17"
+modal = "^0.73.107"
 
 
 [tool.poetry.group.dev.dependencies]
