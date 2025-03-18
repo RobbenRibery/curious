@@ -29,6 +29,7 @@ class ReasoningGymDataset(Dataset):
         self.datasets_name = datasets_name
         self.each_dataset_size = each_dataset_size
         self.seed = seed
+        self.each_dataset_size = each_dataset_size
         self.total_size = len(datasets_name) * each_dataset_size
         
         # Cache for lazy loading
@@ -68,8 +69,8 @@ class ReasoningGymDataset(Dataset):
         Dict
             The item at the given index.
         """
-        dataset_idx = idx // self.size
-        item_idx = idx % self.size
+        dataset_idx = idx // self.each_dataset_size
+        item_idx = idx % self.each_dataset_size
         
         return {
             "question": self._datasets[dataset_idx][item_idx]["question"],

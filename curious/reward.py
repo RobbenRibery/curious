@@ -61,7 +61,7 @@ class RewardModel:
 
         reward = 0 
         if think is not None:
-            reward = 0.5 
+            reward = 0.1 
         
         return reward, think_start, think_end
         

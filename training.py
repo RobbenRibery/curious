@@ -34,38 +34,31 @@ class CliArgs:
     
     # model params
     model_name: str = "Qwen/Qwen2-0.5B-Instruct"
+    model_max_length_inuse:int = 512
     checkpoint_path: Path = Path("output/")
     checkpoint_interval: int = 20
 
+
     # training params
     seed: int = 42
-    group_size: int = 12
+    group_size: int = 8
     lr: float = 5e-6
     kl_weight: float = 0.01
     clip_eps: float = 0.2
-    train_batch_size: int = 16
+    train_batch_size: int = 6
     epochs_per_step: int = 1
     max_norm: float = 1.0
 
     # sampling params
-    max_length: int = 1024
+    max_new_tokens: int = 128
     top_p: float = 0.9
     top_k: int = 50
-    temperature: float = 0.7
+    temperature: float = 0.5
 
     # data params
     each_dataset_size: int = 100
 
-args = CliArgs()
-
-#@app.function(
-#    image=image,
-#    gpu="A10G",
-#    secrets=[
-#        modal.Secret.from_name("wandb-secret"),#
-#    ]
-#)
-def train() -> None:
+def train(args:CliArgs) -> None:
 
     # datasets
     datasets_name = [
@@ -129,8 +122,11 @@ def train() -> None:
         batch_inputs = tokenize_questions(
             tokenizer=tokenizer,
             questions=questions,
-            max_length=args.max_length,
+            max_length=args.model_max_length_inuse,
         )
+        batch_inputs = {
+            k:v.to(device) for k,v in batch_inputs.items()
+        }
 
         # Rollout phase of GRPO
         with torch.no_grad():
@@ -142,11 +138,14 @@ def train() -> None:
                 oracle_answers=answers,
                 generation_config=GenerationConfig(
                     num_return_sequences=args.group_size,
-                    max_length=args.max_length,
+                    max_new_tokens=args.max_new_tokens,
                     temperature=args.temperature,
                     top_p=args.top_p,
+                    top_k=args.top_k,
+                    do_sample = True,
                 ),
             )
+            print(sequence_ids.shape)
             # sequence_ids: (num_samples * group_size, seq_len)
             # action_mask: (num_samples * group_size, seq_len)
             # completions: (num_samples * group_size)
@@ -181,6 +180,7 @@ def train() -> None:
                 action_log_probs=log_probs,
                 log_probs_ref=log_probs_ref,
                 returns=returns,
+                solved_rate = solved_rate,
                 advantages=advantages,
                 attention_mask=attention_mask,
                 action_mask=action_mask,
@@ -260,4 +260,6 @@ def train() -> None:
 
 
 if __name__ == "__main__":
-    train()
+    
+    args = tyro.cli(CliArgs)
+    train(args)

@@ -49,7 +49,7 @@ def rollout(
     # get the batch size
     num_samples = batch_inputs["input_ids"].shape[0]
     num_return_sequences = generation_config.num_return_sequences
-    num_rollouts = num_samples * num_return_sequences
+    #num_rollouts = num_samples * num_return_sequences
 
     # get the parallel rollouts
     pad_token_id = tokenizer.eos_token_id
@@ -67,26 +67,31 @@ def rollout(
     
     # compute the rewards
     returns = torch.zeros(
-        (num_samples, num_return_sequences), 
+        (num_samples * num_return_sequences, ), 
         dtype=torch.float,
         device=sequence_ids.device
     )
-    sovled_rate = torch.zeros(
+    solved_rates = torch.zeros(
         (num_samples, ), 
         dtype=torch.float,
         device=sequence_ids.device
     )
 
-    for i in range(0, num_rollouts, num_return_sequences):
+    for i in range(0, len(completions), num_return_sequences):
         group_completions = completions[i:i+num_return_sequences]
+        
         # compute the reward
-        rewards, solved_rate = RewardModel.reward_batch(group_completions, oracle_answers)
+        orcale_answer_replicates = [oracle_answers[i//num_return_sequences]]*num_return_sequences
+        rewards, solved_rate = RewardModel.reward_batch(group_completions, orcale_answer_replicates)
         # TODO: map the process reward from the string space into the token space 
-        returns[i] = torch.tensor(rewards, dtype=torch.float, device=sequence_ids.device)
-        sovled_rate[i] = torch.tensor(solved_rate, dtype=torch.float, device=sequence_ids.device)
 
-    returns = returns.reshape(-1) # (num_samples * num_return_sequences, )
-    return sequence_ids, returns, solved_rate, action_mask, completions
+        rewards = torch.tensor(rewards, dtype=torch.float, device=sequence_ids.device)
+        
+        returns[i:i+num_return_sequences] = rewards
+        solved_rates[i//num_return_sequences] = solved_rate
+
+    #returns = returns.reshape(-1) # (num_samples * num_return_sequences, )
+    return sequence_ids, returns, solved_rates, action_mask, completions
 
 
 def group_advantages(returns: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:

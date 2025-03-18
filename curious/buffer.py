@@ -75,9 +75,13 @@ def split_experience_batch(experience: Experience) -> List[Experience]:
             vals:List[None] = [None] * batch_size
         else:
             vals: tuple[torch.Tensor, ...] = torch.unbind(value)
-        assert batch_size == len(vals)
+        #assert batch_size == len(vals), print(key, batch_size, len(vals))
         for i, v in enumerate(vals):
-            batch_data[i][key] = v
+            if key == "solved_rate":
+                group_size = batch_size // len(vals)
+                batch_data[i*group_size : (i+1)*group_size][key] = v
+            else:
+                batch_data[i][key] = v
 
     return [Experience(**data) for data in batch_data]
 
