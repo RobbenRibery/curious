@@ -10,7 +10,6 @@ package-mode = false
 [tool.poetry.dependencies]
 python-dotenv = "^1.0.1"
 python = "^3.11.0"
-packaging = ">=23.2"
 torch = "^2.6.0"
 reasoning-gym = "^0.1.12"
 transformers = "^4.49.0"
@@ -24,6 +23,8 @@ lightning = "^2.5.0.post0"
 ipython = "8.22.0"
 accelerate = ">=0.26.0"
 tyro = "^0.9.17"
+modal = "^0.73.107"
+setuptools = "^76.0.0"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -32,3 +33,10 @@ ipykernel = "^6.29.5"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+# Add specific configurations for Modal
+[tool.modal]
+dependencies = [
+    "packaging==23.2",
+    "transformers==4.49.0"
+]
