@@ -42,14 +42,14 @@ def load_model_tokenizer(
 def tokenize_questions(
     tokenizer: PreTrainedTokenizer, 
     questions: List[str],
-    max_length: int = None
+    trucation_max_length: int = None,
 ) -> Dict[str, torch.Tensor]:
     """
     Tokenize a list of questions and answers.
     """
-    if not max_length:
+    if not trucation_max_length:
         print(f"Using model max length: {tokenizer.model_max_length}")
-        max_length = tokenizer.model_max_length
+        trucation_max_length = tokenizer.model_max_length
 
     if tokenizer.padding_side == "right":
         print(f"Adjusting padding side from right to left for training")
@@ -80,10 +80,10 @@ def tokenize_questions(
     # get encodings for the question
     encodings = tokenizer(
         texts,
-        padding= "max_length",
+        padding= "longest", # padding to the longest sequence in the batch
         truncation= True,
         return_tensors= "pt",
-        max_length= max_length,
+        max_length= trucation_max_length,
     )
 
     return encodings

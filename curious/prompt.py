@@ -1,13 +1,13 @@
 from textwrap import dedent
 
-
-# DeepSeek Zero system prompt
 system_prompt = dedent(
-"""A conversation between User and Assistant. The user asks a question, and the Assistant solves it.
-The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. 
-The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively. 
+"""
+You are a helpful assistant that can answer questions and solve problems provided by the user.
+You reason about the problem first and then provide the final answer. 
+You must enclose your reasoning process within <think> </think> tag, and only the final answer within <answer> </answer> tag.
 
 For example:
-<think> reasoning process here </think>
-<answer> answer here </answer>
-""").strip()
+<think> reasoning process ... </think>
+<answer> answer </answer>
+"""
+).strip()

@@ -18,12 +18,8 @@ from curious.loss import GRPOLoss, approx_kl_divergence
 from lightning import seed_everything
 import wandb
 
-from typing import List
 from dataclasses import dataclass
 from pathlib import Path
-
-from modal_setup import app, image
-import modal 
 import tyro 
 
 @dataclass
@@ -37,7 +33,7 @@ class CliArgs:
     
     # model params
     model_name: str = "Qwen/Qwen2-0.5B-Instruct"
-    model_max_length_inuse:int = 400
+    model_max_length_inuse:int = 512
     checkpoint_path: Path = Path("output/")
     checkpoint_interval: int = 20
 
@@ -53,7 +49,7 @@ class CliArgs:
     max_norm: float = 2.0
 
     # sampling params
-    max_new_tokens: int = 128
+    max_new_tokens: int = 256
     top_p: float = 0.9
     top_k: int = 50
     temperature: float = 0.7
@@ -125,7 +121,7 @@ def train(args:CliArgs) -> None:
         batch_inputs = tokenize_questions(
             tokenizer=tokenizer,
             questions=questions,
-            max_length=args.model_max_length_inuse,
+            trucation_max_length=args.model_max_length_inuse,
         )
         batch_inputs = {
             k:v.to(device) for k,v in batch_inputs.items()
@@ -145,7 +141,7 @@ def train(args:CliArgs) -> None:
                     temperature=args.temperature,
                     top_p=args.top_p,
                     top_k=args.top_k,
-                    do_sample = True,
+                    do_sample =True,
                 ),
             )
             # print(sequence_ids.shape)
@@ -263,7 +259,6 @@ def train(args:CliArgs) -> None:
 
     if args.checkpoint_path is not None:
         model.save_pretrained(args.checkpoint_path / f"step_{batch_idx + 1}")
-
 
 if __name__ == "__main__":
     

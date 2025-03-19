@@ -144,12 +144,12 @@ def sequences_log_probs(
     Returns:
         torch.Tensor: The log probabilities of the output ids. (num_samples * group_size, seq_len-1, vocab_size)
     """
-    position_ids = attention_mask.long().cumsum(dim=-1) - 1
-    position_ids.masked_fill_(mask=(attention_mask == 0), value=1)
+    #position_ids = attention_mask.long().cumsum(dim=-1) - 1
+    #position_ids.masked_fill_(mask=(attention_mask == 0), value=1)
     output = model(
         input_ids=sequence_ids,
         attention_mask=attention_mask,
-        position_ids=position_ids,
+        #position_ids=position_ids,
         use_cache=False,
     )
     logits = output["logits"]
