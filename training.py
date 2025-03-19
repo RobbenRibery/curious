@@ -1,8 +1,10 @@
 import os 
 os.environ["TOKENIZERS_PARALLELIS"] = "true"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 import torch 
 from torch.utils.data import DataLoader 
-from torch.nn import utils as clip_grad_norm_
+from torch.nn.utils import clip_grad_norm_
 import torch.optim as optim
 
 from transformers import GenerationConfig
@@ -28,6 +30,7 @@ import tyro
 class CliArgs: 
     # wandb params
     wandb_project: str = "curious-training-grpo-test"
+    wandb_run_name: str = "defulat-run"
 
     # device params
     device_index: int = 0
@@ -41,12 +44,12 @@ class CliArgs:
 
     # training params
     seed: int = 42
-    group_size: int = 8
+    group_size: int = 16
     lr: float = 5e-6
-    kl_weight: float = 0.01
+    kl_weight: float = 0
     clip_eps: float = 0.2
-    train_batch_size: int = 6
-    epochs_per_step: int = 1
+    train_batch_size: int = 8
+    epochs_per_step: int = 4
     max_norm: float = 1.0
 
     # sampling params
@@ -56,16 +59,13 @@ class CliArgs:
     temperature: float = 0.5
 
     # data params
-    each_dataset_size: int = 100
+    each_dataset_size: int = 1000
 
 def train(args:CliArgs) -> None:
 
     # datasets
     datasets_name = [
-        "complex_arithmetic",
-        "intermediate_integration",
-        "polynomial_equations",
-        "simple_equations",
+        "gsm_symbolic"
     ]
 
     device = torch.device("cuda", args.device_index)
@@ -112,7 +112,10 @@ def train(args:CliArgs) -> None:
     if not args.wandb_project:
         wandb.init(mode="disabled")
     else:
-        wandb.init(project=args.wandb_project)
+        wandb.init(
+            project=args.wandb_project,
+            name= args.wandb_run_name,
+        )
 
     for batch_idx, batch in enumerate(main_data_loader):
         replay_buffer.clear()
@@ -145,7 +148,7 @@ def train(args:CliArgs) -> None:
                     do_sample = True,
                 ),
             )
-            print(sequence_ids.shape)
+            # print(sequence_ids.shape)
             # sequence_ids: (num_samples * group_size, seq_len)
             # action_mask: (num_samples * group_size, seq_len)
             # completions: (num_samples * group_size)
@@ -236,9 +239,8 @@ def train(args:CliArgs) -> None:
                 grad_norm = clip_grad_norm_(
                     model.parameters(), 
                     max_norm=args.max_norm,
-                    foreach=True,
                 )
-                print(f"{step_epoch}: kl={kl: .4f}, grad_norm={grad_norm: .4f}")
+                #print(f"{step_epoch}: kl={kl: .4f}, grad_norm={grad_norm: .4f}")
                 wandb.log(
                     {
                         "train/mean_kl": mean_kl, 

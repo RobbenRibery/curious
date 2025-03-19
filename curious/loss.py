@@ -77,6 +77,8 @@ class GRPOLoss(nn.Module):
         )
 
         ratio = (log_probs - old_log_probs).exp()
+        advantages = advantages.unsqueeze(-1) 
+
         surr1 = ratio * advantages
         surr2 = ratio.clamp(1 - self.clip_eps, 1 + self.clip_eps) * advantages
         loss = -torch.min(surr1, surr2) + self.kl_weight * kl

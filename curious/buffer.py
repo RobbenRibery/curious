@@ -79,7 +79,9 @@ def split_experience_batch(experience: Experience) -> List[Experience]:
         for i, v in enumerate(vals):
             if key == "solved_rate":
                 group_size = batch_size // len(vals)
-                batch_data[i*group_size : (i+1)*group_size][key] = v
+                #print(i, group_size, v)
+                for j in range(i*group_size, (i+1)*group_size):
+                    batch_data[j][key] = v
             else:
                 batch_data[i][key] = v
 
@@ -112,15 +114,26 @@ def join_experience_batch(items: List[Experience]) -> Experience:
         "attention_mask",
         "action_mask",
     )
+    
     for key in keys:
         # get the values for this key from all the experiences within the batch 
-        vals: List[torch.Tensor] = [getattr(item, key) for item in items]
+        vals: List[torch.Tensor] = [
+            getattr(item, key) \
+            for item in items
+        ]
+        
         # if all the values are not None, concatenate them
         if all(v is not None for v in vals):
-            data = zero_pad_sequences(vals, "left")
+            #print(key, len(vals), vals[0].shape)
+            if key in {"returns", "solved_rate", "advantages"}:
+                data = torch.stack(vals, dim=0).reshape(-1)
+            else:
+                data = zero_pad_sequences(vals, "left")
         else:
             data = None
+        #print(key, data.shape)
         batch_data[key] = data
+    
     return Experience(**batch_data)
 
 
