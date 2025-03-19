@@ -37,7 +37,7 @@ class CliArgs:
     
     # model params
     model_name: str = "Qwen/Qwen2-0.5B-Instruct"
-    model_max_length_inuse:int = 512
+    model_max_length_inuse:int = 400
     checkpoint_path: Path = Path("output/")
     checkpoint_interval: int = 20
 
@@ -56,7 +56,7 @@ class CliArgs:
     max_new_tokens: int = 128
     top_p: float = 0.9
     top_k: int = 50
-    temperature: float = 0.5
+    temperature: float = 0.7
 
     # data params
     each_dataset_size: int = 1000
