@@ -26,8 +26,7 @@ import tyro
 class CliArgs: 
     # wandb params
     wandb_project: str = "curious-training-grpo-test"
-    wandb_run_name: str = "defulat-run"
-
+    
     # device params
     device_index: int = 0
     
@@ -49,7 +48,7 @@ class CliArgs:
     max_norm: float = 2.0
 
     # sampling params
-    max_new_tokens: int = 256
+    max_new_tokens: int = 512
     top_p: float = 0.9
     top_k: int = 50
     temperature: float = 0.7
@@ -142,6 +141,8 @@ def train(args:CliArgs) -> None:
                     top_p=args.top_p,
                     top_k=args.top_k,
                     do_sample =True,
+                    eos_token_id=tokenizer.eos_token_id,
+                    pad_token_id= tokenizer.eos_token_id,
                 ),
             )
             # print(sequence_ids.shape)
@@ -197,10 +198,10 @@ def train(args:CliArgs) -> None:
             }
         )
         # TODO: log the text completions as artifacts
-        with open(f"completions_{batch_idx}.txt", "w") as f:
+        with open(f"output/completions_{batch_idx}.txt", "w") as f:
             for i, completion in enumerate(completions):
                 f.write(f"******** completion {i} *********\n {completion}\n")
-        wandb.save(f"completions_{batch_idx}.txt")
+        wandb.save(f"output/completions_{batch_idx}.txt")
 
         ### Training phase of GRPO
         experience_sampler = DataLoader(

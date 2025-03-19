@@ -34,7 +34,7 @@ class RewardModel:
             elif oracle_answer in answer:
                 reward = 0.5
             else:
-                reward = 0.01
+                reward = 0.1
 
         return reward
 
@@ -51,7 +51,7 @@ class RewardModel:
             the start index of the think, and the end index of the think.
         """
         think_match = re.search(
-            r"<think>(.*?)</think>",
+            r"<reasoning>(.*?)</reasoning>",
             completion,
             flags=re.DOTALL,
         )
@@ -61,9 +61,9 @@ class RewardModel:
 
         reward = 0 
         if think is not None:
-            reward = 0.1 
+            reward = (think_end - think_start) / len(completion) * 0.1
         
-        return reward, think_start, think_end
+        return reward
         
     
     @classmethod

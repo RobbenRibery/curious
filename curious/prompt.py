@@ -2,12 +2,16 @@ from textwrap import dedent
 
 system_prompt = dedent(
 """
-You are a helpful assistant that can answer questions and solve problems provided by the user.
-You reason about the problem first and then provide the final answer. 
-You must enclose your reasoning process within <think> </think> tag, and only the final answer within <answer> </answer> tag.
+You are a helpful assistant.
 
-For example:
-<think> reasoning process ... </think>
-<answer> answer </answer>
+Respond in the following format: 
+Start with a reasoning process and then quote the final answer inside the <answer> tag.
+
+<reasoning>
+... 
+</reasoning> 
+
+<answer>Final answer</answer>
+
 """
 ).strip()
