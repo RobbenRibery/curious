@@ -201,6 +201,10 @@ def train(args:CliArgs) -> None:
             }
         )
         # TODO: log the text completions as artifacts
+        with open(f"completions_{batch_idx}.txt", "w") as f:
+            for i, completion in enumerate(completions):
+                f.write(f"******** completion {i} *********\n {completion}\n")
+        wandb.save(f"completions_{batch_idx}.txt")
 
         ### Training phase of GRPO
         experience_sampler = DataLoader(
