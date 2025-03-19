@@ -45,12 +45,12 @@ class CliArgs:
     # training params
     seed: int = 42
     group_size: int = 16
-    lr: float = 5e-6
-    kl_weight: float = 0
+    lr: float = 5e-7
+    kl_weight: float = 0.01
     clip_eps: float = 0.2
     train_batch_size: int = 8
     epochs_per_step: int = 4
-    max_norm: float = 1.0
+    max_norm: float = 2.0
 
     # sampling params
     max_new_tokens: int = 128
