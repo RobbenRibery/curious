@@ -25,6 +25,13 @@ class RewardModel:
             completion,
             flags=re.DOTALL,
         )
+        # TODO: 
+        # must only consider the final reward 
+        # TODO: 
+        # why? the LLM could produce intermediate answers 
+        # TODO: 
+        # ADDITIONAL PARSING IS REQUIRED TO HANDLE 000,000 patterns 
+        # we need to use some symbolic methods to validate i.e. Sympy
 
         answer = answer_match.group(1) if answer_match else None
         reward = 0
@@ -39,7 +46,7 @@ class RewardModel:
         return reward
 
     @classmethod
-    def process_reward(cls, completion: str) -> tuple[float, int|None, int|None]:
+    def process_reward(cls, completion: str, illeagel_contents:List[str]) -> tuple[float, int|None, int|None]:
         """
         Processes the reward for a given completion.
 
@@ -51,15 +58,21 @@ class RewardModel:
             the start index of the think, and the end index of the think.
         """
         think_match = re.search(
-            r"<reasoning>(.*?)</reasoning>",
+            r"<think>(.*?)</think>",
             completion,
             flags=re.DOTALL,
         )
-        think = think_match.group(1) if think_match else None
+        think = think_match.group(1).lower().strip() if think_match else None
         think_start = think_match.start() if think_match else None
         think_end = think_match.end() if think_match else None
 
         reward = 0 
+        if think is not None:
+            for illeagel_content in illeagel_contents:
+                illeagel_content = illeagel_content.lower().strip()
+                if illeagel_content == think:
+                    return -1 
+
         if think is not None:
             reward = (think_end - think_start) / len(completion) * 0.1
         
@@ -67,7 +80,12 @@ class RewardModel:
         
     
     @classmethod
-    def reward_batch(cls, completions: List[str], oracle_answers: List[str]) -> Tuple[List[float], float]:
+    def reward_batch(
+        cls, 
+        completions: List[str], 
+        oracle_answers: List[str],
+        illeagel_contents:List[str],
+    ) -> Tuple[List[float], float]:
         """
         Computes the outcome reward for a batch of completions and oracle answers.
         """
@@ -76,8 +94,8 @@ class RewardModel:
         for completion, oracle_answer in zip(completions, oracle_answers):
             outcome_reward = cls.outcome_reward(completion, oracle_answer)
             sovled_times += 1 if outcome_reward == SOLVED_REWARD  else 0
-            process_reward, _, _ = cls.process_reward(completion)
-
+            # TODO: Test only using the outcome reward 
+            process_reward = cls.process_reward(completion, illeagel_contents=illeagel_contents)
             reward = outcome_reward + process_reward
             rewards.append(reward)
 

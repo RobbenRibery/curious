@@ -82,7 +82,15 @@ def rollout(
         
         # compute the reward
         orcale_answer_replicates = [oracle_answers[i//num_return_sequences]]*num_return_sequences
-        rewards, solved_rate = RewardModel.reward_batch(group_completions, orcale_answer_replicates)
+        rewards, solved_rate = RewardModel.reward_batch(
+            group_completions, 
+            orcale_answer_replicates,
+            illeagel_contents= [
+                "reasoning process here",
+                "thinking process...",
+                "reasoning process...",
+            ]
+        )
         # TODO: map the process reward from the string space into the token space 
 
         rewards = torch.tensor(rewards, dtype=torch.float, device=sequence_ids.device)
@@ -119,11 +127,15 @@ def sequence_log_probs_from_logits(logits: torch.Tensor, output_ids: torch.Tenso
     Returns:
         torch.Tensor: The log probabilities of the output ids. (num_samples * num_rollouts, seq_len)
     """
-    log_prob = F.log_softmax(logits, dim=-1) # (num_samples * num_rollouts, seq_len, vocab_size)
-    return log_prob.gather(
-        dim=-1, 
+    # Gather the logits corresponding to the output_ids
+    gathered_logits = logits.gather(
+        dim=-1,
         index=output_ids.unsqueeze(-1)
-    ).squeeze(-1)
+    ).squeeze(-1)  # (num_samples * num_rollouts, seq_len)
+
+     # Compute log-sum-exp over the vocabulary dimension
+    log_sum_exp = logits.logsumexp(dim=-1)  # (num_samples * num_rollouts, seq_len)
+    return torch.log(gathered_logits.exp()) - log_sum_exp
 
 
 def sequences_log_probs(

@@ -14,6 +14,7 @@ def load_model_tokenizer(
     trust_remote_code: bool = True,
     bf16: bool = True,
     device_map: Optional[str] = "auto",
+    freeze_model:bool=False,
 ) -> tuple[PreTrainedModel, PreTrainedTokenizer]:
     """
     Loads a pre-trained model and its tokenizer.
@@ -37,6 +38,10 @@ def load_model_tokenizer(
         torch_dtype=torch.bfloat16 if bf16 else "auto",
         device_map=device_map,
     )
+    if freeze_model:
+        for param in model.parameters():
+            param.requires_grad = False
+
     return model, tokenizer
 
 def tokenize_questions(
