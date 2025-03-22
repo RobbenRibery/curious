@@ -20,7 +20,8 @@ class RewardModel:
                 A reward of 0.5 is given if the oracle answer is contained within the answer.
                 A reward of 0.01 is given otherwise.
         """
-        answer_match = re.search(
+        oracle_answer = oracle_answer.lower()
+        answer_matchs = re.findall(
             r"<answer>(.*?)</answer>",
             completion,
             flags=re.DOTALL,
@@ -33,7 +34,7 @@ class RewardModel:
         # ADDITIONAL PARSING IS REQUIRED TO HANDLE 000,000 patterns 
         # we need to use some symbolic methods to validate i.e. Sympy
 
-        answer = answer_match.group(1) if answer_match else None
+        answer = answer_matchs[-1] if answer_matchs else None
         reward = 0
         if answer is not None:
             if answer == oracle_answer:
@@ -67,11 +68,12 @@ class RewardModel:
         think_end = think_match.end() if think_match else None
 
         reward = 0 
-        if think is not None:
-            for illeagel_content in illeagel_contents:
-                illeagel_content = illeagel_content.lower().strip()
-                if illeagel_content == think:
-                    return -1 
+        # neg_reward = -0.1
+        # if think is not None:
+        #     for illeagel_content in illeagel_contents:
+        #         illeagel_content = illeagel_content.lower().strip()
+        #         if illeagel_content == think:
+        #             return neg_reward
 
         if think is not None:
             reward = (think_end - think_start) / len(completion) * 0.1
