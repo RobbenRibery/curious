@@ -71,9 +71,6 @@ class GSM8KRewardModel:
 
         self.use_format_reward = use_format_reward
         
-        # initialize the executor
-        self.executor = ThreadPoolExecutor()
-        
     def outcome_reward(self, completion: str, oracle_answer: str) -> Tuple[Optional[List[sympy.Expr | str]], float, Dict[str, str]]:
         """
         Computes the reward for a given completion and oracle answer.
@@ -151,6 +148,7 @@ class GSM8KRewardModel:
             Tuple[float, Dict[str, str]]: A tuple containing the reward value and a dictionary of failure mode.
         """
         info  = {}
+
         parsed_answer, outcome_reward, outcome_failure_mode = self.outcome_reward(completion, oracle_answer)
         info.update(outcome_failure_mode)
         info.update({"parsed_answer": parsed_answer})
@@ -162,34 +160,32 @@ class GSM8KRewardModel:
         reward = outcome_reward + format_reward
         return reward, info
     
-    def __call__(self, completions: List[str] | str, oracle_answers: List[str] | str) -> Tuple[List[str], List[float], float]:
-        
+    def __call__(self, completions: List[str] | str, oracle_answers: List[str] | str) -> Tuple[List[str], List[float], List[Dict[str, str]], float]:
+        """
+        Computes the reward for a given completion and oracle answer.
+
+        Args:
+            completions (List[str] | str): The list of completions or a single completion.
+            oracle_answers (List[str] | str): The list of oracle answers or a single oracle answer.
+
+        Returns:
+            Tuple[List[str], List[float], List[Dict[str, str]], float]: A tuple containing the parsed answers, rewards, infos and the solved rate.
+        """
         if isinstance(completions, str):
             completions = [completions]
         if isinstance(oracle_answers, str):
             oracle_answers = [oracle_answers]
 
-        futures:List[Future] = []
-        parsed_answers, rewards = [], []
+        rewards, infos = [], []
         sovled_times = 0
         for completion, oracle_answer in zip(completions, oracle_answers):
-            # submit the task to the executor
-            futures.append(
-                self.executor.submit(
-                    self.instance_reward, 
-                    completion, 
-                    oracle_answer
-                )
-            )
-
-        for future_ in futures:
-            # get the parsed answer and reward
-            parsed_answer, reward = future_.result()
-            # update the solved times
-            sovled_times += 1 if reward == SOLVED_REWARD  else 0
-
-            # append the parsed answer and reward
+            reward, info = self.instance_reward(completion, oracle_answer)
             rewards.append(reward)
-            parsed_answers.append(parsed_answer)
+            infos.append(info)
 
-        return parsed_answers, rewards, sovled_times/len(completions)
+            # update the solved times
+            if info["outcome"] is None and info["format_"] is None:
+                sovled_times += 1
+
+        # return the rewards, infos and the solved rate
+        return rewards, infos, sovled_times/len(completions)

@@ -1,4 +1,5 @@
 from curious.reward import GSM8KRewardModel, SOLVED_REWARD, NEGATIVE_REWARD, ZERO_REWARD
+from curious.data import GSM8KDataset
 from textwrap import dedent
 
 def test_outcome_reward():
@@ -139,4 +140,17 @@ def test_instance_reward():
     assert info["outcome"] == "wrong_answer"
 
 def test_batch_reward():
-    pass 
+    gsm8k = GSM8KDataset(mode="train")
+    completions = gsm8k[:10]["answer"]
+    completions = [
+        completion.replace("####", "<answer>").strip() + "</answer>" \
+        for completion in completions
+    ] 
+    oracle_answers = gsm8k[:10]["oracle_answer"]
+
+    reward_model = GSM8KRewardModel(use_format_reward=False, use_strict_format_reward=False)
+    rewards, infos, solved_rate = reward_model(completions, oracle_answers)
+    assert len(rewards) == len(completions)
+    assert len(infos) == len(completions)
+    assert rewards == [SOLVED_REWARD] * len(completions)
+    assert solved_rate == 1.0

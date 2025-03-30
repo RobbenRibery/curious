@@ -52,3 +52,6 @@ clean-test: ## remove test and coverage artifacts
 	rm -f .coverage
 	rm -fr coverage/
 	rm -fr .pytest_cache
+
+test:
+	poetry run pytest -v tests/

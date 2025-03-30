@@ -15,7 +15,7 @@ from transformers import (
     GenerationConfig,
     PreTrainedModel, 
 )
-from curious.reward import RewardModel
+from curious.reward import GSM8KRewardModel
 
 @torch.no_grad()
 def rollout(
