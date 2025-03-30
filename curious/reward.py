@@ -84,7 +84,7 @@ class GSM8KRewardModel:
             A tuple containing the parsed answer, the reward value and a dictionary of failure mode.
         """
         # normalize the oracle answer 
-        oracle_answer:List[sympy.Expr | str] = parse(oracle_answer)
+        oracle_answer:List[sympy.Expr | str] = parse(oracle_answer,)
 
         # find all the answer matches
         answer_match:List[str] | None = re.findall(self.answer_pattern, completion, flags=re.DOTALL)
@@ -94,7 +94,7 @@ class GSM8KRewardModel:
             return None, NEGATIVE_REWARD, {"outcome": FailureMode.NO_ANSWER}
 
         # get the last answer as the final answer and normalize the parsed answer
-        answer_parsed:List[sympy.Expr | str] = parse(answer_match[-1])
+        answer_parsed:List[sympy.Expr | str] = parse(answer_match[-1], extraction_mode="any_match")
         if not answer_parsed:
             return None, NEGATIVE_REWARD, {"outcome": FailureMode.NO_NUMBER_IN_ANSWER}
 

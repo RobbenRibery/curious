@@ -105,17 +105,17 @@ def test_instance_reward():
     pred1 = dedent(
     """
     <think>If f(x) = x^2, what is f(x) for x = 10?</think>
-    <answer>1.0e02</answer>
+    <answer>100</answer>
     <think>let's multiply the answer by 2</think>
-    <answer>the final answer is 200 = 2.0e02</answer> 
+    <answer>the final answer is 200 = 100 * 2</answer> 
     """ 
     ).strip()
 
     oracle_answer = "200"
     reward_model = GSM8KRewardModel(use_format_reward=True, use_strict_format_reward=True)
     reward, info = reward_model.instance_reward(pred1, oracle_answer)
-    assert reward == 2*SOLVED_REWARD
     assert info['parsed_answer'][1] == "200"
+    assert reward == 2*SOLVED_REWARD
     assert info['parsed_reasoning'] == pred1
     assert info["format_"] == None
     assert info["outcome"] == None
