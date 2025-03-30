@@ -1,128 +1,109 @@
-from curious.reward import GSM8KRewardModel, SOLVED_REWARD, NEGATIVE_REWARD, PARTIAL_REWARD
-from textwrap import dedent 
+from curious.reward import GSM8KRewardModel, SOLVED_REWARD, NEGATIVE_REWARD, ZERO_REWARD
+from textwrap import dedent
 
-THINK_PATTERN = r"<think>(.*?)</think>"
-ANSWER_PATTERN = r"<answer>(.*?)</answer>"
+def test_outcome_reward():
 
-
-def test_perfect_answer():
-    perfect_completion = dedent(
-    """
+    reward_model = GSM8KRewardModel(use_format_reward=False)
+    pred1 = """
     <think> 
-    because the number is too big, we need to use scientific notation
+    If x + y = 10, x - y = 2, what is x?
     </think>
 
     <answer>
-    5e8
+    final answer: x = 6
     </answer>
     """
-    ).strip()
+    oracle_answer = "6"
+
+    pred_answer, reward, info = reward_model.outcome_reward(pred1, oracle_answer)
+    assert reward == SOLVED_REWARD
+    assert info["outcome"] == None
+
+    pred2 = """
+    <think> 
+    If x + y = 10, x - y = 2, what is x?
+    </think>
+
+    <answer>
+    x = 5
+    </answer>
+    """
+    pred_answer, reward, info = reward_model.outcome_reward(pred2, oracle_answer)
+    assert reward == ZERO_REWARD
+    assert info["outcome"] == "wrong_answer"
+
+    pred3 = """
+    <think> 
+    If x + y = 10, x - y = 2, what is x?
+    </think>
+
+    answer:x = 6
+    """
+    pred_answer, reward, info = reward_model.outcome_reward(pred3, oracle_answer)
+    assert reward == NEGATIVE_REWARD
+    assert info["outcome"] == "no_answer_in_required_format"
+
+
+def test_format_reward():
+
+    pred1 = dedent(
+    """
+    <think> 
+    If f(x) = x^2, what is f(x) for x = 10?
+    <answer> 
+    final answer: 1.0e02
+    </answer>
+    </think>
     
-    reward_model = GSM8KRewardModel(think_pattern=THINK_PATTERN, answer_pattern=ANSWER_PATTERN)
-
-    oracle_answer = "5e8"
-    parsed_answer, reward, _ = reward_model(perfect_completion, oracle_answer)
-    assert reward == [SOLVED_REWARD]
-    assert parsed_answer == ["5e8"]
-
-    oracle_answer = "500,000,000"
-    parsed_answer, reward, _ = reward_model(perfect_completion, oracle_answer)
-    assert reward == [SOLVED_REWARD]
-    assert parsed_answer == ["5e8"]
-
-    oracle_answer = "50"
-    parsed_answer, reward, _ = reward_model(perfect_completion, oracle_answer)
-    assert reward == [NEGATIVE_REWARD]
-    assert parsed_answer == ["5e8"]
-
-
-def test_no_answer():
-    completion = dedent(
-    """
-    <think> 
-    because the number is too big, we need to use scientific notation
-    </think>
-    """
-    ).strip()
-
-    oracle_answer = "123"
-    reward_model = GSM8KRewardModel(think_pattern=THINK_PATTERN, answer_pattern=ANSWER_PATTERN)
-    parsed_answer, reward, _ = reward_model(completion, oracle_answer)
-    assert reward == [NEGATIVE_REWARD]
-    assert parsed_answer == [None]
-
-
-    completion = dedent(
-    """
-    <think> 
-    because the number is too big, we need to use scientific notation
-    </think>
-
-    <answer> 
-
+    <answer>
+    1.0e02
     </answer>
     """
     ).strip()
 
-    oracle_answer = "567"
-    parsed_answer, reward, _ = reward_model(completion, oracle_answer)
-    assert reward == [NEGATIVE_REWARD]
-    assert parsed_answer == [None]
+    reward_model = GSM8KRewardModel(use_format_reward=True, use_strict_format_reward=False)
+    _, reward, info = reward_model.format_reward(pred1)
+    assert reward == SOLVED_REWARD
+    assert info["format_"] == None
 
+    reward_model = GSM8KRewardModel(use_format_reward=True, use_strict_format_reward=True)
+    _, reward, info = reward_model.format_reward(pred1)
+    assert reward == NEGATIVE_REWARD
+    assert info["format_"] == "wrong_format"
 
-    completion = dedent(
+    pred2 = dedent(
     """
-    <think> 
-    because the number is too big, we need to use scientific notation
-    </think>
+    <think>If f(x) = x^2, what is f(x) for x = 10?</think>
+    <answer>1.0e02</answer>
 
-    <answer> 567 </answer>
+    <think>let's multiply the answer by 2</think>
+    <answer>2.0e02</answer> 
+    """
+    ).strip()
 
-    <answer> 
-    </answer>
+    oracle_answer = "200"
+    reward_model = GSM8KRewardModel(use_format_reward=True, use_strict_format_reward=True)
+    parsed_answer, reward, info = reward_model.format_reward(pred2)
+    assert reward == SOLVED_REWARD
+    assert info["format_"] == None
+
+
+    pred2 = dedent(
+    """
+    <think>If f(x) = x^2, what is f(x) for x = 10?</think>
+    <answer>1.0e02</answer>
+
+    <think>let's multiply the answer by 2</think>
+    <answer><think> let's think about it</think>2.0e02</answer> 
     """
     ).strip()
 
-    oracle_answer = "567"
-    parsed_answer, reward, _ = reward_model(completion, oracle_answer)
-    assert reward == [NEGATIVE_REWARD]
-    assert parsed_answer == [None]
+    oracle_answer = "200"
+    reward_model = GSM8KRewardModel(use_format_reward=True, use_strict_format_reward=True)
+    parsed_answer, reward, info = reward_model.format_reward(pred2)
+    assert reward == NEGATIVE_REWARD
+    assert info["format_"] == "wrong_format"
 
-def test_partial_answer():
-    completion = dedent(
-    """
-    <think> 
-    what is 3*40
-    </think>
-
-    <answer> 
-    120,00
-    </answer>
-    """
-    ).strip()
-    
-    oracle_answer = "120"
-    reward_model = GSM8KRewardModel(think_pattern=THINK_PATTERN, answer_pattern=ANSWER_PATTERN)
-    parsed_answer, reward, _ = reward_model(completion, oracle_answer)
-    assert reward == [PARTIAL_REWARD]
-    assert parsed_answer == ["12000"]
-
-    completion = dedent(
-    """
-    <think> 
-    what is 3*40
-    </think>
-
-    <answer> 
-    120.00
-    </answer>
-    """
-    ).strip()
-    oracle_answer = "120"
-    reward_model = GSM8KRewardModel(think_pattern=THINK_PATTERN, answer_pattern=ANSWER_PATTERN)
-    parsed_answer, reward, _ = reward_model(completion, oracle_answer)
-    assert reward == [SOLVED_REWARD]
-    assert parsed_answer == ["120.00"]
     
     
     

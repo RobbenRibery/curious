@@ -1,11 +1,19 @@
 import re
-from typing import List, Tuple, Optional
-
+from typing import List, Tuple, Optional, Dict
 from concurrent.futures import ThreadPoolExecutor, Future
 
-PARTIAL_REWARD = 0.5
+import sympy 
+from math_verify import verify, parse
+from dataclasses import dataclass
+
+ZERO_REWARD = 0.0
 NEGATIVE_REWARD = -1.0 
 SOLVED_REWARD = 1.0
+
+THINK_PATTERN = r"<think>(.*?)</think>"
+ANSWER_PATTERN = r"<answer>(.*?)</answer>"
+BASE_FORMAT_PATTERN = r"^<think>.*?</think>\s*<answer>.*?</answer>$"
+STRICT_FORMAT_PATTERN = r"^(?:<think>(?:(?!<answer>|</answer>).)*?</think>\s*<answer>(?:(?!<think>|</think>).)*?</answer>\s*)+$"
 
 def normalize_number(answer:str) -> str:
     """
@@ -13,108 +21,54 @@ def normalize_number(answer:str) -> str:
     """
     return answer.lower().strip().replace(",", "")
 
+@dataclass
+class FailureMode: 
+    
+    # answer failure mode
+    NO_ANSWER = "no_answer_in_required_format"
+    NO_NUMBER_IN_ANSWER = "no_number_in_answer"
+    WRONG_ANSWER = "wrong_answer"
+
+    # format failure mode
+    WRONG_FORMAT = "wrong_format"
+    MULTIPLE_FORMATS = "multiple_required_formats"
+
+
 class GSM8KRewardModel:
 
     def __init__(
         self, 
-        answer_pattern:str, 
-        think_pattern:str,
+        answer_pattern:str = ANSWER_PATTERN, 
+        think_pattern:str = THINK_PATTERN,
+        format_pattern:str = BASE_FORMAT_PATTERN,
         use_format_reward:bool = False,
+        use_strict_format_reward:bool = False,
     ) -> None: 
         """
-        Initializes the RuleRewardModel with the given patterns and options.
+        Initialize the reward model.
 
         Args:
-            answer_pattern (str): The regex pattern for extracting the answer.
-            think_pattern (str): The regex pattern for extracting the think.
-            use_process_reward (bool): Whether to use the process reward.
+            answer_pattern (str): The pattern to extract the answer from the completion.
+            think_pattern (str): The pattern to extract the think from the completion.
+            format_pattern (str): The pattern to check the format of the completion.
+            use_format_reward (bool): Whether to use the format reward.
+            use_strict_format_reward (bool): Whether to use the strict format reward.
         """
+        # initialize the patterns
         self.answer_pattern = answer_pattern
         self.think_ptttern = think_pattern
+        self.format_pattern = format_pattern
 
-        if use_format_reward:
-            raise NotImplementedError("Format reward is not implemented yet")
+        self.use_strict_format_reward = use_strict_format_reward
+        if use_strict_format_reward:
+            self.format_pattern = STRICT_FORMAT_PATTERN
+
         self.use_format_reward = use_format_reward
-
+        
+        # initialize the executor
         self.executor = ThreadPoolExecutor()
         
-    def outcome_reward(self, completion: str, oracle_answer: str) ->Tuple[Optional[str], float]:
-        """
-        Computes the reward based on the completion's answer compared to the oracle answer.
-
-        Args:
-            completion (str): The string containing the completion with an embedded answer.
-            oracle_answer (str): The correct answer to compare against.
-
-        Returns:
-            float: The reward value calculated based on the match of the answer to the oracle answer.
-                A reward of 1.0 is given for an exact match.
-                A reward of 0.5 is given if the oracle answer is contained within the answer.
-                A reward of 0.01 is given otherwise.
-        """
-        # normalize the oracle answer 
-        oracle_answer = normalize_number(oracle_answer)
-
-        # find all the answer matches
-        answer_match:List[str] | None = re.findall(self.answer_pattern, completion, flags=re.DOTALL)
-
-        # return negative reward in case no answer is found
-        if not answer_match:
-            return None, NEGATIVE_REWARD
-
-        # get the last answer as the final answer
-        answer_parsed = normalize_number(answer_match[-1])
-        if not answer_parsed:
-            return None, NEGATIVE_REWARD
-
-        # return positive reward in case 
-        # the answer is exactly the same as the oracle answer
-        if eval(answer_parsed) == eval(oracle_answer):
-            return answer_parsed, SOLVED_REWARD
-        elif oracle_answer in answer_parsed:
-            return answer_parsed, PARTIAL_REWARD
-        else:
-            return answer_parsed, NEGATIVE_REWARD
-
-    def format_reward(self, completion: str) -> Tuple[int|None, int|None, float]:
-        """
-        # TODO: refine this function later
-        Processes the reward for a given completion.
-
-        Args:
-            completion (str): The string containing the completion with an embedded think and answer.
-
-        Returns:
-            tuple[int|None, int|None, float]: A tuple containing the reward value, 
-            the start index of the think, and the end index of the think.
-        """
-        # find the <think> section
-        think_match = re.search(self.think_ptttern, completion, flags=re.DOTALL)
-        if not think_match:
-            return None, None, NEGATIVE_REWARD
-        
-        think_start, think_end = think_match.span()
-
-        # <answer> should not appear within the <think> section.
-        if "<answer>" in think_match.group(1) or "</answer>" in think_match.group(1):
-            return None, None, NEGATIVE_REWARD
-
-        # Find the <answer> section.
-        answer_match = re.search(self.answer_pattern, completion, flags=re.DOTALL)
-        if not answer_match:
-            return think_start, think_end, NEGATIVE_REWARD
-
-        # <answer> must appear after the <think> section.
-        if answer_match.start() < think_end:
-            return think_start, think_end, NEGATIVE_REWARD
-
-        # <think> should not appear within the <answer> section.
-        if "<think>" in answer_match.group(0) or "</think>" in answer_match.group(0):
-            return think_start, think_end, NEGATIVE_REWARD
-
-        return think_start, think_end, SOLVED_REWARD
-             
-    def instance_reward(self, completion: str, oracle_answer: str) -> Tuple[str, float]:
+    def outcome_reward(self, completion: str, oracle_answer: str) -> Tuple[Optional[List[sympy.Expr | str]], float, Dict[str, str]]:
         """
         Computes the reward for a given completion and oracle answer.
 
@@ -123,27 +77,77 @@ class GSM8KRewardModel:
             oracle_answer (str): The correct answer to compare against.
 
         Returns:
-            Tuple[str, float]: A tuple containing the parsed answer and the reward value.
+            Tuple[Optional[List[sympy.Expr | str]], float, Dict[str, str]]: 
+            A tuple containing the parsed answer, the reward value and a dictionary of failure mode.
         """
-        parsed_answer, reward = self.outcome_reward(completion, oracle_answer)
+        # normalize the oracle answer 
+        oracle_answer:List[sympy.Expr | str] = parse(oracle_answer)
 
-        return parsed_answer, reward
+        # find all the answer matches
+        answer_match:List[str] | None = re.findall(self.answer_pattern, completion, flags=re.DOTALL)
+
+        # return negative reward in case no answer is found
+        if not answer_match:
+            return None, NEGATIVE_REWARD, {"outcome": FailureMode.NO_ANSWER}
+
+        # get the last answer as the final answer and normalize the parsed answer
+        answer_parsed:List[sympy.Expr | str] = parse(answer_match[-1])
+        if not answer_parsed:
+            return None, NEGATIVE_REWARD, {"outcome": FailureMode.NO_NUMBER_IN_ANSWER}
+
+        # return positive reward in case 
+        # the answer is exactly the same as the oracle answer
+        if verify(answer_parsed, oracle_answer):
+            return answer_parsed, SOLVED_REWARD, {"outcome": None}
+        else:
+            return answer_parsed, ZERO_REWARD, {"outcome": FailureMode.WRONG_ANSWER}
+
+    
+    def format_reward(self, completion:str) -> Tuple[str|None, float, Dict[str, str|None]]:
+        """
+        Computes the reward for the format of the completion.
+
+        Args:
+            completion (str): The string containing the completion with an embedded answer.
+
+        Returns:
+            Tuple[str|None, float, Dict[str, str|None]]: A tuple containing the parsed format, the reward value and a dictionary of failure mode.
+        """
+        section_parsed = None 
+        if not self.use_format_reward:
+            return section_parsed, ZERO_REWARD, {"format_": None}
+
+        # find all the format matches
+        format_matches:List[str] | None = re.findall(self.format_pattern, completion, flags=re.DOTALL)
+
+        # return negative reward in case no format is found
+        if not format_matches:
+            return section_parsed, NEGATIVE_REWARD, {"format_": FailureMode.WRONG_FORMAT}
+
+        # return the last format as the final format
+        section_parsed = format_matches[-1]
+        return section_parsed, SOLVED_REWARD, {"format_": None}
+             
+    def instance_reward(self, completion: str, oracle_answer: str) -> Tuple[float, Dict[str, str]]:
+        
+        info  = {}
+        parsed_answer, outcome_reward, outcome_failure_mode = self.outcome_reward(completion, oracle_answer)
+        info.update(outcome_failure_mode)
+        info.update({"parsed_answer": parsed_answer})
+
+        section_parsed, format_reward, format_failure_mode = self.format_reward(completion)
+        info.update(format_failure_mode)
+        info.update({"parsed_reasoning": section_parsed})
+
+        reward = outcome_reward + format_reward
+
+        return reward, info
     
     def __call__(
         self,
         completions: List[str] | str,
         oracle_answers: List[str] | str,
     ) -> Tuple[List[str], List[float], float]:
-        """
-        Computes the outcome reward for a batch of completions and oracle answers.
-
-        Args:
-            completions (List[str] | str): The completions to compute the reward for.
-            oracle_answers (List[str] | str): The oracle answers to compare against.
-
-        Returns:
-            Tuple[List[str], List[float], float]: A tuple containing the parsed answers, the reward values, and the solved rate.
-        """
         if isinstance(completions, str):
             completions = [completions]
         if isinstance(oracle_answers, str):

@@ -9,6 +9,7 @@ import torch
 
 from curious.prompt import system_prompt
 
+
 def load_model_tokenizer(
     model_name_or_path: str,
     trust_remote_code: bool = True,
