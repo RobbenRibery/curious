@@ -13,7 +13,11 @@ SOLVED_REWARD = 1.0
 THINK_PATTERN = r"<think>(.*?)</think>"
 ANSWER_PATTERN = r"<answer>(.*?)</answer>"
 BASE_FORMAT_PATTERN = r"^<think>.*?</think>\s*<answer>.*?</answer>$"
-STRICT_FORMAT_PATTERN = r"^(?:<think>(?:(?!<answer>|</answer>).)*?</think>\s*<answer>(?:(?!<think>|</think>).)*?</answer>\s*)+$"
+STRICT_FORMAT_PATTERN = (
+    r"(<think>(?:(?!<answer>|</answer>).)*?</think>\s*"
+    r"<answer>(?:(?!<think>|</think>).)*?</answer>)"
+)
+
 
 def normalize_number(answer:str) -> str:
     """
@@ -31,6 +35,8 @@ class FailureMode:
 
     # format failure mode
     WRONG_FORMAT = "wrong_format"
+    WRONG_BEGINNING_FORMAT = "wrong_beginning_format"
+    WRONG_ENDING_FORMAT = "wrong_ending_format"
     MULTIPLE_FORMATS = "multiple_required_formats"
 
 
@@ -102,7 +108,6 @@ class GSM8KRewardModel:
         else:
             return answer_parsed, ZERO_REWARD, {"outcome": FailureMode.WRONG_ANSWER}
 
-    
     def format_reward(self, completion:str) -> Tuple[str|None, float, Dict[str, str|None]]:
         """
         Computes the reward for the format of the completion.
@@ -118,18 +123,33 @@ class GSM8KRewardModel:
             return section_parsed, ZERO_REWARD, {"format_": None}
 
         # find all the format matches
-        format_matches:List[str] | None = re.findall(self.format_pattern, completion, flags=re.DOTALL)
+        format_matches = list(re.finditer(self.format_pattern, completion, flags=re.DOTALL))
 
         # return negative reward in case no format is found
         if not format_matches:
             return section_parsed, NEGATIVE_REWARD, {"format_": FailureMode.WRONG_FORMAT}
+        
+        if format_matches[0].start() != 0:
+            return section_parsed, NEGATIVE_REWARD, {"format_": FailureMode.WRONG_BEGINNING_FORMAT}
+        
+        if format_matches[-1].end() != len(completion):
+            return section_parsed, NEGATIVE_REWARD, {"format_": FailureMode.WRONG_ENDING_FORMAT}
 
         # return the last format as the final format
-        section_parsed = format_matches[-1]
+        section_parsed = "\n".join([mathch_.group(0) for mathch_ in format_matches]) if len(format_matches) > 1 else format_matches[0].group(0)
         return section_parsed, SOLVED_REWARD, {"format_": None}
              
     def instance_reward(self, completion: str, oracle_answer: str) -> Tuple[float, Dict[str, str]]:
-        
+        """
+        Computes the reward for a given completion and oracle answer.
+
+        Args:
+            completion (str): The string containing the completion with an embedded answer.
+            oracle_answer (str): The correct answer to compare against.
+
+        Returns:
+            Tuple[float, Dict[str, str]]: A tuple containing the reward value and a dictionary of failure mode.
+        """
         info  = {}
         parsed_answer, outcome_reward, outcome_failure_mode = self.outcome_reward(completion, oracle_answer)
         info.update(outcome_failure_mode)
@@ -140,14 +160,10 @@ class GSM8KRewardModel:
         info.update({"parsed_reasoning": section_parsed})
 
         reward = outcome_reward + format_reward
-
         return reward, info
     
-    def __call__(
-        self,
-        completions: List[str] | str,
-        oracle_answers: List[str] | str,
-    ) -> Tuple[List[str], List[float], float]:
+    def __call__(self, completions: List[str] | str, oracle_answers: List[str] | str) -> Tuple[List[str], List[float], float]:
+        
         if isinstance(completions, str):
             completions = [completions]
         if isinstance(oracle_answers, str):

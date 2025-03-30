@@ -2,7 +2,6 @@ from curious.reward import GSM8KRewardModel, SOLVED_REWARD, NEGATIVE_REWARD, ZER
 from textwrap import dedent
 
 def test_outcome_reward():
-
     reward_model = GSM8KRewardModel(use_format_reward=False)
     pred1 = """
     <think> 
@@ -43,9 +42,7 @@ def test_outcome_reward():
     assert reward == NEGATIVE_REWARD
     assert info["outcome"] == "no_answer_in_required_format"
 
-
 def test_format_reward():
-
     pred1 = dedent(
     """
     <think> 
@@ -92,7 +89,6 @@ def test_format_reward():
     """
     <think>If f(x) = x^2, what is f(x) for x = 10?</think>
     <answer>1.0e02</answer>
-
     <think>let's multiply the answer by 2</think>
     <answer><think> let's think about it</think>2.0e02</answer> 
     """
@@ -102,8 +98,45 @@ def test_format_reward():
     reward_model = GSM8KRewardModel(use_format_reward=True, use_strict_format_reward=True)
     parsed_answer, reward, info = reward_model.format_reward(pred2)
     assert reward == NEGATIVE_REWARD
-    assert info["format_"] == "wrong_format"
+    assert info["format_"] == "wrong_ending_format"
 
-    
-    
-    
+def test_instance_reward():
+    pred1 = dedent(
+    """
+    <think>If f(x) = x^2, what is f(x) for x = 10?</think>
+    <answer>1.0e02</answer>
+    <think>let's multiply the answer by 2</think>
+    <answer>the final answer is 200 = 2.0e02</answer> 
+    """ 
+    ).strip()
+
+    oracle_answer = "200"
+    reward_model = GSM8KRewardModel(use_format_reward=True, use_strict_format_reward=True)
+    reward, info = reward_model.instance_reward(pred1, oracle_answer)
+    assert reward == 2*SOLVED_REWARD
+    assert info['parsed_answer'][1] == "200"
+    assert info['parsed_reasoning'] == pred1
+    assert info["format_"] == None
+    assert info["outcome"] == None
+
+
+    pred1 = dedent(
+    """
+    <think>If f(x) = x^2, what is f(x) for x = 10?</think>
+    <answer>1.0e02</answer>
+    <think>let's multiply the answer by 2</think>
+    <answer>the final answer is 200 = 2.0e02</answer> 
+    <answer>the final answer is 400 = 4.0e02</answer> 
+    """ 
+    ).strip()
+
+    oracle_answer = "200"
+    reward_model = GSM8KRewardModel(use_format_reward=True, use_strict_format_reward=True)
+    reward, info = reward_model.instance_reward(pred1, oracle_answer)
+    assert reward == NEGATIVE_REWARD
+    assert info['parsed_answer'][1] == "400"
+    assert info["format_"] == "wrong_ending_format"
+    assert info["outcome"] == "wrong_answer"
+
+def test_batch_reward():
+    pass 
