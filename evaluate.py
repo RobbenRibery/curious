@@ -1,11 +1,11 @@
 from dataclasses import dataclass
-from typing import List
+from typing import List, Callable, Dict
 import tyro 
 import wandb 
-
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from transformers import GenerationConfig
+from transformers import GenerationConfig, PreTrainedTokenizer, PreTrainedModel
 
 from curious.data import GSM8KDataset
 from curious.utils import load_model_tokenizer, tokenize_questions
@@ -73,7 +73,7 @@ class SamplingConfig:
     """
     The number of samples to use for the evaluation.
     """
-    max_new_tokens: int = 100
+    max_new_tokens: int = 1024
     """
     The maximum number of new tokens to use for the evaluation.
     """
@@ -127,7 +127,7 @@ class EvaluationConfig:
 
 
 @torch.no_grad()
-def evaluate(config: EvaluationConfig):
+def evaluate(config: EvaluationConfig, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, logger:Callable):
     """
     Evaluate the model on the dataset.
 
@@ -143,9 +143,6 @@ def evaluate(config: EvaluationConfig):
     # Set the mode to test if it is train
     if config.base_config.mode == "train":
         config.base_config.mode = "test"
-    
-    # Load the model 
-    model, tokenizer = load_model_tokenizer(config.base_config.model_name)
 
     # Load the dataset
     dataset = GSM8KDataset(
@@ -159,6 +156,7 @@ def evaluate(config: EvaluationConfig):
         dataset,
         batch_size=config.base_config.batch_size,
         num_workers=config.base_config.num_workers,
+        shuffle=False,
     )
 
     # Initialize the reward model
@@ -174,15 +172,24 @@ def evaluate(config: EvaluationConfig):
         top_p=config.sampling_config.top_p,
         top_k=config.sampling_config.top_k,
         do_sample=config.sampling_config.do_sample,
+        eos_token_id=tokenizer.eos_token_id,
+        pad_token_id=tokenizer.eos_token_id,
     )
 
-    for batch in dataloader:
+    rewards:List[float] = []
+    infos:List[Dict[str, str]] = []
+    solved_rates:List[float] = []
+    for batch_idx, batch in enumerate(dataloader):
         # Get the questions and answers
         questions = batch["question"]
         oracle_answers = batch["oracle_answer"]
 
         # Tokenize the questions
         batch_inputs = tokenize_questions(tokenizer, questions)
+        batch_inputs = {
+            key: value.to(model.device)
+            for key, value in batch_inputs.items()
+        }
 
         # Get the model predictions
         seq_ids = model.generate(
@@ -197,17 +204,28 @@ def evaluate(config: EvaluationConfig):
         )
 
         # Compute the rewards and the solved rate 
-        candidate_answers, rewards, solved_times = reward_model(
+        batch_rewards, batch_infos, batch_solved_rate = reward_model(
             completions,
             oracle_answers,
         )
 
+        rewards.extend(batch_rewards)
+        infos.extend(batch_infos)
+        solved_rates.append(batch_solved_rate)
+
         # Log the rewards and the solved rate
-        wandb.log({
-            "rewards": rewards,
-            "solved_times": solved_times,
+        logger({
+            "eval/batch_rewards": np.array(batch_rewards).mean(),
+            "eval/batch_solved_rate": batch_solved_rate,
         })
-        
+        del batch_inputs, seq_ids, completions, batch_rewards, batch_infos, batch_solved_rate
+        torch.cuda.empty_cache()
+
+    # Log the mean rewards and the mean solved rate
+    logger({
+        "eval/mean_rewards": np.array(rewards).mean(),
+        "eval/mean_solved_rate": np.array(solved_rates).mean(),
+    })
 
 if __name__ == "__main__":
 
@@ -220,6 +238,10 @@ if __name__ == "__main__":
         name=config.wandb_config.name,
         config=config,
     )
+    logger = wandb.log
     
+    # Load the model 
+    model, tokenizer = load_model_tokenizer(config.base_config.model_name, freeze_model=True)
+
     # Evaluate the model
-    evaluate(config)
+    evaluate(config, model, tokenizer, logger)

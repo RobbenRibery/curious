@@ -179,6 +179,7 @@ class GSM8KRewardModel:
         rewards, infos = [], []
         sovled_times = 0
         for completion, oracle_answer in zip(completions, oracle_answers):
+            # compute the reward and info
             reward, info = self.instance_reward(completion, oracle_answer)
             rewards.append(reward)
             infos.append(info)
