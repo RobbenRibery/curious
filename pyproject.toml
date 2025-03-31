@@ -26,6 +26,7 @@ tyro = "^0.9.17"
 modal = "^0.73.107"
 setuptools = "^76.0.0"
 flash-attn = "^2.7.4.post1"
+math-verify = "^0.7.0"
 
 
 [tool.poetry.group.dev.dependencies]

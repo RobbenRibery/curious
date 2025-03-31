@@ -35,7 +35,7 @@ class BaseConfig:
     A dataclass for storing the evaluation configuration.
     """
     # Model and dataset
-    model_name: str = "Qwen/Qwen2.5-Coder-32B-Instruct"
+    model_name: str = "Qwen/Qwen2-0.5B-Instruct"
     """
     The name of the model to use for the evaluation.
     """
@@ -47,7 +47,7 @@ class BaseConfig:
     """
     The batch size to use for the evaluation.
     """
-    num_workers: int = 1
+    num_workers: int = 8
     """
     The number of workers to use for the evaluation.
     """
@@ -68,10 +68,6 @@ class BaseConfig:
 class SamplingConfig:
     """
     A dataclass for storing the sampling configuration.
-    """
-    num_samples: int = 1
-    """
-    The number of samples to use for the evaluation.
     """
     max_new_tokens: int = 1024
     """
