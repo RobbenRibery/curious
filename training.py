@@ -43,7 +43,7 @@ class CliArgs:
     seed: int = 42
     group_size: int = 12
     lr: float = 1e-6 
-    kl_weight: float = 0.01
+    kl_weight: float = 0
     clip_eps: float = 0.2
     train_batch_size: int = 8
     epochs_per_step: int = 1
