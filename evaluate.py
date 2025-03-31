@@ -227,6 +227,8 @@ def evaluate(config: EvaluationConfig, model: PreTrainedModel, tokenizer: PreTra
         "eval/mean_solved_rate": np.array(solved_rates).mean(),
     })
 
+    return rewards, infos, solved_rates
+
 if __name__ == "__main__":
 
     # Parse the command line arguments
