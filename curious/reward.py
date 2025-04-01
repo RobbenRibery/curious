@@ -2,12 +2,12 @@ import re
 from typing import List, Tuple, Optional, Dict
 from concurrent.futures import ThreadPoolExecutor, Future
 
-import sympy 
+import sympy
 from math_verify import verify, parse
 from dataclasses import dataclass
 
 ZERO_REWARD = 0.0
-NEGATIVE_REWARD = -1.0 
+NEGATIVE_REWARD = -1.0
 SOLVED_REWARD = 1.0
 
 THINK_PATTERN = r"<think>(.*?)</think>"
@@ -19,15 +19,16 @@ STRICT_FORMAT_PATTERN = (
 )
 
 
-def normalize_number(answer:str) -> str:
+def normalize_number(answer: str) -> str:
     """
     Normalizes the answer by removing commas and converting to lowercase.
     """
     return answer.lower().strip().replace(",", "")
 
+
 @dataclass
-class FailureMode: 
-    
+class FailureMode:
+
     # answer failure mode
     NO_ANSWER = "no_answer_in_required_format"
     NO_NUMBER_IN_ANSWER = "no_number_in_answer"
@@ -43,13 +44,13 @@ class FailureMode:
 class GSM8KRewardModel:
 
     def __init__(
-        self, 
-        answer_pattern:str = ANSWER_PATTERN, 
-        think_pattern:str = THINK_PATTERN,
-        format_pattern:str = BASE_FORMAT_PATTERN,
-        use_format_reward:bool = False,
-        use_strict_format_reward:bool = False,
-    ) -> None: 
+        self,
+        answer_pattern: str = ANSWER_PATTERN,
+        think_pattern: str = THINK_PATTERN,
+        format_pattern: str = BASE_FORMAT_PATTERN,
+        use_format_reward: bool = False,
+        use_strict_format_reward: bool = False,
+    ) -> None:
         """
         Initialize the reward model.
 
@@ -70,8 +71,10 @@ class GSM8KRewardModel:
             self.format_pattern = STRICT_FORMAT_PATTERN
 
         self.use_format_reward = use_format_reward
-        
-    def outcome_reward(self, completion: str, oracle_answer: str) -> Tuple[Optional[List[sympy.Expr | str]], float, Dict[str, str]]:
+
+    def outcome_reward(
+        self, completion: str, oracle_answer: str
+    ) -> Tuple[Optional[List[sympy.Expr | str]], float, Dict[str, str]]:
         """
         Computes the reward for a given completion and oracle answer.
 
@@ -80,32 +83,40 @@ class GSM8KRewardModel:
             oracle_answer (str): The correct answer to compare against.
 
         Returns:
-            Tuple[Optional[List[sympy.Expr | str]], float, Dict[str, str]]: 
+            Tuple[Optional[List[sympy.Expr | str]], float, Dict[str, str]]:
             A tuple containing the parsed answer, the reward value and a dictionary of failure mode.
         """
-        # normalize the oracle answer 
-        oracle_answer:List[sympy.Expr | str] = parse(oracle_answer,)
+        # normalize the oracle answer
+        oracle_answer: List[sympy.Expr | str] = parse(
+            oracle_answer,
+        )
 
         # find all the answer matches
-        answer_match:List[str] | None = re.findall(self.answer_pattern, completion, flags=re.DOTALL)
+        answer_match: List[str] | None = re.findall(
+            self.answer_pattern, completion, flags=re.DOTALL
+        )
 
         # return negative reward in case no answer is found
         if not answer_match:
             return None, NEGATIVE_REWARD, {"outcome": FailureMode.NO_ANSWER}
 
         # get the last answer as the final answer and normalize the parsed answer
-        answer_parsed:List[sympy.Expr | str] = parse(answer_match[-1], extraction_mode="any_match")
+        answer_parsed: List[sympy.Expr | str] = parse(
+            answer_match[-1], extraction_mode="any_match"
+        )
         if not answer_parsed:
             return None, NEGATIVE_REWARD, {"outcome": FailureMode.NO_NUMBER_IN_ANSWER}
 
-        # return positive reward in case 
+        # return positive reward in case
         # the answer is exactly the same as the oracle answer
         if verify(answer_parsed, oracle_answer):
             return answer_parsed, SOLVED_REWARD, {"outcome": None}
         else:
             return answer_parsed, ZERO_REWARD, {"outcome": FailureMode.WRONG_ANSWER}
 
-    def format_reward(self, completion:str) -> Tuple[str|None, float, Dict[str, str|None]]:
+    def format_reward(
+        self, completion: str
+    ) -> Tuple[str | None, float, Dict[str, str | None]]:
         """
         Computes the reward for the format of the completion.
 
@@ -115,28 +126,48 @@ class GSM8KRewardModel:
         Returns:
             Tuple[str|None, float, Dict[str, str|None]]: A tuple containing the parsed format, the reward value and a dictionary of failure mode.
         """
-        section_parsed = None 
+        section_parsed = None
         if not self.use_format_reward:
             return section_parsed, ZERO_REWARD, {"format_": None}
 
         # find all the format matches
-        format_matches = list(re.finditer(self.format_pattern, completion, flags=re.DOTALL))
+        format_matches = list(
+            re.finditer(self.format_pattern, completion, flags=re.DOTALL)
+        )
 
         # return negative reward in case no format is found
         if not format_matches:
-            return section_parsed, NEGATIVE_REWARD, {"format_": FailureMode.WRONG_FORMAT}
-        
+            return (
+                section_parsed,
+                NEGATIVE_REWARD,
+                {"format_": FailureMode.WRONG_FORMAT},
+            )
+
         if format_matches[0].start() != 0:
-            return section_parsed, NEGATIVE_REWARD, {"format_": FailureMode.WRONG_BEGINNING_FORMAT}
-        
+            return (
+                section_parsed,
+                NEGATIVE_REWARD,
+                {"format_": FailureMode.WRONG_BEGINNING_FORMAT},
+            )
+
         if format_matches[-1].end() != len(completion):
-            return section_parsed, NEGATIVE_REWARD, {"format_": FailureMode.WRONG_ENDING_FORMAT}
+            return (
+                section_parsed,
+                NEGATIVE_REWARD,
+                {"format_": FailureMode.WRONG_ENDING_FORMAT},
+            )
 
         # return the last format as the final format
-        section_parsed = "\n".join([mathch_.group(0) for mathch_ in format_matches]) if len(format_matches) > 1 else format_matches[0].group(0)
+        section_parsed = (
+            "\n".join([mathch_.group(0) for mathch_ in format_matches])
+            if len(format_matches) > 1
+            else format_matches[0].group(0)
+        )
         return section_parsed, SOLVED_REWARD, {"format_": None}
-             
-    def instance_reward(self, completion: str, oracle_answer: str) -> Tuple[float, Dict[str, str]]:
+
+    def instance_reward(
+        self, completion: str, oracle_answer: str
+    ) -> Tuple[float, Dict[str, str]]:
         """
         Computes the reward for a given completion and oracle answer.
 
@@ -147,20 +178,26 @@ class GSM8KRewardModel:
         Returns:
             Tuple[float, Dict[str, str]]: A tuple containing the reward value and a dictionary of failure mode.
         """
-        info  = {}
+        info = {}
 
-        parsed_answer, outcome_reward, outcome_failure_mode = self.outcome_reward(completion, oracle_answer)
+        parsed_answer, outcome_reward, outcome_failure_mode = self.outcome_reward(
+            completion, oracle_answer
+        )
         info.update(outcome_failure_mode)
         info.update({"parsed_answer": parsed_answer})
 
-        section_parsed, format_reward, format_failure_mode = self.format_reward(completion)
+        section_parsed, format_reward, format_failure_mode = self.format_reward(
+            completion
+        )
         info.update(format_failure_mode)
         info.update({"parsed_reasoning": section_parsed})
 
         reward = outcome_reward + format_reward
         return reward, info
-    
-    def __call__(self, completions: List[str] | str, oracle_answers: List[str] | str) -> Tuple[List[str], List[float], List[Dict[str, str]], float]:
+
+    def __call__(
+        self, completions: List[str] | str, oracle_answers: List[str] | str
+    ) -> Tuple[List[str], List[float], List[Dict[str, str]], float]:
         """
         Computes the reward for a given completion and oracle answer.
 
@@ -189,4 +226,4 @@ class GSM8KRewardModel:
                 sovled_times += 1
 
         # return the rewards, infos and the solved rate
-        return rewards, infos, sovled_times/len(completions)
+        return rewards, infos, sovled_times / len(completions)

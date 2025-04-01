@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import List, Callable, Dict
-import tyro 
-import wandb 
+import tyro
+import wandb
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -13,27 +13,30 @@ from curious.reward import GSM8KRewardModel, THINK_PATTERN, ANSWER_PATTERN
 
 from uuid import uuid4
 
+
 @dataclass
 class WandbConfig:
     """
     A dataclass for storing the wandb configuration.
     """
-    
+
     project: str = "curious"
     """
     The project to use for the wandb.
     """
-    
+
     name: str = f"curious-{uuid4()}"
     """
     The name to use for the wandb.
     """
+
 
 @dataclass
 class BaseConfig:
     """
     A dataclass for storing the evaluation configuration.
     """
+
     # Model and dataset
     model_name: str = "Qwen/Qwen2-0.5B-Instruct"
     """
@@ -64,11 +67,13 @@ class BaseConfig:
     The directory to use for the evaluation.
     """
 
+
 @dataclass
 class SamplingConfig:
     """
     A dataclass for storing the sampling configuration.
     """
+
     max_new_tokens: int = 1024
     """
     The maximum number of new tokens to use for the evaluation.
@@ -90,11 +95,13 @@ class SamplingConfig:
     Whether to sample from the model.
     """
 
+
 @dataclass
 class RewardConfig:
     """
     A dataclass for storing the reward configuration.
     """
+
     answer_pattern: str = ANSWER_PATTERN
     """
     The pattern to use for the answer.
@@ -108,33 +115,47 @@ class RewardConfig:
     Whether to use the format reward.
     """
 
+
 @dataclass
 class EvaluationConfig:
     """
     A dataclass for storing the evaluation configuration.
     """
+
     wandb_config: WandbConfig
 
     base_config: BaseConfig
-    
+
     sampling_config: SamplingConfig
-    
+
     reward_config: RewardConfig
 
 
 @torch.no_grad()
-def evaluate(config: EvaluationConfig, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, logger:Callable):
+def evaluate(
+    config: EvaluationConfig,
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizer,
+    logger: Callable,
+    **kwargs,
+):
     """
-    Evaluate the model on the dataset.
-
+    Evaluate the model on the GSM8K dataset.
     Args:
         config (EvaluationConfig): The evaluation configuration.
+        model (PreTrainedModel): The model to evaluate.
+        tokenizer (PreTrainedTokenizer): The tokenizer to evaluate.
+        logger (Callable): The logger to use.
+        **kwargs: Additional arguments.
 
     Returns:
-        None
+        Tuple[List[float], List[Dict[str, str]], List[float]]: A tuple containing the rewards, infos and solved rates.
     """
+    text_logger = kwargs.get("text_logger", lambda x: print(x))
+
+    # Check if the dataset is GSM8K
     if config.base_config.dataset_name != "openai/gsm8k":
-        raise NotImplementedError("Only GSM8K is supported for now")    
+        raise NotImplementedError("Only GSM8K is supported for now")
 
     # Set the mode to test if it is train
     if config.base_config.mode == "train":
@@ -161,7 +182,7 @@ def evaluate(config: EvaluationConfig, model: PreTrainedModel, tokenizer: PreTra
         think_pattern=config.reward_config.think_pattern,
         use_format_reward=config.reward_config.use_format_reward,
     )
-    # sampling config 
+    # sampling config
     sampling_config = GenerationConfig(
         max_new_tokens=config.sampling_config.max_new_tokens,
         temperature=config.sampling_config.temperature,
@@ -172,9 +193,9 @@ def evaluate(config: EvaluationConfig, model: PreTrainedModel, tokenizer: PreTra
         pad_token_id=tokenizer.eos_token_id,
     )
 
-    rewards:List[float] = []
-    infos:List[Dict[str, str]] = []
-    solved_rates:List[float] = []
+    rewards: List[float] = []
+    infos: List[Dict[str, str]] = []
+    solved_rates: List[float] = []
     for batch_idx, batch in enumerate(dataloader):
         # Get the questions and answers
         questions = batch["question"]
@@ -183,8 +204,7 @@ def evaluate(config: EvaluationConfig, model: PreTrainedModel, tokenizer: PreTra
         # Tokenize the questions
         batch_inputs = tokenize_questions(tokenizer, questions)
         batch_inputs = {
-            key: value.to(model.device)
-            for key, value in batch_inputs.items()
+            key: value.to(model.device) for key, value in batch_inputs.items()
         }
 
         # Get the model predictions
@@ -193,13 +213,12 @@ def evaluate(config: EvaluationConfig, model: PreTrainedModel, tokenizer: PreTra
             generation_config=sampling_config,
         )
 
-        # Decode the generations 
-        completions:List[str] = tokenizer.batch_decode(
-            seq_ids[:, batch_inputs["input_ids"].shape[1] :], 
-            skip_special_tokens=True
+        # Decode the generations
+        completions: List[str] = tokenizer.batch_decode(
+            seq_ids[:, batch_inputs["input_ids"].shape[1] :], skip_special_tokens=True
         )
 
-        # Compute the rewards and the solved rate 
+        # Compute the rewards and the solved rate
         batch_rewards, batch_infos, batch_solved_rate = reward_model(
             completions,
             oracle_answers,
@@ -210,18 +229,38 @@ def evaluate(config: EvaluationConfig, model: PreTrainedModel, tokenizer: PreTra
         solved_rates.append(batch_solved_rate)
 
         # Log the rewards and the solved rate
-        logger({
-            "eval/batch_rewards": np.array(batch_rewards).mean(),
-            "eval/batch_solved_rate": batch_solved_rate,
-        })
-        del batch_inputs, seq_ids, completions, batch_rewards, batch_infos, batch_solved_rate
+        logger(
+            {
+                "eval/batch_rewards": np.array(batch_rewards).mean(),
+                "eval/batch_solved_rate": batch_solved_rate,
+            }
+        )
+        text_logger(
+            {
+                "question": questions,
+                "answer": oracle_answers,
+                "completion": completions,
+                "reward": batch_rewards,
+            }
+        )
+
+        del (
+            batch_inputs,
+            seq_ids,
+            completions,
+            batch_rewards,
+            batch_infos,
+            batch_solved_rate,
+        )
         torch.cuda.empty_cache()
 
     # Log the mean rewards and the mean solved rate
-    logger({
-        "eval/mean_rewards": np.array(rewards).mean(),
-        "eval/mean_solved_rate": np.array(solved_rates).mean(),
-    })
+    logger(
+        {
+            "eval/mean_rewards": np.array(rewards).mean(),
+            "eval/mean_solved_rate": np.array(solved_rates).mean(),
+        }
+    )
 
     return rewards, infos, solved_rates
 
@@ -229,7 +268,7 @@ if __name__ == "__main__":
 
     # Parse the command line arguments
     config = tyro.cli(EvaluationConfig)
-    
+
     # Initialize the wandb
     wandb.init(
         project=config.wandb_config.project,
@@ -237,9 +276,31 @@ if __name__ == "__main__":
         config=config,
     )
     logger = wandb.log
-    
-    # Load the model 
-    model, tokenizer = load_model_tokenizer(config.base_config.model_name, freeze_model=True)
+
+    # text table logger
+    text_table = wandb.Table(columns=["question", "answer", "completion", "reward"])
+    text_logger = lambda x: text_table.add_data(
+        x["question"],
+        x["answer"],
+        x["completion"],
+        x["reward"],
+    )
+
+    # Load the model
+    model, tokenizer = load_model_tokenizer(
+        config.base_config.model_name, freeze_model=True
+    )
 
     # Evaluate the model
-    evaluate(config, model, tokenizer, logger)
+    rewards, infos, solved_rates = evaluate(
+        config,
+        model,
+        tokenizer,
+        logger,
+        **{
+            "text_logger": text_logger,
+        },
+    )
+
+    # Log the text table
+    wandb.log({"eval/text_table": text_table})

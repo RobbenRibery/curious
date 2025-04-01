@@ -11,7 +11,10 @@ class GSM8KDataset(Dataset):
     """
     A dataset of GSM8K questions and answers.
     """
-    def __init__(self, dataset_name: str = "openai/gsm8k", seed: int = 42, mode:str="train"):
+
+    def __init__(
+        self, dataset_name: str = "openai/gsm8k", seed: int = 42, mode: str = "train"
+    ):
         """
         Initialize the GSM8K dataset.
 
@@ -30,7 +33,7 @@ class GSM8KDataset(Dataset):
         )
         self.seed = seed
         self.ds = self.ds.shuffle(seed=self.seed)
-    
+
         self.train = self.ds["train"]
         self.test = self.ds["test"]
 
@@ -38,7 +41,7 @@ class GSM8KDataset(Dataset):
 
     def get_answer_from_gt(self, answer_text: str) -> Dict[str, str]:
         """
-        This function is strict that it will guarantee to find a 
+        This function is strict that it will guarantee to find a
         valid answer in the given answer_text, provided that the answer
         text from the GSM8K Dataset (not generated answer)
         Any violation of the format will raise an error.
@@ -75,7 +78,7 @@ class GSM8KDataset(Dataset):
     def __len__(self):
         """
         Get the length of the dataset.
-        
+
         Returns
         -------
         int : The length of the dataset.
@@ -91,7 +94,7 @@ class GSM8KDataset(Dataset):
         else:
             raise ValueError(f"Invalid mode: {self.mode}")
 
-    def __getitem__(self, idx: int) -> Dict[str, str|List]:
+    def __getitem__(self, idx: int) -> Dict[str, str | List]:
         """
         Get an item from the dataset by index.
 
@@ -109,12 +112,7 @@ class GSM8KDataset(Dataset):
 
 class ReasoningGymDataset(Dataset):
 
-    def __init__(
-        self,
-        datasets_name: List[str], 
-        each_dataset_size: int, 
-        seed: int
-    ):
+    def __init__(self, datasets_name: List[str], each_dataset_size: int, seed: int):
         """
         Initialize a ReasoningGymDataset instance.
 
@@ -132,14 +130,14 @@ class ReasoningGymDataset(Dataset):
         self.seed = seed
         self.each_dataset_size = each_dataset_size
         self.total_size = len(datasets_name) * each_dataset_size
-        
+
         # Cache for lazy loading
-        self._datasets = {}  
+        self._datasets = {}
         for dataset_idx in range(len(datasets_name)):
             self._datasets[dataset_idx] = reasoning_gym.create_dataset(
                 name=self.datasets_name[dataset_idx],
                 size=self.each_dataset_size,
-                seed=self.seed
+                seed=self.seed,
             )
 
     def __len__(self):
@@ -172,12 +170,12 @@ class ReasoningGymDataset(Dataset):
         """
         dataset_idx = idx // self.each_dataset_size
         item_idx = idx % self.each_dataset_size
-        
+
         return {
             "question": self._datasets[dataset_idx][item_idx]["question"],
             "answer": self._datasets[dataset_idx][item_idx]["answer"],
             "dataset_name": self.datasets_name[dataset_idx],
             "dataset_idx": dataset_idx,
             "item_idx": item_idx,
-            "global_idx": idx
+            "global_idx": idx,
         }
