@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import List, Callable, Dict
+import os
 import tyro
 import wandb
 import numpy as np
@@ -11,7 +12,9 @@ from curious.data import GSM8KDataset
 from curious.utils import load_model_tokenizer, tokenize_questions
 from curious.reward import GSM8KRewardModel, THINK_PATTERN, ANSWER_PATTERN
 
+from lightning import seed_everything
 from uuid import uuid4
+
 
 
 @dataclass
@@ -54,15 +57,19 @@ class BaseConfig:
     """
     The number of workers to use for the evaluation.
     """
-    seed: int = 42
-    """
-    The seed to use for the evaluation.
-    """
     mode: str = "test"
     """
     The mode to use for the evaluation.
     """
     log_dir: str = "logs"
+    """
+    The directory to use for the evaluation.
+    """
+    seed: int = 42
+    """
+    The seed to use for the evaluation.
+    """
+    out_dir: str = "evals/"
     """
     The directory to use for the evaluation.
     """
@@ -123,12 +130,24 @@ class EvaluationConfig:
     """
 
     wandb_config: WandbConfig
+    """
+    The wandb configuration.
+    """
 
     base_config: BaseConfig
+    """
+    The base configuration.
+    """
 
     sampling_config: SamplingConfig
+    """
+    The sampling configuration.
+    """
 
     reward_config: RewardConfig
+    """
+    The reward configuration.
+    """
 
 
 @torch.no_grad()
@@ -151,7 +170,16 @@ def evaluate(
     Returns:
         Tuple[List[float], List[Dict[str, str]], List[float]]: A tuple containing the rewards, infos and solved rates.
     """
+    seed_everything(config.base_config.seed) 
     text_logger = kwargs.get("text_logger", lambda x: print(x))
+
+    out_dir = os.path.join(
+        config.base_config.out_dir,
+        os.path.basename(config.base_config.model_name.replace("-", "_")),
+        os.path.basename(config.base_config.dataset_name.replace("-", "_")),
+        config.wandb_config.name.replace("-", "_"),
+    )
+    os.makedirs(out_dir, exist_ok=True)
 
     # Check if the dataset is GSM8K
     if config.base_config.dataset_name != "openai/gsm8k":
@@ -244,6 +272,16 @@ def evaluate(
             }
         )
 
+        for question, answer, completion, reward in zip(
+            questions,
+            oracle_answers,
+            completions,
+            batch_rewards,
+        ):
+            with open(os.path.join(out_dir, "log.txt"), "a") as f:
+                f.write(f"******\nQuestion: {question}\nAnswer: {answer}\nCompletion: {completion}\nReward: {reward}\n******\n")
+            f.close()
+            
         del (
             batch_inputs,
             seq_ids,
@@ -262,9 +300,15 @@ def evaluate(
         }
     )
 
+    # Log the text table
+    logger({"eval/text_table": text_table})
+
     return rewards, infos, solved_rates
 
+
 if __name__ == "__main__":
+
+
 
     # Parse the command line arguments
     config = tyro.cli(EvaluationConfig)
@@ -301,6 +345,3 @@ if __name__ == "__main__":
             "text_logger": text_logger,
         },
     )
-
-    # Log the text table
-    wandb.log({"eval/text_table": text_table})
