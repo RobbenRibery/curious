@@ -49,7 +49,7 @@ class BaseConfig:
     """
     The name of the dataset to use for the evaluation.
     """
-    batch_size: int = 32
+    batch_size: int = 256
     """
     The batch size to use for the evaluation.
     """
@@ -272,16 +272,21 @@ def evaluate(
             }
         )
 
-        for question, answer, completion, reward in zip(
+        for question, answer, completion, reward, info in zip(
             questions,
             oracle_answers,
             completions,
             batch_rewards,
+            infos,
         ):
             with open(os.path.join(out_dir, "log.txt"), "a") as f:
-                f.write(f"******\nQuestion: {question}\nAnswer: {answer}\nCompletion: {completion}\nReward: {reward}\n******\n")
+                f.write(
+                    f"******\nQuestion: {question}\nAnswer: {answer}\n"
+                    f"Completion: {completion}\nReward: {reward}\n"
+                    f"Info: {info}\n******\n"
+                )
             f.close()
-            
+
         del (
             batch_inputs,
             seq_ids,
