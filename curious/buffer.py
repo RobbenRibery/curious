@@ -72,7 +72,7 @@ def split_experience_batch(experience: Experience) -> List[Experience]:
     )
     for key in keys:
         value:torch.Tensor = getattr(experience, key)
-        print(f"{key} -> {type(value)} ({value.shape})")
+        #print(f"{key} -> {type(value)} ({value.shape})")
         if value is None:
             vals: List[None] = [None] * batch_size
         else:
@@ -86,8 +86,17 @@ def split_experience_batch(experience: Experience) -> List[Experience]:
                     batch_data[j][key] = v
             else:
                 batch_data[i][key] = v
-
-    return [Experience(**data) for data in batch_data]
+    out_exp = []
+    for i, data in enumerate(batch_data):
+        try:
+            exp = Experience(**data)
+            out_exp.append(exp)
+        except Exception as e:
+            print(i, len(batch_data))
+            print(data.keys())
+            print(data)
+            raise e
+    return out_exp
 
 
 def join_experience_batch(items: List[Experience]) -> Experience:

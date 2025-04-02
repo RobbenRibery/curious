@@ -1,5 +1,5 @@
 python training.py \
-    --wandb_config.name "grpo-reproduction" \
+    --wandb_config.name "grpo-reproduction-logprobs-compiled" \
     --base_config.checkpoint_path "checkpoints" \
     --base_config.checkpoint_interval 100 \
     --base_config.mode "train" \
@@ -10,7 +10,7 @@ python training.py \
     --base_config.seed 42 \
     --base_config.log_dir "train_logs" \
     --base_config.batch_size 16 \
-    --grpo_config.mini_batch_size 16 \
+    --grpo_config.mini_batch_size 32 \
     --grpo_config.epochs_per_step 2 \
     --grpo_config.group_size 12 \
     --grpo_config.lr 1e-6 \

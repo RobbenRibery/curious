@@ -67,7 +67,7 @@ def rollout(
     # TODO: need to collect the rewards for each completion, each group first, 
     # then the mean of the group -> advantage per completion
     returns = torch.zeros(
-        (num_samples, num_return_sequences),
+        (num_samples * num_return_sequences, ),
         dtype=torch.float,
         device="cpu",
     )

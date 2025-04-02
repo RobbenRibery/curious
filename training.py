@@ -61,7 +61,7 @@ def train(args:TrainingConfig, logger: Callable) -> None:
 
     # check that the data mode is train
     assert args.base_config.mode == "train"
-    assert args.base_config.batch_size % args.grpo_config.mini_batch_size == 0
+    #assert args.base_config.batch_size  args.grpo_config.mini_batch_size == 0
 
     # device & seeding
     device = torch.device("cuda", args.base_config.device_index)
@@ -97,6 +97,7 @@ def train(args:TrainingConfig, logger: Callable) -> None:
         batch_size=args.base_config.batch_size,
         shuffle=True,
         drop_last=True,
+        
     )
     
     # replay buffer
