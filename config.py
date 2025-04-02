@@ -68,7 +68,7 @@ class BaseConfig:
     """
     The maximum length of the model to use for the evaluation.
     """
-    checkpoint_path: str = None
+    checkpoint_path: str = "checkpoints"
     """
     The path to the checkpoint to use for the evaluation.
     """
@@ -154,4 +154,8 @@ class GRPOConfig:
     epochs_per_step: int = 1
     """
     The number of epochs to use for the GRPO.
+    """
+    max_grad_norm: float = 1.0
+    """
+    The maximum gradient norm 
     """

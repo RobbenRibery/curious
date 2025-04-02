@@ -42,6 +42,7 @@ def rollout(
     """
     # get the batch size
     num_samples = batch_inputs["input_ids"].shape[0]
+    oracle_answers = batch_inputs.pop("oracle_answer")
     num_return_sequences = generation_config.num_return_sequences
     # num_rollouts = num_samples * num_return_sequences
 
@@ -75,8 +76,6 @@ def rollout(
     )
     info_list = []
     
-    # get the oracle answers
-    oracle_answers = batch_inputs["oracle_answer"]
     # compute the rewards
     for i in range(0, len(completions), num_return_sequences):
 
@@ -125,11 +124,12 @@ def sequence_log_probs_from_logits(
     Returns:
         torch.Tensor: The log probabilities of the output ids. (num_samples * num_rollouts, seq_len)
     """
-    # Compute the log softmax in place:
-    # log_softmax(logits) = logits - logsumexp(logits, keepdim=True)
-    # This saves VRAM by not creating an extra tensor.
-    logits.sub_(logits.logsumexp(dim=-1, keepdim=True))
-    return logits.gather(dim=-1, index=output_ids.unsqueeze(-1)).squeeze(-1)
+    # Gather the logits corresponding to the output_ids
+    gathered_logits = logits.gather(dim=-1, index=output_ids.unsqueeze(-1)).squeeze(-1)  # (num_samples * num_rollouts, seq_len)
+
+    # Compute log-sum-exp over the vocabulary dimension
+    log_sum_exp = logits.logsumexp(dim=-1)  # (num_samples * num_rollouts, seq_len)
+    return gathered_logits - log_sum_exp
 
 
 def sequences_log_probs(
@@ -159,6 +159,7 @@ def sequences_log_probs(
         use_cache=False,
     )
     logits = output["logits"]
+    del output 
 
     # logits: [batch_size * num_rollouts, seq_len, vocab_size]
     log_probs = sequence_log_probs_from_logits(
@@ -166,7 +167,6 @@ def sequences_log_probs(
         output_ids=sequence_ids[:, 1:],  # right shift 1 block to get the actual output ids
     )
     del logits
-    del output
     return log_probs
 
 

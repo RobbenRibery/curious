@@ -78,6 +78,7 @@ def train(args:TrainingConfig, logger: Callable) -> None:
         args.base_config.model_name, 
         device_map=device
     )
+    tokenizer.padding_side  = 'left'
     optimizer = optim.AdamW(model.parameters(), lr=args.grpo_config.lr)
     reference_model.eval()
     model.gradient_checkpointing_enable()
@@ -145,6 +146,7 @@ def train(args:TrainingConfig, logger: Callable) -> None:
         batch_inputs = {
             k:v.to(device) for k,v in batch_inputs.items()
         }
+        batch_inputs["oracle_answer"] = batch["oracle_answer"]
         max_input_length = batch_inputs["input_ids"].shape[1]
 
         # Rollout phase of GRPO
@@ -207,7 +209,6 @@ def train(args:TrainingConfig, logger: Callable) -> None:
             del action_mask
             del log_probs
             del log_probs_ref
-            del returns 
             del advantages
 
         torch.cuda.empty_cache()
@@ -277,7 +278,7 @@ def train(args:TrainingConfig, logger: Callable) -> None:
 
                 grad_norm = clip_grad_norm_(
                     model.parameters(), 
-                    max_norm=args.max_norm,
+                    max_norm=args.grpo_config.max_grad_norm,
                 )
                 #print(f"{step_epoch}: kl={kl: .4f}, grad_norm={grad_norm: .4f}")
                 wandb.log(
@@ -292,9 +293,8 @@ def train(args:TrainingConfig, logger: Callable) -> None:
                 del exp 
                 del loss 
                 del mean_kl
+                del exp 
                 torch.cuda.empty_cache()
-
-            del experience
 
         if (
             args.base_config.checkpoint_path is not None
