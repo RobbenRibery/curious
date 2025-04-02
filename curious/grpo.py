@@ -64,8 +64,10 @@ def rollout(
 
     # outputs
     num_words_in_completions = [len(completion.split(' ')) for completion in completions]
+    # TODO: need to collect the rewards for each completion, each group first, 
+    # then the mean of the group -> advantage per completion
     returns = torch.zeros(
-        (num_samples * num_return_sequences,),
+        (num_samples, num_return_sequences),
         dtype=torch.float,
         device="cpu",
     )
@@ -110,7 +112,7 @@ def group_advantages(returns: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     """
     return (returns - returns.mean()) / (returns.std() + eps)
 
-
+@torch.compile(dynamic=True)
 def sequence_log_probs_from_logits(
     logits: torch.Tensor, output_ids: torch.Tensor
 ) -> torch.Tensor:
