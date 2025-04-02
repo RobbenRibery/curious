@@ -71,7 +71,8 @@ def split_experience_batch(experience: Experience) -> List[Experience]:
         "action_mask",
     )
     for key in keys:
-        value = getattr(experience, key)
+        value:torch.Tensor = getattr(experience, key)
+        print(f"{key} -> {type(value)} ({value.shape})")
         if value is None:
             vals: List[None] = [None] * batch_size
         else:
