@@ -164,7 +164,7 @@ def train(args:TrainingConfig, logger: Callable) -> None:
             # sequence_ids: (num_samples * group_size, seq_len)
             # action_mask: (num_samples * group_size, seq_len)
             # completions: (num_samples * group_size)
-            # returns: (num_samples * group_size)
+            # returns: (num_samples, group_size)
             # solved_rate: (num_samples, )
 
             batch_mean_format_returns = np.array([x["format_reward"] for x in info_list]).mean()
@@ -174,6 +174,9 @@ def train(args:TrainingConfig, logger: Callable) -> None:
             print(f"batch_idx: {batch_idx} | returns: {batch_mean_returns.item()} | solved_rate: {batch_mean_solved_rate.item()} | format_returns: {batch_mean_format_returns} | outcome_returns: {batch_mean_outcome_returns}")
 
             advantages = group_advantages(returns) # (num_samples, group_size)
+            returns = returns.reshape(-1)
+            advantages = advantages.reshape(-1)
+            
             attention_mask = sequence_ids != pad_token_id # (num_samples * group_size, seq_len)
 
             log_probs = sequences_log_probs(

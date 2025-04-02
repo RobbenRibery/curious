@@ -65,7 +65,7 @@ def rollout(
     # outputs
     num_words_in_completions = [len(completion.split(' ')) for completion in completions]
     returns = torch.zeros(
-        (num_samples * num_return_sequences, ),
+        (num_samples, num_return_sequences),
         dtype=torch.float,
         device="cpu",
     )
@@ -88,12 +88,12 @@ def rollout(
             group_completions,
             orcale_answer_replicates,
         )
-        returns[i : i + num_return_sequences] = torch.tensor(
+        returns[question_idx, :] = torch.tensor(
             rewards, 
             dtype=torch.float, 
             device="cpu",
         )
-        solved_rates[i // num_return_sequences] = solved_rate
+        solved_rates[question_idx] = solved_rate
         info_list.extend(infos)
 
     return sequence_ids, returns, solved_rates, action_mask, completions, info_list, num_words_in_completions
@@ -104,13 +104,13 @@ def group_advantages(returns: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     Normalizes the advantages of a group of returns.
 
     Args:
-        returns (torch.Tensor): The returns to normalize.
+        returns (torch.Tensor): The returns to normalize. (num_samples, num_return_sequences)
         eps (float): The epsilon value to add to the standard deviation to prevent division by zero.
 
     Returns:
-        torch.Tensor: The normalized advantages.
+        torch.Tensor: The normalized advantages. (num_samples, num_return_sequences)
     """
-    return (returns - returns.mean()) / (returns.std() + eps)
+    return (returns - returns.mean(dim=1, keepdim=True)) / (returns.std(dim=1, keepdim=True) + eps)
 
 @torch.compile(dynamic=True)
 def sequence_log_probs_from_logits(
