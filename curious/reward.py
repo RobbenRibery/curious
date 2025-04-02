@@ -185,18 +185,22 @@ class GSM8KRewardModel:
         )
         info.update(outcome_failure_mode)
         info.update({"parsed_answer": parsed_answer})
+        info.update({"outcome_reward": outcome_reward})
 
         section_parsed, format_reward, format_failure_mode = self.format_reward(
             completion
         )
         info.update(format_failure_mode)
         info.update({"parsed_reasoning": section_parsed})
+        info.update({"format_reward": format_reward})
 
         reward = outcome_reward + format_reward
         return reward, info
 
     def __call__(
-        self, completions: List[str] | str, oracle_answers: List[str] | str
+        self, 
+        completions: List[str] | str, 
+        oracle_answers: List[str] | str
     ) -> Tuple[List[str], List[float], List[Dict[str, str]], float]:
         """
         Computes the reward for a given completion and oracle answer.
@@ -213,7 +217,9 @@ class GSM8KRewardModel:
         if isinstance(oracle_answers, str):
             oracle_answers = [oracle_answers]
 
+        # compute the rewards and infos
         rewards, infos = [], []
+        
         sovled_times = 0
         for completion, oracle_answer in zip(completions, oracle_answers):
             # compute the reward and info

@@ -1,6 +1,7 @@
 import os 
 os.environ["TOKENIZERS_PARALLELIS"] = "true"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+from typing import Callable
 
 import torch 
 from torch.utils.data import DataLoader 
@@ -9,86 +10,90 @@ import torch.optim as optim
 
 from transformers import GenerationConfig
 
-from curious.data import ReasoningGymDataset
+from curious.data import GSM8KDataset
 from curious.utils import tokenize_questions, load_model_tokenizer
 from curious.grpo import rollout, sequences_log_probs, group_advantages
 from curious.buffer import ReplayBuffer, Experience, join_experience_batch
 from curious.loss import GRPOLoss, approx_kl_divergence
+from curious.reward import GSM8KRewardModel
+from config import GRPOConfig, WandbConfig, BaseConfig, SamplingConfig, RewardConfig
 
 from lightning import seed_everything
 import wandb
+import numpy as np
 
 from dataclasses import dataclass
 from pathlib import Path
 import tyro 
 
 @dataclass
-class CliArgs: 
-    # wandb params
-    wandb_project: str = "curious-training-grpo-test"
-    wandb_run_name: str = "defualt-run"
-    wand_group_name:str = "no-ablation"
-    
-    # device params
-    device_index: int = 0
-    
-    # model params
-    model_name: str = "Qwen/Qwen2-0.5B-Instruct"
-    model_max_length_inuse:int = 512
-    checkpoint_path: Path = Path("output/")
-    checkpoint_interval: int = 20
+class TrainingConfig:
+    """
+    A dataclass for storing the training configuration.
+    """
 
+    grpo_config: GRPOConfig
+    """
+    The GRPO configuration.
+    """
 
-    # training params
-    seed: int = 42
-    group_size: int = 12
-    lr: float = 1e-6 
-    kl_weight: float = 0
-    clip_eps: float = 0.2
-    train_batch_size: int = 8
-    epochs_per_step: int = 1
-    max_norm: float = 1.0
+    wandb_config: WandbConfig
+    """
+    The wandb configuration.
+    """
 
-    # sampling params
-    max_new_tokens: int = 1024
-    top_p: float = 0.9
-    top_k: int = 50
-    temperature: float = 1.0
+    base_config: BaseConfig
+    """
+    The base configuration.
+    """
 
-    # data params
-    each_dataset_size: int = 1000
+    sampling_config: SamplingConfig
+    """
+    The sampling configuration.
+    """
 
-def train(args:CliArgs) -> None:
+    reward_config: RewardConfig
+    """
+    The reward configuration.
+    """
 
-    # datasets
-    datasets_name = [
-        "gsm_symbolic"
-    ]
+def train(args:TrainingConfig, logger: Callable) -> None:
 
-    device = torch.device("cuda", args.device_index)
+    # check that the data mode is train
+    assert args.base_config.mode == "train"
+    assert args.base_config.batch_size % args.grpo_config.mini_batch_size == 0
+
+    # device & seeding
+    device = torch.device("cuda", args.base_config.device_index)
     cpu_device = torch.device("cpu")
-    seed_everything(args.seed)
+    seed_everything(args.base_config.seed)
 
     # load models
-    reference_model, _ = load_model_tokenizer(args.model_name, device_map=device, freeze_model=True)
-    model, tokenizer = load_model_tokenizer(args.model_name, device_map=device)
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
-
+    reference_model, _ = load_model_tokenizer(
+        args.base_config.model_name, 
+        device_map=device, 
+        freeze_model=True
+    )
+    model, tokenizer = load_model_tokenizer(
+        args.base_config.model_name, 
+        device_map=device
+    )
+    optimizer = optim.AdamW(model.parameters(), lr=args.grpo_config.lr)
     reference_model.eval()
     model.gradient_checkpointing_enable()
 
+    # pad token id
     pad_token_id = tokenizer.eos_token_id
 
     # data
-    dataset = ReasoningGymDataset(
-        datasets_name=datasets_name,
-        each_dataset_size=args.each_dataset_size,
-        seed=args.seed,
+    dataset = GSM8KDataset(
+        dataset_name=args.base_config.dataset_name,
+        seed=args.base_config.seed,
+        mode=args.base_config.mode,
     )
-
-    main_data_loader = DataLoader(
+    rollout_data_loader = DataLoader(
         dataset,
-        batch_size=args.train_batch_size,
+        batch_size=args.base_config.batch_size,
         shuffle=True,
         drop_last=True,
     )
@@ -98,21 +103,30 @@ def train(args:CliArgs) -> None:
 
     # objective
     objective = GRPOLoss(
-        clip_eps=args.clip_eps,
-        kl_weight=args.kl_weight,
+        clip_eps=args.grpo_config.clip_eps,
+        kl_weight=args.grpo_config.kl_weight,
     )
 
-    if not args.wandb_project:
-        wandb.init(mode="disabled")
-    else:
-        args.wandb_run_name = args.wandb_run_name + f"-batch_{args.train_batch_size}" + f"-group_{args.group_size}"
-        wandb.init(
-            project=args.wandb_project,
-            name= args.wandb_run_name,
-            group= args.wand_group_name,
-        )
+    # reward model
+    reward_model = GSM8KRewardModel(
+        answer_pattern=args.reward_config.answer_pattern,
+        think_pattern=args.reward_config.think_pattern,
+        use_format_reward=args.reward_config.use_format_reward,
+    )
 
-    for batch_idx, batch in enumerate(main_data_loader):
+    # sampling config
+    generation_config = GenerationConfig(
+        num_return_sequences=args.grpo_config.group_size,
+        max_new_tokens=args.sampling_config.max_new_tokens,
+        temperature=args.sampling_config.temperature,
+        top_p=args.sampling_config.top_p,
+        top_k=args.sampling_config.top_k,
+        do_sample =args.sampling_config.do_sample,
+        eos_token_id=tokenizer.eos_token_id,
+        pad_token_id= tokenizer.eos_token_id,
+    )
+
+    for batch_idx, batch in enumerate(rollout_data_loader):
         
         print(f"Batch indx {batch_idx}")
         print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/1024/1024/1024))
@@ -126,48 +140,37 @@ def train(args:CliArgs) -> None:
         batch_inputs = tokenize_questions(
             tokenizer=tokenizer,
             questions=questions,
-            trucation_max_length=args.model_max_length_inuse,
+            trucation_max_length=args.base_config.model_max_length_inuse,
         )
         batch_inputs = {
-            k:v.to(device) \
-            for k,v in batch_inputs.items()
+            k:v.to(device) for k,v in batch_inputs.items()
         }
         max_input_length = batch_inputs["input_ids"].shape[1]
 
         # Rollout phase of GRPO
         with torch.no_grad():
+            model.eval()
             # rollout
-            sequence_ids, returns, solved_rate, action_mask, completions = rollout(
+            sequence_ids, returns, solved_rate, action_mask, completions, info_list, num_words_in_completions = rollout(
                 model,
                 tokenizer,
                 batch_inputs,
-                oracle_answers=answers,
-                generation_config=GenerationConfig(
-                    num_return_sequences=args.group_size,
-                    max_new_tokens=args.max_new_tokens,
-                    temperature=args.temperature,
-                    top_p=args.top_p,
-                    top_k=args.top_k,
-                    do_sample =True,
-                    eos_token_id=tokenizer.eos_token_id,
-                    pad_token_id= tokenizer.eos_token_id,
-                ),
+                reward_model=reward_model,
+                generation_config=generation_config,
             )
-            # print(sequence_ids.shape)
             # sequence_ids: (num_samples * group_size, seq_len)
             # action_mask: (num_samples * group_size, seq_len)
             # completions: (num_samples * group_size)
             # returns: (num_samples * group_size)
             # solved_rate: (num_samples, )
 
-            batch_mean_returns = returns.mean().to(cpu_device)
-            batch_mean_solved_rate = solved_rate.mean().to(cpu_device) 
-            print(f"batch_idx: {batch_idx} | returns: {batch_mean_returns.item()} | solved_rate: {batch_mean_solved_rate.item()}")
+            batch_mean_format_returns = np.array([x["format_reward"] for x in info_list]).mean()
+            batch_mean_outcome_returns = np.array([x["outcome_reward"] for x in info_list]).mean()
+            batch_mean_returns = returns.mean()
+            batch_mean_solved_rate = solved_rate.mean()
+            print(f"batch_idx: {batch_idx} | returns: {batch_mean_returns.item()} | solved_rate: {batch_mean_solved_rate.item()} | format_returns: {batch_mean_format_returns} | outcome_returns: {batch_mean_outcome_returns}")
 
             advantages = group_advantages(returns) # (num_samples, group_size)
-            returns = returns.to(cpu_device)
-            solved_rate = solved_rate.to(cpu_device)
-
             attention_mask = sequence_ids != pad_token_id # (num_samples * group_size, seq_len)
 
             log_probs = sequences_log_probs(
@@ -210,44 +213,45 @@ def train(args:CliArgs) -> None:
         torch.cuda.empty_cache()
 
         # log the stats to wandb 
-        wandb.log(
+        logger(
             {
                 "train/batch_returns": batch_mean_returns,
                 "train/batch_solved_rate": batch_mean_solved_rate,
                 "train/max_input_length": max_input_length,
+                "train/num_words_in_completions": np.array(num_words_in_completions).mean(),
+                "train/batch_mean_format_returns": batch_mean_format_returns,
+                "train/batch_mean_outcome_returns": batch_mean_outcome_returns,
             }
         )
-        # TODO: log the text completions as artifacts
-        out_dir = f"output/{args.wandb_run_name}"
-        if not os.path.exists(out_dir):
-            os.makedirs(out_dir)
+        out_dir = os.path.join(args.base_config.log_dir, args.wandb_config.name)
+        os.makedirs(out_dir, exist_ok=True)
 
-        file_name = os.path.join(
-            out_dir,
-            f"completions_{batch_idx}.txt"
-        )
-        text = ""
-        with open(file_name, "w") as f:
+        delimeter = "*"*50
+        file_name = os.path.join(out_dir, f"log_{batch_idx}.txt")
+        with open(file_name, "a") as f:
             for i, completion in enumerate(completions):
-                question = questions[i//args.group_size]
-                text += "******" + "\n" + question + ":\n----\n" 
-                text += completion + "\n******\n"
-            f.write(text)
-                
-        wandb.save(file_name)
-
+                question = questions[i//args.grpo_config.group_size]
+                answer = answers[i//args.grpo_config.group_size]
+                reward = returns[i]
+                info = info_list[i]                
+                f.write(
+                    f"{delimeter}\nQuestion:\n{question}\nAnswer:\n{answer}\n"
+                    f"Completion:\n{completion}\nReward:\n{reward}\n"
+                    f"Info:\n{info}\n{delimeter}\n"
+                )
+        f.close()
+        
         ### Training phase of GRPO
         experience_sampler = DataLoader(
             replay_buffer,
-            batch_size=args.train_batch_size,
+            batch_size=args.grpo_config.mini_batch_size,
             shuffle=True,
             drop_last=False,
             collate_fn=join_experience_batch,
         )
+        model.train()
 
-        for _ in range(args.epochs_per_step):
-            model.train()
-
+        for _ in range(args.grpo_config.epochs_per_step):
             for exp in experience_sampler:
                 exp: Experience
                 exp = exp.to(device)
@@ -293,18 +297,26 @@ def train(args:CliArgs) -> None:
             del experience
 
         if (
-            args.checkpoint_path is not None
-            and args.checkpoint_interval is not None
-            and (batch_idx + 1) % args.checkpoint_interval == 0
+            args.base_config.checkpoint_path is not None
+            and args.base_config.checkpoint_interval is not None
+            and (batch_idx + 1) % args.base_config.checkpoint_interval == 0
         ):
-            model.save_pretrained(args.checkpoint_path / f"step_{batch_idx + 1}")
-
+            model.save_pretrained(args.base_config.checkpoint_path / f"step_{batch_idx + 1}")
         del batch_inputs
 
-    if args.checkpoint_path is not None:
-        model.save_pretrained(args.checkpoint_path / f"step_{batch_idx + 1}")
+    if args.base_config.checkpoint_path is not None:
+        model.save_pretrained(args.base_config.checkpoint_path / f"step_{batch_idx + 1}")
+
 
 if __name__ == "__main__":
+
+    args = tyro.cli(TrainingConfig)
     
-    args = tyro.cli(CliArgs)
-    train(args)
+    wandb.init(
+        project=args.wandb_config.project,
+        name=args.wandb_config.name,
+        config=args,
+    )
+    logger = wandb.log  
+    
+    train(args, logger)

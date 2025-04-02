@@ -4,7 +4,7 @@ from pathlib import Path
 import random
 import re
 from typing import Any, Iterator, Optional, List, Tuple
-import wandb
+
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
@@ -17,13 +17,14 @@ from transformers import (
 )
 from curious.reward import GSM8KRewardModel
 
+from transformers.generation.utils import GenerateDecoderOnlyOutput
 
 @torch.no_grad()
 def rollout(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizer,
     batch_inputs: dict[str, torch.Tensor],
-    oracle_answers: List[str],
+    reward_model: GSM8KRewardModel,
     generation_config: GenerationConfig,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, List[str]]:
     """
@@ -39,8 +40,6 @@ def rollout(
     Returns:
         tuple: A tuple containing the sequence ids, the returns, the action mask, and the completions.
     """
-    # assume model.eval()
-
     # get the batch size
     num_samples = batch_inputs["input_ids"].shape[0]
     num_return_sequences = generation_config.num_return_sequences
@@ -49,8 +48,11 @@ def rollout(
     # get the parallel rollouts
     pad_token_id = tokenizer.eos_token_id
     sequence_ids = model.generate(**batch_inputs, generation_config=generation_config)
+    
+    # get the completions
     completions = tokenizer.batch_decode(
-        sequence_ids[:, batch_inputs["input_ids"].shape[1] :], skip_special_tokens=True
+        sequence_ids[:, batch_inputs["input_ids"].shape[1] :], 
+        skip_special_tokens=True
     )
 
     # action mask (state that has performed an action = 1)
@@ -59,41 +61,41 @@ def rollout(
     action_mask[sequence_ids == pad_token_id] = False
     action_mask = action_mask[:, 1:]  # (num_samples * group_size, seq_len-1)
 
-    # compute the rewards
+    # outputs
+    num_words_in_completions = [len(completion.split(' ')) for completion in completions]
     returns = torch.zeros(
         (num_samples * num_return_sequences,),
         dtype=torch.float,
-        device=sequence_ids.device,
+        device="cpu",
     )
     solved_rates = torch.zeros(
-        (num_samples,), dtype=torch.float, device=sequence_ids.device
+        (num_samples,), 
+        dtype=torch.float, 
+        device="cpu"
     )
-
+    info_list = []
+    
+    # get the oracle answers
+    oracle_answers = batch_inputs["oracle_answer"]
+    # compute the rewards
     for i in range(0, len(completions), num_return_sequences):
-        group_completions = completions[i : i + num_return_sequences]
 
-        # compute the reward
-        orcale_answer_replicates = [
-            oracle_answers[i // num_return_sequences]
-        ] * num_return_sequences
-        rewards, solved_rate = RewardModel.reward_batch(
+        group_completions = completions[i : i + num_return_sequences]
+        orcale_answer_replicates = [oracle_answers[i // num_return_sequences]] * num_return_sequences
+        
+        rewards, infos, solved_rate = reward_model(
             group_completions,
             orcale_answer_replicates,
-            illeagel_contents=[
-                "reasoning process here",
-                "thinking process...",
-                "reasoning process...",
-            ],
         )
-        # TODO: map the process reward from the string space into the token space
-
-        rewards = torch.tensor(rewards, dtype=torch.float, device=sequence_ids.device)
-
-        returns[i : i + num_return_sequences] = rewards
+        returns[i : i + num_return_sequences] = torch.tensor(
+            rewards, 
+            dtype=torch.float, 
+            device="cpu",
+        )
         solved_rates[i // num_return_sequences] = solved_rate
+        info_list.extend(infos)
 
-    # returns = returns.reshape(-1) # (num_samples * num_return_sequences, )
-    return sequence_ids, returns, solved_rates, action_mask, completions
+    return sequence_ids, returns, solved_rates, action_mask, completions, info_list, num_words_in_completions
 
 
 def group_advantages(returns: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
@@ -123,14 +125,11 @@ def sequence_log_probs_from_logits(
     Returns:
         torch.Tensor: The log probabilities of the output ids. (num_samples * num_rollouts, seq_len)
     """
-    # Gather the logits corresponding to the output_ids
-    gathered_logits = logits.gather(dim=-1, index=output_ids.unsqueeze(-1)).squeeze(
-        -1
-    )  # (num_samples * num_rollouts, seq_len)
-
-    # Compute log-sum-exp over the vocabulary dimension
-    log_sum_exp = logits.logsumexp(dim=-1)  # (num_samples * num_rollouts, seq_len)
-    return torch.log(gathered_logits.exp()) - log_sum_exp
+    # Compute the log softmax in place:
+    # log_softmax(logits) = logits - logsumexp(logits, keepdim=True)
+    # This saves VRAM by not creating an extra tensor.
+    logits.sub_(logits.logsumexp(dim=-1, keepdim=True))
+    return logits.gather(dim=-1, index=output_ids.unsqueeze(-1)).squeeze(-1)
 
 
 def sequences_log_probs(
@@ -151,12 +150,12 @@ def sequences_log_probs(
     Returns:
         torch.Tensor: The log probabilities of the output ids. (num_samples * group_size, seq_len-1, vocab_size)
     """
-    # position_ids = attention_mask.long().cumsum(dim=-1) - 1
-    # position_ids.masked_fill_(mask=(attention_mask == 0), value=1)
+    #position_ids = attention_mask.long().cumsum(dim=-1) - 1
+    #position_ids.masked_fill_(mask=(attention_mask == 0), value=1)
     output = model(
         input_ids=sequence_ids,
         attention_mask=attention_mask,
-        # position_ids=position_ids,
+        #position_ids=position_ids,
         use_cache=False,
     )
     logits = output["logits"]
@@ -164,8 +163,55 @@ def sequences_log_probs(
     # logits: [batch_size * num_rollouts, seq_len, vocab_size]
     log_probs = sequence_log_probs_from_logits(
         logits=logits[:, :-1],
-        output_ids=sequence_ids[
-            :, 1:
-        ],  # right shift 1 block to get the actual output ids
+        output_ids=sequence_ids[:, 1:],  # right shift 1 block to get the actual output ids
     )
+    del logits
+    del output
     return log_probs
+
+
+def sequences_log_probs_with_mask(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizer,
+    generation_output: GenerateDecoderOnlyOutput,
+) -> torch.Tensor:
+    """
+    Computes the log probabilities of a sequence of tokens, given the output of a generate() call from a HuggingFace model.
+
+    Args:
+        model (PreTrainedModel): The model to use for computing the log probabilities.
+        tokenizer (PreTrainedTokenizer): The tokenizer to use for computing the log probabilities.
+        generation_output (GenerateDecoderOnlyOutput): The output of the generate() call.
+
+    Returns:
+        logprobs (torch.Tensor): The log probabilities of the sequence of tokens. (num_seqs, seq_len)
+        action_mask (torch.Tensor): A boolean mask indicating where the action was taken. (num_seqs, seq_len)
+    """
+    seq_ids = generation_output.sequences 
+    len_inputs = seq_ids.shape[1] - len(generation_output.logits)
+
+    pad_token_id = tokenizer.eos_token_id 
+
+    logprobs = torch.zeros_like(
+        seq_ids, 
+        dtype= torch.float, 
+        device= seq_ids.device,
+    )
+    action_mask = torch.zeros_like(
+        seq_ids, 
+        dtype=torch.bool,
+        device=seq_ids.device
+    )
+    action_mask[:, seq_ids.shape[1] :] = True
+    action_mask[seq_ids == pad_token_id] = False
+    # action_mask = action_mask[:, 1:]  
+    # (num_seqs, seq_len-1)
+    generation_logprobs = model.compute_transition_scores(
+        generation_output.sequences, 
+        generation_output.logits, 
+        normalize_logits=True, 
+    )
+    # (num_seqs, generation_length)
+    logprobs[:, len_inputs:] = generation_logprobs
+    masked_logprobs = logprobs * action_mask
+    return masked_logprobs 
