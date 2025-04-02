@@ -9,8 +9,8 @@ python training.py \
     --base_config.num_workers 8 \
     --base_config.seed 42 \
     --base_config.log_dir "train_logs" \
-    --base_config.batch_size 8 \
-    --grpo_config.mini_batch_size 8 \
+    --base_config.batch_size 16 \
+    --grpo_config.mini_batch_size 16 \
     --grpo_config.epochs_per_step 2 \
     --grpo_config.group_size 12 \
     --grpo_config.lr 1e-6 \

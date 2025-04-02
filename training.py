@@ -293,7 +293,6 @@ def train(args:TrainingConfig, logger: Callable) -> None:
                 del exp 
                 del loss 
                 del mean_kl
-                del exp 
                 torch.cuda.empty_cache()
 
         if (
@@ -301,11 +300,21 @@ def train(args:TrainingConfig, logger: Callable) -> None:
             and args.base_config.checkpoint_interval is not None
             and (batch_idx + 1) % args.base_config.checkpoint_interval == 0
         ):
-            model.save_pretrained(args.base_config.checkpoint_path / f"step_{batch_idx + 1}")
+            model.save_pretrained(
+                os.path.join(
+                    args.base_config.checkpoint_path, 
+                    f"step_{batch_idx + 1}"
+                )
+            )
         del batch_inputs
 
     if args.base_config.checkpoint_path is not None:
-        model.save_pretrained(args.base_config.checkpoint_path / f"step_{batch_idx + 1}")
+        model.save_pretrained(
+            os.path.join(
+                args.base_config.checkpoint_path, 
+                f"step_{batch_idx + 1}"
+            )
+        )
 
 
 if __name__ == "__main__":
