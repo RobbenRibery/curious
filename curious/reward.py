@@ -39,6 +39,7 @@ class FailureMode:
     WRONG_BEGINNING_FORMAT = "wrong_beginning_format"
     WRONG_ENDING_FORMAT = "wrong_ending_format"
     MULTIPLE_FORMATS = "multiple_required_formats"
+    WRONG_FORMAT_WITH_REASONING = "wrong_format_with_reasoning"
 
 
 class GSM8KRewardModel:
@@ -159,11 +160,14 @@ class GSM8KRewardModel:
 
         # return the last format as the final format
         section_parsed = (
-            "\n".join([mathch_.group(0) for mathch_ in format_matches])
+            "\n".join([mathch_.group(0) for mathch_ in format_matches]).strip()
             if len(format_matches) > 1
-            else format_matches[0].group(0)
+            else format_matches[0].group(0).strip()
         )
-        return section_parsed, SOLVED_REWARD, {"format_": None}
+        if "reasoning process here" == section_parsed:
+            return section_parsed, NEGATIVE_REWARD, {"format_": FailureMode.WRONG_FORMAT_WITH_REASONING}
+        else:
+            return section_parsed, ZERO_REWARD, {"format_": None}
 
     def instance_reward(
         self, completion: str, oracle_answer: str
