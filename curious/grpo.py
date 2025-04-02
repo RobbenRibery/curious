@@ -64,8 +64,6 @@ def rollout(
 
     # outputs
     num_words_in_completions = [len(completion.split(' ')) for completion in completions]
-    # TODO: need to collect the rewards for each completion, each group first, 
-    # then the mean of the group -> advantage per completion
     returns = torch.zeros(
         (num_samples * num_return_sequences, ),
         dtype=torch.float,
@@ -81,8 +79,10 @@ def rollout(
     # compute the rewards
     for i in range(0, len(completions), num_return_sequences):
 
+        question_idx = i // num_return_sequences
+
         group_completions = completions[i : i + num_return_sequences]
-        orcale_answer_replicates = [oracle_answers[i // num_return_sequences]] * num_return_sequences
+        orcale_answer_replicates = [oracle_answers[question_idx]] * num_return_sequences
         
         rewards, infos, solved_rate = reward_model(
             group_completions,
