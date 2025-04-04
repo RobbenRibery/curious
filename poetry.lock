@@ -1502,6 +1502,25 @@ antlr4-9-3 = ["antlr4-python3-runtime (==4.9.3)"]
 dev = ["pytest"]
 
 [[package]]
+name = "liger-kernel"
+version = "0.5.6"
+description = "Efficient Triton kernels for LLM Training"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "liger_kernel-0.5.6-py3-none-any.whl", hash = "sha256:7a1a952460622a5064e73f15e86822982aa20b05b30e4329a448491e5161c17d"},
+    {file = "liger_kernel-0.5.6.tar.gz", hash = "sha256:be983852a0322a5df75ce2a7e9bd6a79d84fe440621082c0603a65f9ec03b788"},
+]
+
+[package.dependencies]
+torch = ">=2.1.2"
+triton = ">=2.3.1"
+
+[package.extras]
+dev = ["black (>=24.4.2)", "datasets (>=2.19.2)", "flake8 (>=4.0.1.1)", "isort (>=5.13.2)", "matplotlib (>=3.7.2)", "mkdocs", "mkdocs-material", "pytest (>=7.1.2)", "pytest-rerunfailures", "pytest-xdist", "seaborn", "transformers (>=4.44.2)"]
+
+[[package]]
 name = "lightning"
 version = "2.5.1"
 description = "The Deep Learning framework to train, deploy, and ship AI products Lightning fast."
@@ -4091,7 +4110,6 @@ description = "A language and compiler for custom Deep Learning operations"
 optional = false
 python-versions = "*"
 groups = ["main"]
-markers = "platform_system == \"Linux\" and platform_machine == \"x86_64\""
 files = [
     {file = "triton-3.2.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b3e54983cd51875855da7c68ec05c05cf8bb08df361b1d5b69e05e40b0c9bd62"},
     {file = "triton-3.2.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8009a1fb093ee8546495e96731336a33fb8856a38e45bb4ab6affd6dbc3ba220"},
@@ -4650,4 +4668,4 @@ six = "*"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11.0"
-content-hash = "baa22ba01dcc21aea913ed74d7ae2304f470a338ae6e4d892596c2aec667d631"
+content-hash = "8d0388bfe237fc559dcfc2b7d740fa8f6130c7eb88847f393df29908e7b34b41"

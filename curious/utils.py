@@ -4,6 +4,9 @@ from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
 )
+from liger_kernel.transformers import (
+    AutoLigerKernelForCausalLM,
+)
 from typing import List, Dict, Optional
 import torch
 
@@ -29,7 +32,7 @@ def load_model_tokenizer(
     Returns:
         tuple: A tuple containing the model and its tokenizer.
     """
-    tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+    tokenizer: PreTrainedTokenizer = AutoLigerKernelForCausalLM.from_pretrained(model_name_or_path)
     tokenizer.pad_token = tokenizer.eos_token
 
     model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
