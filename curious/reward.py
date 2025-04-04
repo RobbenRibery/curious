@@ -167,7 +167,7 @@ class GSM8KRewardModel:
         if "reasoning process here" == section_parsed:
             return section_parsed, NEGATIVE_REWARD, {"format_": FailureMode.WRONG_FORMAT_WITH_REASONING}
         else:
-            return section_parsed, ZERO_REWARD, {"format_": None}
+            return section_parsed, SOLVED_REWARD, {"format_": None}
 
     def instance_reward(
         self, completion: str, oracle_answer: str
