@@ -164,7 +164,14 @@ class GSM8KRewardModel:
             if len(format_matches) > 1
             else format_matches[0].group(0).strip()
         )
-        if "reasoning process here" == section_parsed:
+
+        think_sections:List[str] = re.findall(self.think_ptttern, section_parsed, flags=re.DOTALL)
+        # Iterate over the think section to reject any completion with copy-pasting the prompt
+        for think_section in think_sections:
+            if "reasoning process here" == think_section.strip():
+                return section_parsed, NEGATIVE_REWARD, {"format_": FailureMode.WRONG_FORMAT_WITH_REASONING}
+            
+        if "reasoning process here" == section_parsed.strip():
             return section_parsed, NEGATIVE_REWARD, {"format_": FailureMode.WRONG_FORMAT_WITH_REASONING}
         else:
             return section_parsed, SOLVED_REWARD, {"format_": None}
