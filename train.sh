@@ -1,5 +1,5 @@
 python training.py \
-    --wandb_config.name "grpo-reproduction-rmcorrecrted-batch32" \
+    --wandb_config.name "grpo-reproduction-rmcorrect-batch16-group16-dropkl" \
     --base_config.checkpoint_path "checkpoints" \
     --base_config.checkpoint_interval 100 \
     --base_config.mode "train" \
@@ -9,11 +9,11 @@ python training.py \
     --base_config.num_workers 8 \
     --base_config.seed 42 \
     --base_config.log_dir "train_logs" \
-    --base_config.batch_size 16 \
-    --grpo_config.mini_batch_size 32 \
+    --base_config.batch_size 8 \
+    --grpo_config.mini_batch_size 16 \
     --grpo_config.epochs_per_step 2 \
     --grpo_config.group_size 16 \
     --grpo_config.lr 1e-6 \
-    --grpo_config.kl_weight 0.01 \
+    --grpo_config.kl_weight 0.0 \
     --grpo_config.clip_eps 0.2 \
     --reward_config.use_format_reward 
