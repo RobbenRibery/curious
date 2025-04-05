@@ -167,6 +167,7 @@ class GSM8KRewardModel:
 
         think_sections:List[str] = re.findall(self.think_ptttern, section_parsed, flags=re.DOTALL)
         # Iterate over the think section to reject any completion with copy-pasting the prompt
+        # TODO: Add a partial reward for only including the <think> token
         for think_section in think_sections:
             if "reasoning process here" == think_section.strip():
                 return section_parsed, NEGATIVE_REWARD, {"format_": FailureMode.WRONG_FORMAT_WITH_REASONING}

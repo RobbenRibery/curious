@@ -87,7 +87,7 @@ class SamplingConfig:
     """
     The maximum number of new tokens to use for the evaluation.
     """
-    temperature: float = 0.7
+    temperature: float = 1
     """
     The temperature to use for the evaluation.
     """

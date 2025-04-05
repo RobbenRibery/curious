@@ -165,3 +165,4 @@ output/
 .vscode/
 train_logs/
 checkpoints/
+checkpoints_minibatch32_batch8_group16_temp1/

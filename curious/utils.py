@@ -32,10 +32,10 @@ def load_model_tokenizer(
     Returns:
         tuple: A tuple containing the model and its tokenizer.
     """
-    tokenizer: PreTrainedTokenizer = AutoLigerKernelForCausalLM.from_pretrained(model_name_or_path)
+    tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
     tokenizer.pad_token = tokenizer.eos_token
 
-    model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
+    model: PreTrainedModel = AutoLigerKernelForCausalLM.from_pretrained(
         model_name_or_path,
         trust_remote_code=trust_remote_code,
         attn_implementation="flash_attention_2",
