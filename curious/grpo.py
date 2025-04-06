@@ -98,7 +98,7 @@ def rollout(
 
     return sequence_ids, returns, solved_rates, action_mask, completions, info_list, num_words_in_completions
 
-
+@torch.compile(dynamic=True)
 def group_advantages(returns: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     """
     Normalizes the advantages of a group of returns.
@@ -133,7 +133,7 @@ def sequence_log_probs_from_logits(
     log_sum_exp = logits.logsumexp(dim=-1)  # (num_samples * num_rollouts, seq_len)
     return gathered_logits - log_sum_exp
 
-
+@torch.compile(dynamic=True)
 def sequences_log_probs(
     model: PreTrainedModel,
     sequence_ids: torch.Tensor,

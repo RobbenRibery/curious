@@ -103,6 +103,10 @@ class SamplingConfig:
     """
     Whether to sample from the model.
     """
+    use_cache:bool = True
+    """
+    Whether to use kv cache during inference
+    """
 
 
 @dataclass
