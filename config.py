@@ -10,16 +10,15 @@ class WandbConfig:
     A dataclass for storing the wandb configuration.
     """
 
-    project: str = "curious"
+    project: str = "gasm8k-qwen-grpo-eval"
     """
     The project to use for the wandb.
     """
-
-    name: str = f"curious-{uuid4()}"
+    name: str = "eval-grpo-klconstrained-batch8-minibatch32-batch900"
     """
     The name to use for the wandb.
     """
-    group: str = "grpo-reproduction"
+    group: str = "qwen-05b-instruct-gsm8k"
     """
     The group to use for the wandb.
     """
@@ -56,7 +55,7 @@ class BaseConfig:
     """
     The mode to use for the evaluation.
     """
-    log_dir: str = "logs"
+    log_dir: str = "eval_logs"
     """
     The directory to use for the evaluation.
     """
@@ -68,10 +67,12 @@ class BaseConfig:
     """
     The maximum length of the model to use for the evaluation.
     """
-    checkpoint_path: str = "checkpoints"
+
+    checkpoint_dir: str = "checkpoints/checkpoints/step_900"
     """
-    The path to the checkpoint to use for the evaluation.
+    The directory to use for the checkpoint.
     """
+
     checkpoint_interval: int = 100
     """
     The interval to use for the checkpoint.
@@ -87,7 +88,7 @@ class SamplingConfig:
     """
     The maximum number of new tokens to use for the evaluation.
     """
-    temperature: float = 1
+    temperature: float = 0.7
     """
     The temperature to use for the evaluation.
     """
@@ -107,6 +108,10 @@ class SamplingConfig:
     """
     Whether to use kv cache during inference
     """
+    repetition_penalty: float = 1.0
+    """
+    The repetition penalty to use for the sampling.
+    """
 
 
 @dataclass
@@ -123,7 +128,7 @@ class RewardConfig:
     """
     The pattern to use for the think.
     """
-    use_format_reward: bool = False
+    use_format_reward: bool = True
     """
     Whether to use the format reward.
     """

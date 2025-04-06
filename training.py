@@ -60,6 +60,8 @@ class TrainingConfig:
 
 def train(args:TrainingConfig, logger: Callable) -> None:
 
+    run_name = args.wandb_config.name.replace("-", "_")
+
     # check that the data mode is train
     assert args.base_config.mode == "train"
     #assert args.base_config.batch_size  args.grpo_config.mini_batch_size == 0
@@ -127,6 +129,8 @@ def train(args:TrainingConfig, logger: Callable) -> None:
         do_sample =args.sampling_config.do_sample,
         eos_token_id=tokenizer.eos_token_id,
         pad_token_id= tokenizer.eos_token_id,
+        use_cache=args.sampling_config.use_cache,
+        repetition_penalty=args.sampling_config.repetition_penalty,
     )
 
     for batch_idx, batch in enumerate(rollout_data_loader):
@@ -302,23 +306,29 @@ def train(args:TrainingConfig, logger: Callable) -> None:
                 torch.cuda.empty_cache()
 
         if (
-            args.base_config.checkpoint_path is not None
+            args.base_config.checkpoint_dir is not None
             and args.base_config.checkpoint_interval is not None
             and (batch_idx + 1) % args.base_config.checkpoint_interval == 0
         ):
             model.save_pretrained(
                 os.path.join(
-                    args.base_config.checkpoint_path, 
-                    f"step_{batch_idx + 1}"
+                    *[
+                        args.base_config.checkpoint_dir, 
+                        run_name,
+                        f"step_{batch_idx + 1}"
+                    ]
                 )
             )
         del batch_inputs
 
-    if args.base_config.checkpoint_path is not None:
+    if args.base_config.checkpoint_dir is not None:
         model.save_pretrained(
             os.path.join(
-                args.base_config.checkpoint_path, 
-                f"step_{batch_idx + 1}"
+                *[
+                    args.base_config.checkpoint_dir, 
+                    run_name,
+                    f"step_{batch_idx + 1}_final"
+                ]
             )
         )
 

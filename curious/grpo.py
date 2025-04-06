@@ -1,15 +1,6 @@
-from collections.abc import Callable
-import json
-from pathlib import Path
-import random
-import re
-from typing import Any, Iterator, Optional, List, Tuple
+from typing import List, Tuple, Dict
 
 import torch
-import torch.optim as optim
-import torch.nn.functional as F
-from torch.nn.utils import clip_grad_norm_
-from torch.utils.data import DataLoader
 from transformers import (
     PreTrainedTokenizer,
     GenerationConfig,
@@ -23,7 +14,7 @@ from transformers.generation.utils import GenerateDecoderOnlyOutput
 def rollout(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizer,
-    batch_inputs: dict[str, torch.Tensor],
+    batch_inputs: Dict[str, torch.Tensor],
     reward_model: GSM8KRewardModel,
     generation_config: GenerationConfig,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, List[str]]:
@@ -170,7 +161,6 @@ def sequences_log_probs(
     )
     del logits
     return log_probs
-
 
 def sequences_log_probs_with_mask(
     model: PreTrainedModel,

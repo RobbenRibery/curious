@@ -9,7 +9,7 @@ package-mode = false
 
 [tool.poetry.dependencies]
 python-dotenv = "^1.0.1"
-python = "^3.11.0"
+python = ">=3.11.0,<3.14"
 torch = "^2.6.0"
 reasoning-gym = "^0.1.12"
 transformers = "^4.49.0"
@@ -27,6 +27,10 @@ modal = "^0.73.107"
 setuptools = "^76.0.0"
 math-verify = "^0.7.0"
 memory-profiler = "^0.61.0"
+easydel = "^0.1.2"
+jax = "^0.5.3"
+flax = "^0.10.5"
+chex = "^0.1.89"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29.5"

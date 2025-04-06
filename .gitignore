@@ -164,6 +164,7 @@ wandb/
 output/
 .vscode/
 train_logs/
+eval_logs/
 checkpoints/
 checkpoints_minibatch32_batch8_group16_temp1/
 checkpoints_minibatch16_batch8_group16_temp1_zerokl

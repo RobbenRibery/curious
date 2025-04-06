@@ -7,7 +7,7 @@ from transformers import (
 from liger_kernel.transformers import (
     AutoLigerKernelForCausalLM,
 )
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 import torch
 
 from curious.prompt import (
@@ -22,6 +22,7 @@ def load_model_tokenizer(
     bf16: bool = True,
     device_map: Optional[str] = "auto",
     freeze_model: bool = False,
+    checkpoint_path: Optional[str] = None,
 ) -> tuple[PreTrainedModel, PreTrainedTokenizer]:
     """
     Loads a pre-trained model and its tokenizer.
@@ -39,7 +40,7 @@ def load_model_tokenizer(
     tokenizer.pad_token = tokenizer.eos_token
 
     model: PreTrainedModel = AutoLigerKernelForCausalLM.from_pretrained(
-        model_name_or_path,
+        model_name_or_path if checkpoint_path is None else checkpoint_path,
         trust_remote_code=trust_remote_code,
         attn_implementation="flash_attention_2",
         torch_dtype=torch.bfloat16 if bf16 else "auto",

@@ -17,4 +17,5 @@ python training.py \
     --grpo_config.lr 1e-06 \
     --grpo_config.kl_weight 0.0 \
     --grpo_config.clip_eps 0.2 \
+    --sampling_config.repetition_penalty 1.2 \
     --reward_config.use_format_reward 

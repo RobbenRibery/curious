@@ -4,7 +4,7 @@ from torch.utils.data import Dataset
 
 from math_verify import parse
 
-from typing import List, Dict, Any
+from typing import List, Dict
 
 
 class GSM8KDataset(Dataset):
