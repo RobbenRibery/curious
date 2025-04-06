@@ -10,7 +10,10 @@ from liger_kernel.transformers import (
 from typing import List, Dict, Optional
 import torch
 
-from curious.prompt import system_prompt
+from curious.prompt import (
+    deepseek_system_prompt,
+    outcome_driven_system_prompt,
+)
 
 
 def load_model_tokenizer(
@@ -53,6 +56,7 @@ def tokenize_questions(
     tokenizer: PreTrainedTokenizer,
     questions: List[str],
     trucation_max_length: int = None,
+    system_prompt: str = deepseek_system_prompt,
 ) -> Dict[str, torch.Tensor]:
     """
     Tokenize a list of questions and answers.

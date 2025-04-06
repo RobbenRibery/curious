@@ -8,22 +8,6 @@ check_shell:
 ENV_NAME = .venv
 PYTHON_VERSION = 3.11
 
-# use this on local 
-.PHONY: init
-init:
-	@echo "##setup the project##"
-	@git init . &> /dev/null
-	@echo "##installing poetry##"
-	@python -m pip install --upgrade pip
-	@pip install poetry -U 
-	@echo "##install dependencies##"
-	@python -m venv .venv 
-	@poetry config virtualenvs.path .venv
-	@poetry config virtualenvs.create false
-	@poetry install
-	@echo "##done !##"
-	@echo "Don't forget to activate the virtual environment: source .venv/bin/activate"
-
 # use this on lighting ai studio
 .PHONY: install 
 install:

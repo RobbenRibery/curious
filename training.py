@@ -57,6 +57,7 @@ class TrainingConfig:
     The reward configuration.
     """
 
+
 def train(args:TrainingConfig, logger: Callable) -> None:
 
     # check that the data mode is train
@@ -131,9 +132,9 @@ def train(args:TrainingConfig, logger: Callable) -> None:
     for batch_idx, batch in enumerate(rollout_data_loader):
         
         print(f"Batch indx {batch_idx}")
-        print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/1024/1024/1024))
-        print("torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/1024/1024/1024))
-        print("torch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/1024/1024/1024))
+        print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/(1024**3)))
+        print("torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/(1024**3)))
+        print("torch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/(1024**3)))
 
         replay_buffer.clear()
         questions = batch["question"]
@@ -220,12 +221,13 @@ def train(args:TrainingConfig, logger: Callable) -> None:
         # log the stats to wandb 
         logger(
             {
-                "train/batch_returns": batch_mean_returns,
-                "train/batch_solved_rate": batch_mean_solved_rate,
+                "train/mean_batch_returns": batch_mean_returns,
+                "train/mean_batch_solved_rate": batch_mean_solved_rate,
                 "train/max_input_length": max_input_length,
-                "train/num_words_in_completions": np.array(num_words_in_completions).mean(),
-                "train/batch_mean_format_returns": batch_mean_format_returns,
-                "train/batch_mean_outcome_returns": batch_mean_outcome_returns,
+                "train/mean_num_words_in_completions": np.array(num_words_in_completions).mean(),
+                "train/mean_batch_format_returns": batch_mean_format_returns,
+                "train/mean_batch_outcome_returns": batch_mean_outcome_returns,
+                "num_batches_visited": batch_idx + 1,
             }
         )
         out_dir = os.path.join(args.base_config.log_dir, args.wandb_config.name)
@@ -285,7 +287,7 @@ def train(args:TrainingConfig, logger: Callable) -> None:
                     max_norm=args.grpo_config.max_grad_norm,
                 )
                 #print(f"{step_epoch}: kl={kl: .4f}, grad_norm={grad_norm: .4f}")
-                wandb.log(
+                logger(
                     {
                         "train/mean_kl": mean_kl, 
                         "train/grad_norm": grad_norm,
@@ -330,6 +332,14 @@ if __name__ == "__main__":
         name=args.wandb_config.name,
         config=args,
     )
+    wandb.define_metric("num_batches_visited")
+    wandb.define_metric("train/mean_batch_returns", step_metric="num_batches_visited")
+    wandb.define_metric("train/mean_batch_solved_rate", step_metric="num_batches_visited")
+    wandb.define_metric("train/max_input_length", step_metric="num_batches_visited")
+    wandb.define_metric("train/mean_num_words_in_completions", step_metric="num_batches_visited")
+    wandb.define_metric("train/mean_batch_format_returns", step_metric="num_batches_visited")
+    wandb.define_metric("train/mean_batch_outcome_returns", step_metric="num_batches_visited")
+    
     logger = wandb.log  
     
     train(args, logger)
