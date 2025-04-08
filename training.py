@@ -16,11 +16,7 @@ from curious.grpo import rollout, sequences_log_probs, group_advantages
 from curious.buffer import ReplayBuffer, Experience, join_experience_batch
 from curious.loss import GRPOLoss, approx_kl_divergence
 from curious.reward import GSM8KRewardModel
-from curious.prompt import (
-    improved_deepseek_system_prompt,
-    deepseek_system_prompt,
-    outcome_driven_system_prompt,
-)
+from curious.prompt import *
 from config import GRPOConfig, WandbConfig, BaseConfig, SamplingConfig, RewardConfig
 
 from lightning import seed_everything

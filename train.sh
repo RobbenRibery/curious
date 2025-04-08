@@ -1,6 +1,6 @@
 export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:128,expandable_segments:True"
 python training.py \
-    --wandb_config.name "grpo-ietrate-prompt[deepseek]-reward[no-format]-kl[0.0]-max_gen[1400]" \
+    --wandb_config.name "grpo-ietrate-prompt[qwen]-reward[no-format]-kl[0.0]-max_gen[1400]" \
     --base_config.checkpoint_interval 50 \
     --base_config.mode "train" \
     --base_config.dataset_name "openai/gsm8k" \
@@ -19,5 +19,5 @@ python training.py \
     --sampling_config.max_new_tokens 1400 \
     --sampling_config.top_p 1.0 \
     --sampling_config.repetition_penalty 1.1 \
-    --sampling_config.system_prompt "deepseek_system_prompt" \
+    --sampling_config.system_prompt "qwen_system_prompt" \
     --reward_config.no-use-format-reward \
