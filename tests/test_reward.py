@@ -1,5 +1,7 @@
 from curious.reward import GSM8KRewardModel, SOLVED_REWARD, NEGATIVE_REWARD, ZERO_REWARD
 from curious.data import GSM8KDataset
+from curious.reward import QWEN_ANSWER_PATTERN
+from curious.prompt import qwen_system_prompt
 from textwrap import dedent
 
 def test_outcome_reward():
@@ -154,3 +156,23 @@ def test_batch_reward():
     assert len(infos) == len(completions)
     assert rewards == [SOLVED_REWARD] * len(completions)
     assert solved_rate == 1.0
+
+def test_qwen_reward():
+    reward_model = GSM8KRewardModel(use_format_reward=False, use_strict_format_reward=False, answer_pattern=QWEN_ANSWER_PATTERN)
+    
+    completion = dedent(
+    """
+    In summary:
+    - Her total earnings were $960;
+    - She had $180 over her goal ($610 minus $790);
+    - The difference was $180; and
+    - Thus, she made an additional $180 above her goal, as calculated previously.
+    The final answer is $\\boxed{180}$ dollars.
+    """
+    ).strip()
+    #print(qwen_system_prompt)
+
+    oracle_answer = "180"
+    answer_parsed, reward, info = reward_model.outcome_reward(completion, oracle_answer)
+    assert reward == SOLVED_REWARD
+    assert info["outcome"] == None

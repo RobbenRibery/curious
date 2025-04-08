@@ -18,7 +18,7 @@ STRICT_FORMAT_PATTERN = (
     r"<answer>(?:(?!<think>|</think>).)*?</answer>)"
 )
 
-QWEN_ANSWER_PATTERN = r"\$\\boxed\{<(\d+(?:\.\d+)?)>\}\$"
+QWEN_ANSWER_PATTERN = r"boxed\{(.*?)\}\$"
 
 def normalize_number(answer: str) -> str:
     """
@@ -94,17 +94,17 @@ class GSM8KRewardModel:
         )
 
         # find all the answer matches
-        answer_match: List[str] | None = re.findall(
-            self.answer_pattern, completion, flags=re.DOTALL
-        )
-
+        answer_match: List[str] | None = []
+        for match_ in re.finditer(self.answer_pattern, completion, flags=re.DOTALL):
+            answer_match.append(match_.group(1))
+        
         # return negative reward in case no answer is found
         if not answer_match:
             return None, NEGATIVE_REWARD, {"outcome": FailureMode.NO_ANSWER}
 
         # get the last answer as the final answer and normalize the parsed answer
         answer_parsed: List[sympy.Expr | str] = parse(
-            answer_match[-1], extraction_mode="any_match"
+            answer_match[-1]
         )
         if not answer_parsed:
             return None, NEGATIVE_REWARD, {"outcome": FailureMode.NO_NUMBER_IN_ANSWER}
