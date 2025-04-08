@@ -97,7 +97,7 @@ class GSM8KRewardModel:
         answer_match: List[str] | None = []
         for match_ in re.finditer(self.answer_pattern, completion, flags=re.DOTALL):
             answer_match.append(match_.group(1))
-        
+
         # return negative reward in case no answer is found
         if not answer_match:
             return None, NEGATIVE_REWARD, {"outcome": FailureMode.NO_ANSWER}

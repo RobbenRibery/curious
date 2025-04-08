@@ -21,4 +21,3 @@ python training.py \
     --sampling_config.repetition_penalty 1.1 \
     --sampling_config.system_prompt "qwen_system_prompt" \
     --reward_config.no-use-format-reward \
-    --reward_config.answer_pattern "QWEN_ANSWER_PATTERN" \

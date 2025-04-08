@@ -124,7 +124,7 @@ class RewardConfig:
     A dataclass for storing the reward configuration.
     """
 
-    answer_pattern: str = ANSWER_PATTERN
+    answer_pattern: str = QWEN_ANSWER_PATTERN
     """
     The pattern to use for the answer.
     """
