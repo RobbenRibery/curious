@@ -39,7 +39,11 @@ def rollout(
 
     # get the parallel rollouts
     pad_token_id = tokenizer.eos_token_id
-    sequence_ids = model.generate(**batch_inputs, generation_config=generation_config)
+    sequence_ids = model.generate(
+        input_ids=batch_inputs["input_ids"],
+        attention_mask=batch_inputs["attention_mask"],
+        generation_config=generation_config
+    )
     
     # get the completions
     completions = tokenizer.batch_decode(

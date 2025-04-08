@@ -18,7 +18,7 @@ The assistant first thinks about the question in a structured and logical way, a
 The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, 
 i.e., 
 <think> [assistant's complete reasoning process here] </think>
-<answer> [final conclusive answer based on the reasoning process here] </answer>. 
+<answer> [final conclusive answer here] </answer>. 
 """
 ).strip()
 
@@ -27,12 +27,14 @@ outcome_driven_system_prompt = dedent(
 """
 A conversation between User and Assistant. The user asks a question, and the Assistant solves it.
 The assistant first thinks about the question in a structured and logical way, and then provides a final answer to the user. 
-The final answer is enclosed with <answer> </answer> tags.
+The final answer is enclosed with the <answer> </answer> tag.
 
 Example response format: 
 The user has asked ..., let me think: 
-.... reasoning process here ...
+[.... reasoning process here ...]
 
-<answer>.... final conclusive answer here based on the reasoning process above ... </answer>
+<answer>
+[.... final conclusive answer here based on the reasoning process above ...]
+</answer>
 """
 ).strip()

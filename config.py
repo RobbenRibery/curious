@@ -10,15 +10,15 @@ class WandbConfig:
     A dataclass for storing the wandb configuration.
     """
 
-    project: str = "gasm8k-qwen-grpo-eval"
+    project: str = "curious"
     """
     The project to use for the wandb.
     """
-    name: str = "eval-grpo-klconstrained-batch8-minibatch32-batch900"
+    name: str = f"curious-{uuid4()}"
     """
     The name to use for the wandb.
     """
-    group: str = "qwen-05b-instruct-gsm8k"
+    group: str = "grpo-iterate"
     """
     The group to use for the wandb.
     """
@@ -51,11 +51,11 @@ class BaseConfig:
     """
     The number of cpu workers to use for the evaluation.
     """
-    mode: str = "test"
+    mode: str = "train"
     """
     The mode to use for the evaluation.
     """
-    log_dir: str = "eval_logs"
+    log_dir: str = "train_logs"
     """
     The directory to use for the evaluation.
     """
@@ -68,7 +68,7 @@ class BaseConfig:
     The maximum length of the model to use for the evaluation.
     """
 
-    checkpoint_dir: str = "checkpoints/checkpoints/step_900"
+    checkpoint_dir: str = "checkpoints/"
     """
     The directory to use for the checkpoint.
     """
@@ -111,6 +111,10 @@ class SamplingConfig:
     repetition_penalty: float = 1.0
     """
     The repetition penalty to use for the sampling.
+    """
+    system_prompt: str = "deepseek_system_prompt"
+    """
+    The system prompt to use for the sampling.
     """
 
 

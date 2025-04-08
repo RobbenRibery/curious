@@ -16,6 +16,11 @@ from curious.grpo import rollout, sequences_log_probs, group_advantages
 from curious.buffer import ReplayBuffer, Experience, join_experience_batch
 from curious.loss import GRPOLoss, approx_kl_divergence
 from curious.reward import GSM8KRewardModel
+from curious.prompt import (
+    improved_deepseek_system_prompt,
+    deepseek_system_prompt,
+    outcome_driven_system_prompt,
+)
 from config import GRPOConfig, WandbConfig, BaseConfig, SamplingConfig, RewardConfig
 
 from lightning import seed_everything
@@ -75,7 +80,7 @@ def train(args:TrainingConfig, logger: Callable) -> None:
     reference_model, _ = load_model_tokenizer(
         args.base_config.model_name, 
         device_map=device, 
-        freeze_model=True
+        freeze_model=True,
     )
     model, tokenizer = load_model_tokenizer(
         args.base_config.model_name, 
@@ -148,6 +153,7 @@ def train(args:TrainingConfig, logger: Callable) -> None:
             tokenizer=tokenizer,
             questions=questions,
             trucation_max_length=args.base_config.model_max_length_inuse,
+            system_prompt= eval(args.sampling_config.system_prompt),
         )
         batch_inputs = {
             k:v.to(device) for k,v in batch_inputs.items()
