@@ -22,6 +22,13 @@ i.e.,
 """
 ).strip()
 
+qwen_system_prompt = dedent(
+"""
+Please reason step by step, and put your final answer within \\boxed{}
+"""
+).strip()
+
+
 
 outcome_driven_system_prompt = dedent(
 """

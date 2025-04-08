@@ -59,6 +59,7 @@ class GRPOLoss(nn.Module):
         self.clip_eps = clip_eps
         self.kl_weight = kl_weight
 
+    @torch.compile(dynamic=True)
     def forward(
         self,
         log_probs: torch.Tensor,

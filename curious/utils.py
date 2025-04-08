@@ -10,11 +10,7 @@ from liger_kernel.transformers import (
 from typing import List, Dict, Optional, Union
 import torch
 
-from curious.prompt import (
-    deepseek_system_prompt,
-    improved_deepseek_system_prompt,
-    outcome_driven_system_prompt,
-)
+from curious.prompt import * 
 
 def load_model_tokenizer(
     model_name_or_path: str,
