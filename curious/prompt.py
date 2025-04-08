@@ -28,8 +28,6 @@ Please reason step by step, and put your final answer within $\\boxed{}$.
 """
 ).strip()
 
-
-
 outcome_driven_system_prompt = dedent(
 """
 A conversation between User and Assistant. The user asks a question, and the Assistant solves it.

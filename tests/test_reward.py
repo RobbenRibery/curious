@@ -162,17 +162,15 @@ def test_qwen_reward():
     
     completion = dedent(
     """
-    In summary:
-    - Her total earnings were $960;
-    - She had $180 over her goal ($610 minus $790);
-    - The difference was $180; and
-    - Thus, she made an additional $180 above her goal, as calculated previously.
-    The final answer is $\\boxed{180}$ dollars.
+     James can carry 10 bags on each trip.
+    If he takes 20 trips a day, then the number of bags he delivers per day is $10 \times 20 = 200$.
+    In 5 days, he will deliver $200 \times 5 = 1000$ bags. The answer is: $\boxed{1000}$
     """
     ).strip()
+    #print(completion)
     #print(qwen_system_prompt)
 
-    oracle_answer = "180"
+    oracle_answer = "1000"
     answer_parsed, reward, info = reward_model.outcome_reward(completion, oracle_answer)
     assert reward == SOLVED_REWARD
     assert info["outcome"] == None
