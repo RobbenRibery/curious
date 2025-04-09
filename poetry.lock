@@ -1036,7 +1036,7 @@ jax = ">=0.5.1"
 msgpack = "*"
 numpy = [
     {version = ">=1.26.0", markers = "python_version >= \"3.12\""},
-    {version = ">=1.23.2", markers = "python_version >= \"3.11\""},
+    {version = ">=1.23.2", markers = "python_version == \"3.11\""},
 ]
 optax = "*"
 orbax-checkpoint = "*"
@@ -1548,7 +1548,7 @@ jaxlib = "0.5.3"
 ml_dtypes = ">=0.4.0"
 numpy = [
     {version = ">=1.26.0", markers = "python_version >= \"3.12\""},
-    {version = ">=1.25", markers = "python_version < \"3.12\""},
+    {version = ">=1.25"},
 ]
 opt_einsum = "*"
 scipy = ">=1.11.1"
@@ -5129,6 +5129,38 @@ tests = ["autopep8", "flake8", "isort", "llnl-hatchet", "numpy", "pytest", "scip
 tutorials = ["matplotlib", "pandas", "tabulate"]
 
 [[package]]
+name = "trl"
+version = "0.16.1"
+description = "Train transformer language models with reinforcement learning."
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "trl-0.16.1-py3-none-any.whl", hash = "sha256:2b893bbed77dce79c88d6e864ce1216641f6587f4a28988281befba1d2a13ae9"},
+    {file = "trl-0.16.1.tar.gz", hash = "sha256:166acab64811acfbaaa3839688547d78fec806f9b12b99497b168431e13968be"},
+]
+
+[package.dependencies]
+accelerate = ">=0.34.0"
+datasets = ">=3.0.0"
+rich = "*"
+transformers = ">=4.46.0"
+
+[package.extras]
+deepspeed = ["deepspeed (>=0.14.4) ; sys_platform != \"win32\""]
+dev = ["Pillow", "Pillow", "bitsandbytes", "bitsandbytes", "deepspeed (>=0.14.4) ; sys_platform != \"win32\"", "deepspeed (>=0.14.4) ; sys_platform != \"win32\"", "diffusers (>=0.18.0)", "diffusers (>=0.18.0)", "fastapi", "fastapi", "liger-kernel (==0.5.3) ; sys_platform != \"win32\"", "liger-kernel (==0.5.3) ; sys_platform != \"win32\"", "llm-blender (>=0.0.2)", "llm-blender (>=0.0.2)", "mergekit (>=0.0.5.1)", "mergekit (>=0.0.5.1)", "openai (>=1.23.2)", "openai (>=1.23.2)", "parameterized", "parameterized", "peft (>=0.8.0)", "peft (>=0.8.0)", "pydantic", "pydantic", "pytest", "pytest", "pytest-cov", "pytest-cov", "pytest-rerunfailures", "pytest-rerunfailures", "pytest-xdist", "pytest-xdist", "requests", "requests", "scikit-learn", "scikit-learn", "uvicorn", "uvicorn", "vllm (>=0.7.0) ; sys_platform != \"win32\"", "vllm (>=0.7.0) ; sys_platform != \"win32\""]
+diffusers = ["diffusers (>=0.18.0)"]
+judges = ["llm-blender (>=0.0.2)", "openai (>=1.23.2)"]
+liger = ["liger-kernel (==0.5.3) ; sys_platform != \"win32\""]
+mergekit = ["mergekit (>=0.0.5.1)"]
+peft = ["peft (>=0.8.0)"]
+quantization = ["bitsandbytes"]
+scikit = ["scikit-learn"]
+test = ["parameterized", "pytest", "pytest-cov", "pytest-rerunfailures", "pytest-xdist"]
+vllm = ["fastapi", "pydantic", "requests", "uvicorn", "vllm (>=0.7.0) ; sys_platform != \"win32\""]
+vlm = ["Pillow"]
+
+[[package]]
 name = "typeguard"
 version = "4.4.2"
 description = "Run-time type checker for Python"
@@ -5764,4 +5796,4 @@ six = "*"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11.0,<3.14"
-content-hash = "8d046b4dd4d96ca6f84034cf99873b0569fcac5db7d3f2a97b0953017b037cfa"
+content-hash = "126a165d18e3d904bdfdf665e11b04ceae976c5a0b8c0dbba92b17b962c120ee"

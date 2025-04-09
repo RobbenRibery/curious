@@ -74,6 +74,42 @@ class GSM8KRewardModel:
 
         self.use_format_reward = use_format_reward
 
+    def get_answer_from_gt(self, answer_text: str) -> Dict[str, str]:
+        """
+        This function is strict that it will guarantee to find a
+        valid answer in the given answer_text, provided that the answer
+        text from the GSM8K Dataset (not generated answer)
+        Any violation of the format will raise an error.
+
+        The ground truth format is a single string with the following rules:
+
+        1. The last line should start with "####"
+        2. The last line should contain only digits
+
+        (Works only on GSM8K data)
+
+        Args:
+            answer_text (str): The answer text from the GMS8K Dataset
+
+        Returns:
+            A dictionary with a single key "answer_str_digit" and the
+            corresponding value as the digit-only answer string.
+        """
+        lines = answer_text.strip().split("\n")
+
+        if "####" not in lines[-1]:
+            raise ValueError(f"Ill-formed answer provided: {answer_text}")
+
+        answer_str: str = lines[-1].replace("####", "").strip()
+        answer_str_digit = answer_str.replace(",", "")
+
+        try:
+            eval(answer_str_digit)
+        except Exception as e:
+            raise ValueError(f"Ill-formed answer provided: {answer_str}") from e
+
+        return {"oracle_answer": answer_str_digit}
+
     def outcome_reward(
         self, completion: str, oracle_answer: str
     ) -> Tuple[Optional[List[sympy.Expr | str]], float, Dict[str, str]]:
@@ -246,3 +282,56 @@ class GSM8KRewardModel:
 
         # return the rewards, infos and the solved rate
         return rewards, infos, sovled_times / len(completions)
+
+    def hf_outcome_reward(
+        self,
+        completions: List[str],
+        canonical_solution: List[str],
+        **kwargs,
+    ) -> List[float]:
+        """
+        Computes the reward for a given completion and oracle answer.
+
+        Args:
+            completions (List[str]): The list of completions.
+            canonical_solution (List[str]): The list of canonical solutions.
+
+        Returns:
+            List[float]: The list of rewards.
+        """
+        rewards:List[float] = []
+        for y_hat, y in zip(completions, canonical_solution):
+            y_hat = y_hat[0]["content"]
+            rewards.append(
+                self.outcome_reward(
+                    y_hat, 
+                    self.get_answer_from_gt(y)["oracle_answer"]
+                )[1]
+            )
+        print(f"Outcome rewards: {rewards}")
+        return rewards
+
+    def hf_format_reward(
+        self,
+        completions: List[str],
+        canonical_solution: List[str],
+        **kwargs,
+    ) -> List[float]:
+        """
+        Computes the reward for a given completion and oracle answer.
+
+        Args:
+            completions (List[str]): The list of completions.
+            canonical_solution (List[str]): The list of canonical solutions.
+
+        Returns:
+            List[float]: The list of rewards.
+        """
+        rewards:List[float] = []
+        for y_hat, _ in zip(completions, canonical_solution):
+            y_hat = y_hat[0]["content"]
+            rewards.append(
+                self.format_reward(y_hat)[1]
+            )
+        print(f"Format rewards: {rewards}")
+        return rewards

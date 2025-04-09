@@ -6,9 +6,54 @@ from transformers import (
     GenerationConfig,
     PreTrainedModel,
 )
+from accelerate.utils import set_seed
+from transformers.generation.utils import GenerateDecoderOnlyOutput
+
 from curious.reward import GSM8KRewardModel
 
-from transformers.generation.utils import GenerateDecoderOnlyOutput
+from concurrent.futures import ThreadPoolExecutor, Future
+
+@torch.no_grad()
+def sample_responses(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizer,
+    batch_inputs: Dict[str, torch.Tensor],
+    generation_config: GenerationConfig,
+    seed: int = 42,
+) -> Dict[str, torch.Tensor]:
+    
+    # set the seed
+    set_seed(seed)
+    group_size = generation_config.num_return_sequences
+
+    num_samples = batch_inputs["input_ids"].shape[0]
+    pad_token_id = tokenizer.eos_token_id
+
+    # get the sequence ids
+    sequence_ids = model.generate(
+        input_ids=batch_inputs["input_ids"].to(model.device),
+        attention_mask=batch_inputs["attention_mask"].to(model.device),
+        generation_config=generation_config
+    )
+
+    # action mask (state that has performed an action = 1)
+    # interpretation: an `action` has been performed to produce the token at the current position
+    action_mask = torch.zeros_like(sequence_ids, dtype=torch.bool)
+    action_mask[:, batch_inputs["input_ids"].shape[1] :] = True
+    action_mask[sequence_ids == pad_token_id] = False
+    action_mask = action_mask[:, 1:]  # (num_samples * group_size, seq_len-1)
+
+    return {
+        "num_samples": num_samples * group_size,
+        "input_ids": batch_inputs["input_ids"].to(device="cpu"),
+        "sequence_ids": sequence_ids.to(device="cpu"),
+        "action_mask": action_mask.to(device="cpu"),
+        "completions": tokenizer.batch_decode(
+            sequence_ids[:, batch_inputs["input_ids"].shape[1] :], 
+            skip_special_tokens=True
+        ),
+    }
+
 
 @torch.no_grad()
 def rollout(
@@ -17,7 +62,10 @@ def rollout(
     batch_inputs: Dict[str, torch.Tensor],
     reward_model: GSM8KRewardModel,
     generation_config: GenerationConfig,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, List[str]]:
+    group_size: int,
+    seed: int = 42,
+    normalize_centered_returns: bool = False,
+) -> Dict[str, torch.Tensor]:
     """
     Performs a rollout of the model.
 
@@ -31,70 +79,96 @@ def rollout(
     Returns:
         tuple: A tuple containing the sequence ids, the returns, the action mask, and the completions.
     """
-    # get the batch size
-    num_samples = batch_inputs["input_ids"].shape[0]
-    oracle_answers = batch_inputs.pop("oracle_answer")
-    num_return_sequences = generation_config.num_return_sequences
-    # num_rollouts = num_samples * num_return_sequences
+    assert generation_config.num_return_sequences == group_size, \
+    f"The number of return sequences must be equal to the group size: {generation_config.num_return_sequences} != {group_size}"
 
-    # get the parallel rollouts
-    pad_token_id = tokenizer.eos_token_id
-    sequence_ids = model.generate(
-        input_ids=batch_inputs["input_ids"],
-        attention_mask=batch_inputs["attention_mask"],
-        generation_config=generation_config
+    # get the batch size
+    oracle_answers = batch_inputs["oracle_answer"]
+    
+    # get the sequence ids
+    sampled_responses = sample_responses(
+        model,
+        tokenizer,
+        batch_inputs,
+        generation_config,
+        seed=seed,
     )
     
-    # get the completions
-    completions = tokenizer.batch_decode(
-        sequence_ids[:, batch_inputs["input_ids"].shape[1] :], 
-        skip_special_tokens=True
+    # get the rewards
+    rewards_out = compute_rewards(
+        reward_model,
+        completions=sampled_responses["completions"],
+        oracle_answers=oracle_answers,
+        group_size=generation_config.num_return_sequences,
     )
 
-    # action mask (state that has performed an action = 1)
-    action_mask = torch.zeros_like(sequence_ids, dtype=torch.bool)
-    action_mask[:, batch_inputs["input_ids"].shape[1] :] = True
-    action_mask[sequence_ids == pad_token_id] = False
-    action_mask = action_mask[:, 1:]  # (num_samples * group_size, seq_len-1)
+    advantages = compute_group_advantages(
+        returns=rewards_out["returns"],
+        normalize=normalize_centered_returns,
+    )
+   
 
     # outputs
+    completions = sampled_responses["completions"]
     num_words_in_completions = [len(completion.split(' ')) for completion in completions]
-    returns = torch.zeros(
-        (num_samples, num_return_sequences),
-        dtype=torch.float,
-        device="cpu",
-    )
-    solved_rates = torch.zeros(
-        (num_samples,), 
-        dtype=torch.float, 
-        device="cpu"
-    )
-    info_list = []
-    
-    # compute the rewards
-    for i in range(0, len(completions), num_return_sequences):
 
-        question_idx = i // num_return_sequences
+    rewards_out.update(
+        {
+            "num_samples": batch_inputs["input_ids"].shape[0] * generation_config.num_return_sequences,
+            "num_samples_per_group": generation_config.num_return_sequences,
+            "sequence_ids": sampled_responses["sequence_ids"],
+            "action_mask": sampled_responses["action_mask"],
+            "advantages": advantages,
+            "num_words_in_completions": torch.IntTensor(num_words_in_completions, device="cpu"),
+            "completions": completions,
+        }
+    )
 
-        group_completions = completions[i : i + num_return_sequences]
-        orcale_answer_replicates = [oracle_answers[question_idx]] * num_return_sequences
+    return rewards_out
+
+
+def compute_rewards(
+    reward_model: GSM8KRewardModel,
+    completions: List[str],
+    oracle_answers: List[str],
+    group_size: int,
+) -> Dict[str, torch.Tensor]:
+    """
+    Computes the rewards for a list of completions and oracle answers.
+    """
+    assert int(len(completions) / len(oracle_answers)) == group_size, \
+    f"The number of completions must be equal to the number of oracle answers times the group size: {len(completions)} != {len(oracle_answers)} * {group_size}"
+
+    returns = []
+    infos = []
+    solved_rates = []
+
+    for begin_idx in range(0, len(completions), group_size):
+
+        end_idx = begin_idx + group_size
+        group_completions = completions[begin_idx:end_idx]
+
+        group_idx = begin_idx // group_size
+        group_oracle_answers = [oracle_answers[group_idx]] * group_size
         
-        rewards, infos, solved_rate = reward_model(
+        group_rewards, group_infos, solved_rate = reward_model(
             group_completions,
-            orcale_answer_replicates,
+            group_oracle_answers,
         )
-        returns[question_idx, :] = torch.tensor(
-            rewards, 
-            dtype=torch.float, 
-            device="cpu",
-        )
-        solved_rates[question_idx] = solved_rate
-        info_list.extend(infos)
 
-    return sequence_ids, returns, solved_rates, action_mask, completions, info_list, num_words_in_completions
+        returns.append(group_rewards)
+        infos.append(group_infos)
+        solved_rates.append(solved_rate)
+    
+    return {
+        "returns": torch.FloatTensor(returns, device="cpu"), # (num_questions, group_size)
+        "infos": infos, # double list (first level: question, second level: group)
+        "solved_rates": torch.FloatTensor(solved_rates, device="cpu"), # (num_questions)
+    }
+
 
 @torch.compile(dynamic=True)
-def group_advantages(returns: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+def compute_group_advantages(returns: torch.Tensor, eps: float = 1e-8, normalize: bool = True) -> torch.Tensor:
     """
     Normalizes the advantages of a group of returns.
 
@@ -105,7 +179,12 @@ def group_advantages(returns: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     Returns:
         torch.Tensor: The normalized advantages. (num_samples, num_return_sequences)
     """
-    return (returns - returns.mean(dim=1, keepdim=True)) / (returns.std(dim=1, keepdim=True) + eps)
+    centered_returns = returns - returns.mean(dim=1, keepdim=True)
+    if normalize:
+        return centered_returns / (centered_returns.std(dim=1, keepdim=True) + eps)
+    else:
+        return centered_returns
+
 
 @torch.compile(dynamic=True)
 def sequence_log_probs_from_logits(
@@ -128,6 +207,7 @@ def sequence_log_probs_from_logits(
     log_sum_exp = logits.logsumexp(dim=-1)  # (num_samples * num_rollouts, seq_len)
     return gathered_logits - log_sum_exp
 
+
 @torch.compile(dynamic=True)
 def sequences_log_probs(
     model: PreTrainedModel,
@@ -147,14 +227,7 @@ def sequences_log_probs(
     Returns:
         torch.Tensor: The log probabilities of the output ids. (num_samples * group_size, seq_len-1, vocab_size)
     """
-    #position_ids = attention_mask.long().cumsum(dim=-1) - 1
-    #position_ids.masked_fill_(mask=(attention_mask == 0), value=1)
-    output = model(
-        input_ids=sequence_ids,
-        attention_mask=attention_mask,
-        #position_ids=position_ids,
-        use_cache=False,
-    )
+    output = model(input_ids=sequence_ids, attention_mask=attention_mask)
     logits = output["logits"]
     del output 
 
@@ -165,6 +238,7 @@ def sequences_log_probs(
     )
     del logits
     return log_probs
+
 
 def sequences_log_probs_with_mask(
     model: PreTrainedModel,
