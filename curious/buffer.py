@@ -57,7 +57,8 @@ def split_experience_batch(experience: Experience) -> List[Experience]:
             single element from the batch. If a field in `experience` is None,
             the corresponding field in the output `Experience` objects will also be None.
     """
-
+    # batch size is not the real batch size here
+    # it is the number of samples in a batch (i.e. number of groups * num_samples)
     batch_size = experience.sequences.size(0)
     batch_data = [{} for _ in range(batch_size)]
     keys = (
@@ -72,7 +73,6 @@ def split_experience_batch(experience: Experience) -> List[Experience]:
     )
     for key in keys:
         value:torch.Tensor = getattr(experience, key)
-        #print(f"{key} -> {type(value)} ({value.shape})")
         if value is None:
             vals: List[None] = [None] * batch_size
             print(f"WARNING: The key {key} is None")
