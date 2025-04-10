@@ -45,9 +45,9 @@ def sample_responses(
 
     return {
         "num_samples": num_samples * group_size,
-        "input_ids": batch_inputs["input_ids"].to(device="cpu"),
-        "sequence_ids": sequence_ids.to(device="cpu"),
-        "action_mask": action_mask.to(device="cpu"),
+        "input_ids": batch_inputs["input_ids"],
+        "sequence_ids": sequence_ids,
+        "action_mask": action_mask,
         "completions": tokenizer.batch_decode(
             sequence_ids[:, batch_inputs["input_ids"].shape[1] :], 
             skip_special_tokens=True
@@ -106,7 +106,6 @@ def rollout(
         returns=rewards_out["returns"],
         normalize=normalize_centered_returns,
     )
-   
 
     # outputs
     completions = sampled_responses["completions"]

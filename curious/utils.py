@@ -4,13 +4,13 @@ from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
 )
-from liger_kernel.transformers import (
-    AutoLigerKernelForCausalLM
-)
 from typing import List, Dict, Optional, Union
 import torch
 
 from curious.prompt import * 
+from liger_kernel.transformers import (
+    AutoLigerKernelForCausalLM
+)
 
 def load_model_tokenizer(
     model_name_or_path: str,
@@ -34,6 +34,7 @@ def load_model_tokenizer(
     """
     tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
     tokenizer.pad_token = tokenizer.eos_token
+
 
     model: PreTrainedModel = AutoLigerKernelForCausalLM.from_pretrained(
         model_name_or_path if checkpoint_path is None else checkpoint_path,

@@ -4,7 +4,7 @@ import torch.nn as nn
 
 from curious.buffer import Experience
 
-
+@torch.compile(dynamic=True)
 def approx_kl_divergence(
     log_probs: torch.Tensor,
     log_probs_ref: torch.Tensor,
@@ -26,7 +26,7 @@ def approx_kl_divergence(
 
     return log_ratio.exp() - log_ratio - 1
 
-
+@torch.compile(dynamic=True)
 def masked_mean(
     tensor: torch.Tensor,
     mask: Optional[torch.Tensor] = None,
@@ -38,9 +38,9 @@ def masked_mean(
     If dim is None, return the mean of the whole tensor.
 
     Args:
-        tensor (torch.Tensor): The tensor to compute the mean of.
-        mask (Optional[torch.Tensor]): The mask to compute the mean of.
-        dim (Optional[int]): The dimension to compute the mean of.
+        tensor (torch.Tensor): The tensor to compute the mean of. (batch_size, seq_len)
+        mask (Optional[torch.Tensor]): The mask to compute the mean of. (batch_size, seq_len)
+        dim (Optional[int]): The dimension to compute the mean of. default to None
 
     Returns:
         torch.Tensor: The mean of the tensor.
@@ -51,13 +51,41 @@ def masked_mean(
     return (tensor * mask).sum(axis=dim) / mask.sum(axis=dim)
 
 
-class GRPOLoss(nn.Module):
-    """GRPO actor loss"""
+class ActorLoss(nn.Module):
 
-    def __init__(self, clip_eps: float, kl_weight: float) -> None:
+    def __init__(
+        self, 
+        epsilon:float = 0.2, 
+        epsilon_high:float = 0.28,
+        kl_weight:float = 0.001, 
+        use_clip_high:bool = False, 
+        use_token_level_loss:bool = False,
+    ) -> None:
+        """
+        Args:
+            epsilon: float, default to 0.2
+            epsilon_high: float, default to 0.28
+            kl_weight: float, default to 0.001
+            use_clip_high: bool, default to False
+            use_token_level_loss: bool, default to False
+        """
         super().__init__()
-        self.clip_eps = clip_eps
+
+        # kl weight
         self.kl_weight = kl_weight
+
+        # surrogate loss clipping
+        self.use_clip_high = use_clip_high
+        self.epsilon_low = epsilon
+
+        if self.use_clip_high:
+            self.epsilon_high = epsilon_high
+        else:
+            self.epsilon_high = epsilon
+
+        # token-level loss vs group-level loss
+        self.use_token_level_loss = use_token_level_loss
+        self.aggregation_dim = None if use_token_level_loss else -1
 
     @torch.compile(dynamic=True)
     def forward(
@@ -65,29 +93,41 @@ class GRPOLoss(nn.Module):
         log_probs: torch.Tensor,
         experience: Experience,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute the actor loss.
 
+        Args:
+            log_probs (torch.Tensor): The log probabilities of the current model. (batch_size, seq_len)
+            experience (Experience): The experience.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]: The actor loss and the KL divergence.
+        """
         old_log_probs = experience.action_log_probs
-        log_probs_ref = experience.log_probs_ref
         action_mask = experience.action_mask
         advantages = experience.advantages
 
-        kl = approx_kl_divergence(
-            log_probs=log_probs,
-            log_probs_ref=log_probs_ref,
-            action_mask=action_mask,
-        )
+        if self.kl_weight > 0:
+            kl = approx_kl_divergence(
+                log_probs=log_probs,
+                log_probs_ref=experience.log_probs_ref,
+                action_mask=action_mask,
+            )
+            kl_loss = self.kl_weight * kl
+        else:
+            kl_loss = torch.tensor(0.0)
 
+        # importance sampling ratio
         ratio = (log_probs - old_log_probs).exp()
-        advantages = advantages.unsqueeze(-1)
 
+        # surrogate loss 
         surr1 = ratio * advantages
-        surr2 = ratio.clamp(1 - self.clip_eps, 1 + self.clip_eps) * advantages
+        surr2 = ratio.clamp(1 - self.epsilon_low, 1 + self.epsilon_high) * advantages
+
         policy_loss = -torch.min(surr1, surr2)
-        kl_loss = self.kl_weight * kl
         loss = policy_loss + kl_loss
 
-        loss = masked_mean(loss, action_mask, dim=-1).mean()
+        # token-level loss vs group-level loss
+        loss = masked_mean(loss, action_mask, dim=self.aggregation_dim).mean()
 
-        # TODO:
-        # log which loss term would dominate
         return loss, kl.mean()
