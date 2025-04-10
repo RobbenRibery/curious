@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from uuid import uuid4
 
-from curious.reward import THINK_PATTERN, ANSWER_PATTERN
+from curious.reward import * 
 
 @dataclass
 class WandbConfig:
@@ -14,12 +14,11 @@ class WandbConfig:
     """
     The project to use for the wandb.
     """
-
     name: str = f"curious-{uuid4()}"
     """
     The name to use for the wandb.
     """
-    group: str = "grpo-reproduction"
+    group: str = "grpo-iterate"
     """
     The group to use for the wandb.
     """
@@ -52,11 +51,11 @@ class BaseConfig:
     """
     The number of cpu workers to use for the evaluation.
     """
-    mode: str = "test"
+    mode: str = "train"
     """
     The mode to use for the evaluation.
     """
-    log_dir: str = "logs"
+    log_dir: str = "train_logs"
     """
     The directory to use for the evaluation.
     """
@@ -68,10 +67,12 @@ class BaseConfig:
     """
     The maximum length of the model to use for the evaluation.
     """
-    checkpoint_path: str = "checkpoints"
+
+    checkpoint_dir: str = "checkpoints/"
     """
-    The path to the checkpoint to use for the evaluation.
+    The directory to use for the checkpoint.
     """
+
     checkpoint_interval: int = 100
     """
     The interval to use for the checkpoint.
@@ -103,6 +104,18 @@ class SamplingConfig:
     """
     Whether to sample from the model.
     """
+    use_cache:bool = True
+    """
+    Whether to use kv cache during inference
+    """
+    repetition_penalty: float = 1.0
+    """
+    The repetition penalty to use for the sampling.
+    """
+    system_prompt: str = "deepseek_system_prompt"
+    """
+    The system prompt to use for the sampling.
+    """
 
 
 @dataclass
@@ -111,7 +124,7 @@ class RewardConfig:
     A dataclass for storing the reward configuration.
     """
 
-    answer_pattern: str = ANSWER_PATTERN
+    answer_pattern: str = QWEN_ANSWER_PATTERN
     """
     The pattern to use for the answer.
     """
@@ -119,7 +132,7 @@ class RewardConfig:
     """
     The pattern to use for the think.
     """
-    use_format_reward: bool = False
+    use_format_reward: bool = True
     """
     Whether to use the format reward.
     """

@@ -12,10 +12,11 @@ from transformers import GenerationConfig
 
 from curious.data import GSM8KDataset
 from curious.utils import tokenize_questions, load_model_tokenizer
-from curious.grpo import rollout, sequences_log_probs, group_advantages
+from curious.sampling import rollout, sequences_log_probs, compute_group_advantages
 from curious.buffer import ReplayBuffer, Experience, join_experience_batch
 from curious.loss import GRPOLoss, approx_kl_divergence
 from curious.reward import GSM8KRewardModel
+from curious.prompt import *
 from config import GRPOConfig, WandbConfig, BaseConfig, SamplingConfig, RewardConfig
 
 from lightning import seed_everything
@@ -57,7 +58,10 @@ class TrainingConfig:
     The reward configuration.
     """
 
+
 def train(args:TrainingConfig, logger: Callable) -> None:
+
+    run_name = args.wandb_config.name.replace("-", "_")
 
     # check that the data mode is train
     assert args.base_config.mode == "train"
@@ -72,7 +76,7 @@ def train(args:TrainingConfig, logger: Callable) -> None:
     reference_model, _ = load_model_tokenizer(
         args.base_config.model_name, 
         device_map=device, 
-        freeze_model=True
+        freeze_model=True,
     )
     model, tokenizer = load_model_tokenizer(
         args.base_config.model_name, 
@@ -126,14 +130,16 @@ def train(args:TrainingConfig, logger: Callable) -> None:
         do_sample =args.sampling_config.do_sample,
         eos_token_id=tokenizer.eos_token_id,
         pad_token_id= tokenizer.eos_token_id,
+        use_cache=args.sampling_config.use_cache,
+        repetition_penalty=args.sampling_config.repetition_penalty,
     )
 
     for batch_idx, batch in enumerate(rollout_data_loader):
         
         print(f"Batch indx {batch_idx}")
-        print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/1024/1024/1024))
-        print("torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/1024/1024/1024))
-        print("torch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/1024/1024/1024))
+        print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/(1024**3)))
+        print("torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/(1024**3)))
+        print("torch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/(1024**3)))
 
         replay_buffer.clear()
         questions = batch["question"]
@@ -143,6 +149,7 @@ def train(args:TrainingConfig, logger: Callable) -> None:
             tokenizer=tokenizer,
             questions=questions,
             trucation_max_length=args.base_config.model_max_length_inuse,
+            system_prompt= eval(args.sampling_config.system_prompt),
         )
         batch_inputs = {
             k:v.to(device) for k,v in batch_inputs.items()
@@ -152,9 +159,10 @@ def train(args:TrainingConfig, logger: Callable) -> None:
 
         # Rollout phase of GRPO
         with torch.no_grad():
+            
             model.eval()
             # rollout
-            sequence_ids, returns, solved_rate, action_mask, completions, info_list, num_words_in_completions = rollout(
+            rollout_out = rollout(
                 model,
                 tokenizer,
                 batch_inputs,
@@ -164,7 +172,7 @@ def train(args:TrainingConfig, logger: Callable) -> None:
             # sequence_ids: (num_samples * group_size, seq_len)
             # action_mask: (num_samples * group_size, seq_len)
             # completions: (num_samples * group_size)
-            # returns: (num_samples * group_size)
+            # returns: (num_samples, group_size)
             # solved_rate: (num_samples, )
 
             batch_mean_format_returns = np.array([x["format_reward"] for x in info_list]).mean()
@@ -173,7 +181,10 @@ def train(args:TrainingConfig, logger: Callable) -> None:
             batch_mean_solved_rate = solved_rate.mean()
             print(f"batch_idx: {batch_idx} | returns: {batch_mean_returns.item()} | solved_rate: {batch_mean_solved_rate.item()} | format_returns: {batch_mean_format_returns} | outcome_returns: {batch_mean_outcome_returns}")
 
-            advantages = group_advantages(returns) # (num_samples, group_size)
+            advantages = compute_group_advantages(returns) # (num_samples, group_size)
+            returns = returns.reshape(-1)
+            advantages = advantages.reshape(-1)
+            
             attention_mask = sequence_ids != pad_token_id # (num_samples * group_size, seq_len)
 
             log_probs = sequences_log_probs(
@@ -217,12 +228,13 @@ def train(args:TrainingConfig, logger: Callable) -> None:
         # log the stats to wandb 
         logger(
             {
-                "train/batch_returns": batch_mean_returns,
-                "train/batch_solved_rate": batch_mean_solved_rate,
+                "train/mean_batch_returns": batch_mean_returns,
+                "train/mean_batch_solved_rate": batch_mean_solved_rate,
                 "train/max_input_length": max_input_length,
-                "train/num_words_in_completions": np.array(num_words_in_completions).mean(),
-                "train/batch_mean_format_returns": batch_mean_format_returns,
-                "train/batch_mean_outcome_returns": batch_mean_outcome_returns,
+                "train/mean_num_words_in_completions": np.array(num_words_in_completions).mean(),
+                "train/mean_batch_format_returns": batch_mean_format_returns,
+                "train/mean_batch_outcome_returns": batch_mean_outcome_returns,
+                "num_batches_visited": batch_idx + 1,
             }
         )
         out_dir = os.path.join(args.base_config.log_dir, args.wandb_config.name)
@@ -282,7 +294,7 @@ def train(args:TrainingConfig, logger: Callable) -> None:
                     max_norm=args.grpo_config.max_grad_norm,
                 )
                 #print(f"{step_epoch}: kl={kl: .4f}, grad_norm={grad_norm: .4f}")
-                wandb.log(
+                logger(
                     {
                         "train/mean_kl": mean_kl, 
                         "train/grad_norm": grad_norm,
@@ -297,23 +309,29 @@ def train(args:TrainingConfig, logger: Callable) -> None:
                 torch.cuda.empty_cache()
 
         if (
-            args.base_config.checkpoint_path is not None
+            args.base_config.checkpoint_dir is not None
             and args.base_config.checkpoint_interval is not None
             and (batch_idx + 1) % args.base_config.checkpoint_interval == 0
         ):
             model.save_pretrained(
                 os.path.join(
-                    args.base_config.checkpoint_path, 
-                    f"step_{batch_idx + 1}"
+                    *[
+                        args.base_config.checkpoint_dir, 
+                        run_name,
+                        f"step_{batch_idx + 1}"
+                    ]
                 )
             )
         del batch_inputs
 
-    if args.base_config.checkpoint_path is not None:
+    if args.base_config.checkpoint_dir is not None:
         model.save_pretrained(
             os.path.join(
-                args.base_config.checkpoint_path, 
-                f"step_{batch_idx + 1}"
+                *[
+                    args.base_config.checkpoint_dir, 
+                    run_name,
+                    f"step_{batch_idx + 1}_final"
+                ]
             )
         )
 
@@ -327,6 +345,14 @@ if __name__ == "__main__":
         name=args.wandb_config.name,
         config=args,
     )
+    wandb.define_metric("num_batches_visited")
+    wandb.define_metric("train/mean_batch_returns", step_metric="num_batches_visited")
+    wandb.define_metric("train/mean_batch_solved_rate", step_metric="num_batches_visited")
+    wandb.define_metric("train/max_input_length", step_metric="num_batches_visited")
+    wandb.define_metric("train/mean_num_words_in_completions", step_metric="num_batches_visited")
+    wandb.define_metric("train/mean_batch_format_returns", step_metric="num_batches_visited")
+    wandb.define_metric("train/mean_batch_outcome_returns", step_metric="num_batches_visited")
+    
     logger = wandb.log  
     
     train(args, logger)

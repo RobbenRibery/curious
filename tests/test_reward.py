@@ -1,5 +1,7 @@
 from curious.reward import GSM8KRewardModel, SOLVED_REWARD, NEGATIVE_REWARD, ZERO_REWARD
 from curious.data import GSM8KDataset
+from curious.reward import QWEN_ANSWER_PATTERN
+from curious.prompt import qwen_system_prompt
 from textwrap import dedent
 
 def test_outcome_reward():
@@ -154,3 +156,21 @@ def test_batch_reward():
     assert len(infos) == len(completions)
     assert rewards == [SOLVED_REWARD] * len(completions)
     assert solved_rate == 1.0
+
+def test_qwen_reward():
+    reward_model = GSM8KRewardModel(use_format_reward=False, use_strict_format_reward=False, answer_pattern=QWEN_ANSWER_PATTERN)
+    
+    completion = dedent(
+    """
+     James can carry 10 bags on each trip.
+    If he takes 20 trips a day, then the number of bags he delivers per day is $10 \times 20 = 200$.
+    In 5 days, he will deliver $200 \times 5 = 1000$ bags. The answer is: $\boxed{1000}$
+    """
+    ).strip()
+    #print(completion)
+    #print(qwen_system_prompt)
+
+    oracle_answer = "1000"
+    answer_parsed, reward, info = reward_model.outcome_reward(completion, oracle_answer)
+    assert reward == SOLVED_REWARD
+    assert info["outcome"] == None

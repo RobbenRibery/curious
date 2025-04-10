@@ -7,16 +7,15 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from transformers import GenerationConfig, PreTrainedTokenizer, PreTrainedModel
+from liger_kernel.transformers import AutoLigerKernelForCausalLM
 
 from curious.data import GSM8KDataset
 from curious.utils import load_model_tokenizer, tokenize_questions
-from curious.reward import GSM8KRewardModel, THINK_PATTERN, ANSWER_PATTERN
+from curious.reward import GSM8KRewardModel
 from config import WandbConfig, BaseConfig, SamplingConfig, RewardConfig
-
 
 from lightning import seed_everything
 from uuid import uuid4
-
 
 
 @dataclass
@@ -70,7 +69,7 @@ def evaluate(
     text_logger = kwargs.get("text_logger", lambda x: print(x))
 
     out_dir = os.path.join(
-        config.base_config.out_dir,
+        config.base_config.log_dir,
         os.path.basename(config.base_config.model_name.replace("-", "_")),
         os.path.basename(config.base_config.dataset_name.replace("-", "_")),
         config.wandb_config.name.replace("-", "_"),
@@ -106,16 +105,6 @@ def evaluate(
         think_pattern=config.reward_config.think_pattern,
         use_format_reward=config.reward_config.use_format_reward,
     )
-    # sampling config
-    sampling_config = GenerationConfig(
-        max_new_tokens=config.sampling_config.max_new_tokens,
-        temperature=config.sampling_config.temperature,
-        top_p=config.sampling_config.top_p,
-        top_k=config.sampling_config.top_k,
-        do_sample=config.sampling_config.do_sample,
-        eos_token_id=tokenizer.eos_token_id,
-        pad_token_id=tokenizer.eos_token_id,
-    )
 
     rewards: List[float] = []
     infos: List[Dict[str, str]] = []
@@ -133,8 +122,17 @@ def evaluate(
 
         # Get the model predictions
         seq_ids = model.generate(
-            **batch_inputs,
-            generation_config=sampling_config,
+            input_ids = batch_inputs["input_ids"],
+            attention_mask = batch_inputs["attention_mask"],
+            max_new_tokens=config.sampling_config.max_new_tokens,
+            temperature=config.sampling_config.temperature,
+            top_p=config.sampling_config.top_p,
+            top_k=config.sampling_config.top_k,
+            do_sample=config.sampling_config.do_sample,
+            eos_token_id=tokenizer.eos_token_id,
+            pad_token_id=tokenizer.eos_token_id,
+            use_cache=config.sampling_config.use_cache, 
+            repetition_penalty=config.sampling_config.repetition_penalty,
         )
 
         # Decode the generations
@@ -152,11 +150,16 @@ def evaluate(
         infos.extend(batch_infos)
         solved_rates.append(batch_solved_rate)
 
+        batch_mean_format_returns = np.array([x["format_reward"] for x in batch_infos]).mean()
+        batch_mean_outcome_returns = np.array([x["outcome_reward"] for x in batch_infos]).mean()
+
         # Log the rewards and the solved rate
         logger(
             {
                 "eval/batch_rewards": np.array(batch_rewards).mean(),
                 "eval/batch_solved_rate": batch_solved_rate,
+                "eval/batch_mean_format_returns": batch_mean_format_returns,
+                "eval/batch_mean_outcome_returns": batch_mean_outcome_returns,
             }
         )
         text_logger(
@@ -194,12 +197,14 @@ def evaluate(
         torch.cuda.empty_cache()
 
     # Log the mean rewards and the mean solved rate
+    mean_pass1 = np.array(solved_rates).mean()
     logger(
         {
             "eval/mean_rewards": np.array(rewards).mean(),
-            "eval/mean_solved_rate": np.array(solved_rates).mean(),
+            "eval/mean_solved_rate": mean_pass1,
         }
     )
+    print(f"#### Mean pass@1: {mean_pass1}")
 
     # Log the text table
     logger({"eval/text_table": text_table})
@@ -208,7 +213,6 @@ def evaluate(
 
 
 if __name__ == "__main__":
-
 
 
     # Parse the command line arguments
@@ -233,7 +237,9 @@ if __name__ == "__main__":
 
     # Load the model
     model, tokenizer = load_model_tokenizer(
-        config.base_config.model_name, freeze_model=True
+        config.base_config.model_name, 
+        freeze_model=True,
+        checkpoint_path=config.base_config.checkpoint_dir,
     )
 
     # Evaluate the model
