@@ -25,6 +25,7 @@ import numpy as np
 
 from dataclasses import dataclass
 import tyro 
+import gc
 
 @dataclass
 class TrainingConfig:
@@ -238,6 +239,7 @@ def train(args:TrainingConfig, logger: Callable) -> None:
         del sequence_ids
         del action_mask
         del rollout_out
+        gc.collect()
         torch.cuda.empty_cache()
         ### ----- Rollout phase END ----- ###
 
@@ -325,6 +327,7 @@ def train(args:TrainingConfig, logger: Callable) -> None:
                 del grad_norm
                 del loss 
                 del mean_kl
+                gc.collect()
                 torch.cuda.empty_cache()
                 
                 logger(
