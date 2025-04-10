@@ -141,7 +141,7 @@ def compute_rewards(
 
     returns = []
     infos = []
-    solved_rates = []
+    solved_masks = []
 
     for begin_idx in range(0, len(completions), group_size):
 
@@ -151,21 +151,20 @@ def compute_rewards(
         group_idx = begin_idx // group_size
         group_oracle_answers = [oracle_answers[group_idx]] * group_size
         
-        group_rewards, group_infos, solved_rate = reward_model(
+        group_rewards, group_infos, solved = reward_model(
             group_completions,
             group_oracle_answers,
         )
 
         returns.append(group_rewards)
         infos.append(group_infos)
-        solved_rates.append(solved_rate)
+        solved_masks.append(solved)
     
     return {
         "returns": torch.FloatTensor(returns, device="cpu"), # (num_questions, group_size)
+        "solved_masks": torch.FloatTensor(solved_masks, device="cpu"), # (num_questions, group_size)
         "infos": infos, # double list (first level: question, second level: group)
-        "solved_rates": torch.FloatTensor(solved_rates, device="cpu"), # (num_questions)
     }
-
 
 @torch.compile(dynamic=True)
 def compute_group_advantages(returns: torch.Tensor, eps: float = 1e-8, normalize: bool = True) -> torch.Tensor:

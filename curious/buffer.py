@@ -1,5 +1,5 @@
 from dataclasses import dataclass, fields
-from typing import Optional, Self, List
+from typing import Optional, Self, List, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -45,7 +45,7 @@ class Experience:
 def split_experience_batch(experience: Experience) -> List[Experience]:
     """
     Splits a single `Experience` object into a list of `Experience` objects,
-    where each object corresponds to a batch element.
+    where each object corresponds to a single instance.
 
     Args:
         experience (Experience): The `Experience` object containing batched data.
@@ -75,18 +75,15 @@ def split_experience_batch(experience: Experience) -> List[Experience]:
         #print(f"{key} -> {type(value)} ({value.shape})")
         if value is None:
             vals: List[None] = [None] * batch_size
+            print(f"WARNING: The key {key} is None")
         else:
-            vals: tuple[torch.Tensor, ...] = torch.unbind(value)
+            vals: Tuple[torch.Tensor, ...] = torch.unbind(value)
         # assert batch_size == len(vals), print(key, batch_size, len(vals))
         for i, v in enumerate(vals):
-            if key == "solved_rate":
-                group_size = batch_size // len(vals)
-                # print(i, group_size, v)
-                for j in range(i * group_size, (i + 1) * group_size):
-                    batch_data[j][key] = v
-            else:
-                batch_data[i][key] = v
-    out_exp = []
+            batch_data[i][key] = v
+
+    # convert the batch data to a list of experiences
+    out_exp: List[Experience] = []
     for i, data in enumerate(batch_data):
         try:
             exp = Experience(**data)
@@ -146,6 +143,9 @@ def join_experience_batch(items: List[Experience]) -> Experience:
 
 
 class ReplayBuffer:
+    """
+    A buffer that stores experiences.
+    """
     def __init__(self, limit: int = 0) -> None:
         """
         Initialize a ReplayBuffer with a given buffer limit.
@@ -157,18 +157,37 @@ class ReplayBuffer:
         self.items: list[Experience] = []
 
     def append(self, experience: Experience) -> None:
+        """
+        Append an experience to the buffer.
+
+        Args:
+            experience (Experience): The experience to append.
+
+        Returns:
+            None
+        """
         items = split_experience_batch(experience)
         self.items.extend(items)
         if self.limit > 0:
             samples_to_remove = len(self.items) - self.limit
             if samples_to_remove > 0:
+                # remove the oldest experiences
                 self.items = self.items[samples_to_remove:]
 
     def clear(self) -> None:
+        """
+        Clear the buffer.
+        """
         self.items.clear()
 
     def __len__(self) -> int:
+        """
+        Get the number of experiences in the buffer.
+        """
         return len(self.items)
 
     def __getitem__(self, idx: int) -> Experience:
+        """
+        Get an experience from the buffer.
+        """
         return self.items[idx]

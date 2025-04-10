@@ -269,7 +269,7 @@ class GSM8KRewardModel:
         # compute the rewards and infos
         rewards, infos = [], []
         
-        sovled_times = 0
+        solved_masks:List[int] = []
         for completion, oracle_answer in zip(completions, oracle_answers):
             # compute the reward and info
             reward, info = self.instance_reward(completion, oracle_answer)
@@ -278,10 +278,12 @@ class GSM8KRewardModel:
 
             # update the solved times
             if info["outcome"] is None and info["format_"] is None:
-                sovled_times += 1
+                solved_masks.append(1)
+            else:
+                solved_masks.append(0)
 
         # return the rewards, infos and the solved rate
-        return rewards, infos, sovled_times / len(completions)
+        return rewards, infos, solved_masks
 
     def hf_outcome_reward(
         self,

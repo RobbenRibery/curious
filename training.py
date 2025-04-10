@@ -12,7 +12,7 @@ from transformers import GenerationConfig
 
 from curious.data import GSM8KDataset
 from curious.utils import tokenize_questions, load_model_tokenizer
-from curious.grpo import rollout, sequences_log_probs, group_advantages
+from curious.sampling import rollout, sequences_log_probs, compute_group_advantages
 from curious.buffer import ReplayBuffer, Experience, join_experience_batch
 from curious.loss import GRPOLoss, approx_kl_divergence
 from curious.reward import GSM8KRewardModel
@@ -159,9 +159,10 @@ def train(args:TrainingConfig, logger: Callable) -> None:
 
         # Rollout phase of GRPO
         with torch.no_grad():
+            
             model.eval()
             # rollout
-            sequence_ids, returns, solved_rate, action_mask, completions, info_list, num_words_in_completions = rollout(
+            rollout_out = rollout(
                 model,
                 tokenizer,
                 batch_inputs,
@@ -180,7 +181,7 @@ def train(args:TrainingConfig, logger: Callable) -> None:
             batch_mean_solved_rate = solved_rate.mean()
             print(f"batch_idx: {batch_idx} | returns: {batch_mean_returns.item()} | solved_rate: {batch_mean_solved_rate.item()} | format_returns: {batch_mean_format_returns} | outcome_returns: {batch_mean_outcome_returns}")
 
-            advantages = group_advantages(returns) # (num_samples, group_size)
+            advantages = compute_group_advantages(returns) # (num_samples, group_size)
             returns = returns.reshape(-1)
             advantages = advantages.reshape(-1)
             
