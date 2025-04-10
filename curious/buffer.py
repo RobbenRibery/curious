@@ -4,10 +4,15 @@ from typing import Optional, Self, List, Tuple
 import torch
 import torch.nn.functional as F
 
-
-def zero_pad_sequences(
-    sequences: List[torch.Tensor], side: str = "left"
-) -> torch.Tensor:
+def zero_pad_sequences(sequences: List[torch.Tensor], side: str = "left") -> torch.Tensor:
+    """
+    Zero pad sequences to the same length.
+    Args:
+        sequences: A list of torch.Tensor objects.
+        side: A string that can be either "left" or "right".
+    Returns:
+        A torch.Tensor object.
+    """
     assert side in ("left", "right")
     max_len = max(
         seq.size(0) for seq in sequences
@@ -19,18 +24,22 @@ def zero_pad_sequences(
         padded_sequences.append(F.pad(seq, padding))  # pad the sequence
     return torch.stack(padded_sequences, dim=0)  # stack the padded sequences
 
-
 @dataclass
 class Experience:
+    """
+    A 1/2 Dimensional representation of a collection of experiences.
+    """
     sequences: torch.Tensor  # (num_samples * group_size, seq_len)
     action_log_probs: torch.Tensor  # (num_samples * group_size, seq_len-1)
-    log_probs_ref: torch.Tensor  # (num_samples * group_size, seq_len-1)
-    returns: Optional[torch.Tensor]  # (num_samples * group_size)
-    solved_rate: Optional[torch.Tensor]  # (num_samples)
-    advantages: Optional[torch.Tensor]  # (num_samples * group_size)
-    attention_mask: Optional[torch.Tensor]  # (num_samples * group_size, seq_len)
-    action_mask: Optional[torch.Tensor]  # (num_samples * group_size, seq_len-1)
-    kl: Optional[torch.Tensor] = None  # (num_samples * group_size, seq_len-1) (boolean)
+    attention_mask: torch.Tensor  # (num_samples * group_size, seq_len)
+    action_mask: torch.Tensor  # (num_samples * group_size, seq_len-1)
+
+    returns: torch.Tensor  # (num_samples * group_size)
+    solved_mask: torch.Tensor  # (num_samples * group_size)
+    advantages: torch.Tensor  # (num_samples * group_size)
+
+    kl: Optional[torch.Tensor]  = None # (num_samples * group_size, seq_len-1) (boolean)
+    log_probs_ref: Optional[torch.Tensor] = None # (num_samples * group_size, seq_len-1)
 
     def to(self, device: torch.device) -> Self:
         members = {}
@@ -40,6 +49,17 @@ class Experience:
                 v = v.to(device=device)
             members[field.name] = v
         return Experience(**members)
+    
+    keys = [
+        "sequences",
+        "action_log_probs",
+        "log_probs_ref",
+        "returns",
+        "solved_mask",
+        "advantages",
+        "attention_mask",
+        "action_mask",
+    ]
 
 
 def split_experience_batch(experience: Experience) -> List[Experience]:
@@ -61,39 +81,20 @@ def split_experience_batch(experience: Experience) -> List[Experience]:
     # it is the number of samples in a batch (i.e. number of groups * num_samples)
     batch_size = experience.sequences.size(0)
     batch_data = [{} for _ in range(batch_size)]
-    keys = (
-        "sequences",
-        "action_log_probs",
-        "log_probs_ref",
-        "returns",
-        "solved_rate",
-        "advantages",
-        "attention_mask",
-        "action_mask",
-    )
+    keys = experience.keys
+
     for key in keys:
         value:torch.Tensor = getattr(experience, key)
         if value is None:
             vals: List[None] = [None] * batch_size
-            print(f"WARNING: The key {key} is None")
         else:
             vals: Tuple[torch.Tensor, ...] = torch.unbind(value)
-        # assert batch_size == len(vals), print(key, batch_size, len(vals))
+       
         for i, v in enumerate(vals):
             batch_data[i][key] = v
 
     # convert the batch data to a list of experiences
-    out_exp: List[Experience] = []
-    for i, data in enumerate(batch_data):
-        try:
-            exp = Experience(**data)
-            out_exp.append(exp)
-        except Exception as e:
-            print(i, len(batch_data))
-            print(data.keys())
-            print(data)
-            raise e
-    return out_exp
+    return [Experience(**data) for data in batch_data]
 
 
 def join_experience_batch(items: List[Experience]) -> Experience:
@@ -112,31 +113,20 @@ def join_experience_batch(items: List[Experience]) -> Experience:
             output `Experience` will also be None.
     """
     batch_data = {}
-    keys = (
-        "sequences",
-        "action_log_probs",
-        "log_probs_ref",
-        "returns",
-        "solved_rate",
-        "advantages",
-        "attention_mask",
-        "action_mask",
-    )
+    keys = items[0].keys
 
     for key in keys:
         # get the values for this key from all the experiences within the batch
         vals: List[torch.Tensor] = [getattr(item, key) for item in items]
-
+        
         # if all the values are not None, concatenate them
-        if all(v is not None for v in vals):
-            # print(key, len(vals), vals[0].shape)
-            if key in {"returns", "solved_rate", "advantages"}:
-                data = torch.stack(vals, dim=0).reshape(-1)
-            else:
-                data = zero_pad_sequences(vals, "left")
+        if all(v is not None for v in vals):            
+            data = torch.stack(vals, dim=0) #zero_pad_sequences(vals, "left")
+            # for 1 dimensional data, stack the values and reshape them
+            if key in {"returns", "solved_mask", "advantages"}:
+                data = data.reshape(-1)
         else:
             data = None
-        # print(key, data.shape)
         batch_data[key] = data
 
     return Experience(**batch_data)
