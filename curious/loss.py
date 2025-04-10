@@ -36,7 +36,7 @@ def masked_mean(
     Compute the mean of the tensor over the specified dimension.
     If mask is None, return the mean of the whole tensor.
     If dim is None, return the mean of the whole tensor.
-    
+
     Args:
         tensor (torch.Tensor): The tensor to compute the mean of.
         mask (Optional[torch.Tensor]): The mask to compute the mean of.
@@ -47,7 +47,7 @@ def masked_mean(
     """
     if mask is None:
         return tensor.mean(axis=dim)
-    # when dim == None, return the mean of the whole tensor
+    # when dim == None, return the mean of the whole tensor
     return (tensor * mask).sum(axis=dim) / mask.sum(axis=dim)
 
 
@@ -59,6 +59,7 @@ class GRPOLoss(nn.Module):
         self.clip_eps = clip_eps
         self.kl_weight = kl_weight
 
+    @torch.compile(dynamic=True)
     def forward(
         self,
         log_probs: torch.Tensor,
@@ -77,7 +78,7 @@ class GRPOLoss(nn.Module):
         )
 
         ratio = (log_probs - old_log_probs).exp()
-        advantages = advantages.unsqueeze(-1) 
+        advantages = advantages.unsqueeze(-1)
 
         surr1 = ratio * advantages
         surr2 = ratio.clamp(1 - self.clip_eps, 1 + self.clip_eps) * advantages
@@ -87,6 +88,6 @@ class GRPOLoss(nn.Module):
 
         loss = masked_mean(loss, action_mask, dim=-1).mean()
 
-        # TODO: 
-        # log which loss term would dominate
+        # TODO:
+        # log which loss term would dominate
         return loss, kl.mean()
