@@ -1,4 +1,4 @@
-from typing import List, Tuple, Dict
+from typing import List, Dict
 
 import torch
 from transformers import (
@@ -10,8 +10,6 @@ from accelerate.utils import set_seed
 from transformers.generation.utils import GenerateDecoderOnlyOutput
 
 from curious.reward import GSM8KRewardModel
-
-from concurrent.futures import ThreadPoolExecutor, Future
 
 @torch.no_grad()
 def sample_responses(

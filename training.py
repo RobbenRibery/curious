@@ -1,7 +1,7 @@
 import os 
 os.environ["TOKENIZERS_PARALLELIS"] = "true"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-from typing import Callable
+from typing import Callable, List, Dict, Any, Tuple
 
 import torch 
 from torch.utils.data import DataLoader 
@@ -11,13 +11,15 @@ import torch.optim as optim
 from transformers import GenerationConfig
 
 from curious.data import GSM8KDataset
-from curious.utils import tokenize_questions, load_model_tokenizer
-from curious.sampling import rollout, sequences_log_probs, compute_group_advantages
+from curious.utils import LOGGING_TEMPLATE, load_model_tokenizer
+from curious.sampling import rollout, sequences_log_probs
 from curious.buffer import ReplayBuffer, Experience, join_experience_batch
-from curious.loss import approx_kl_divergence, ActorLoss
+from curious.loss import ActorLoss, approx_kl_divergence
 from curious.reward import GSM8KRewardModel
 from curious.prompt import *
+
 from config import GRPOConfig, WandbConfig, BaseConfig, SamplingConfig, RewardConfig
+from evaluate import FixedSamplingConfig, EvaluationConfig, evaluate
 
 from accelerate.utils import set_seed
 import wandb
@@ -59,14 +61,27 @@ class TrainingConfig:
     """
 
 
-def train(args:TrainingConfig, logger: Callable) -> None:
+def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Train the model.
+    Args:
+        args (TrainingConfig): The training configuration.
+        logger (Callable): The logger to use.
 
+    Returns:
+        Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]: The training outputs and the evaluation outputs.
+    """
+    # outputs 
+    train_outs:List[Dict[str, Any]] = []
+    eval_outs:List[Dict[str, Any]] = []
+
+    # get the run name
     run_name = args.wandb_config.name.replace("-", "_")
 
     # check that the data mode is train
     assert args.base_config.mode == "train"
     assert args.grpo_config.mini_batch_size % args.grpo_config.group_size == 0
-    assert args.base_config.batch_size * args.grpo_config.group_size % args.grpo_config.mini_batch_size == 0
+    assert args.base_config.train_batch_size * args.grpo_config.group_size % args.grpo_config.mini_batch_size == 0
 
     # device & seeding
     device = torch.device("cuda", args.base_config.device_index)
@@ -111,9 +126,10 @@ def train(args:TrainingConfig, logger: Callable) -> None:
     )
     rollout_data_loader = DataLoader(
         dataset,
-        batch_size=args.base_config.batch_size,
+        batch_size=args.base_config.train_batch_size,
         shuffle=True,
-        drop_last=False,
+        drop_last=True,
+        num_workers=args.base_config.num_workers,
     )
     
     ## Replay buffer
@@ -150,6 +166,18 @@ def train(args:TrainingConfig, logger: Callable) -> None:
         repetition_penalty=args.sampling_config.repetition_penalty,
     )
 
+    ## Evaluation config
+    eval_config = EvaluationConfig(
+        base_config=args.base_config,
+        sampling_config=FixedSamplingConfig(),
+        reward_config=args.reward_config,
+        wandb_config=args.wandb_config,
+    )
+
+    # create the logging directory for training logs
+    out_dir = os.path.join(args.base_config.train_log_dir, args.wandb_config.name)
+    os.makedirs(out_dir, exist_ok=True)
+
     for batch_idx, batch_inputs in enumerate(rollout_data_loader):
         
         print(f"Batch indx {batch_idx}")
@@ -181,23 +209,23 @@ def train(args:TrainingConfig, logger: Callable) -> None:
             # solved_masks: (num_samples, group_size)
             # infos: [[{format_reward: float, outcome_reward: float}, ...], ...]
 
-            info_list = rollout_out["infos"]
-            batch_mean_format_returns = np.array([x["format_reward"] for x in info_list]).mean()
-            batch_mean_outcome_returns = np.array([x["outcome_reward"] for x in info_list]).mean()
-            batch_mean_returns = rollout_out["returns"].mean().item()
-            batch_mean_solved_rate = rollout_out["solved_masks"].mean().item()
-            batch_mean_num_words_in_completions = rollout_out["num_words_in_completions"].mean().item()
+            info_list: List[Dict[str, float]] = rollout_out["infos"]
+            batch_mean_format_returns: float = np.array([x["format_reward"] for x in info_list]).mean()
+            batch_mean_outcome_returns: float = np.array([x["outcome_reward"] for x in info_list]).mean()
+            batch_mean_returns: float = rollout_out["returns"].mean().item()
+            batch_mean_solved_rate: float = rollout_out["solved_masks"].mean().item()
+            batch_mean_num_words_in_completions: float = rollout_out["num_words_in_completions"].mean().item()
 
             # compute the log probs
-            returns = rollout_out["returns"].reshape(-1)
-            advantages = rollout_out["advantages"].reshape(-1)
-            solved_mask = rollout_out["solved_masks"].reshape(-1)
+            returns: torch.Tensor = rollout_out["returns"].reshape(-1)
+            advantages: torch.Tensor = rollout_out["advantages"].reshape(-1)
+            solved_mask: torch.Tensor = rollout_out["solved_masks"].reshape(-1)
 
-            sequence_ids = rollout_out["sequence_ids"]
-            action_mask = rollout_out["action_mask"]
+            sequence_ids: torch.Tensor = rollout_out["sequence_ids"]
+            action_mask: torch.Tensor = rollout_out["action_mask"]
         
-            attention_mask = sequence_ids != pad_token_id # (num_samples * group_size, seq_len)
-            log_probs = sequences_log_probs(
+            attention_mask: torch.Tensor = sequence_ids != pad_token_id # (num_samples * group_size, seq_len)
+            log_probs: torch.Tensor = sequences_log_probs(
                 model=model,
                 sequence_ids=sequence_ids,
                 attention_mask=attention_mask,
@@ -206,20 +234,20 @@ def train(args:TrainingConfig, logger: Callable) -> None:
             kl, log_probs_ref = None, None
             if args.grpo_config.kl_weight > 0:
                 # compute the log probs of the reference model
-                log_probs_ref = sequences_log_probs(
+                log_probs_ref: torch.Tensor = sequences_log_probs(
                     model=reference_model,
                     sequence_ids=sequence_ids,
                     attention_mask=attention_mask,
                 ) # (num_samples * group_size, seq_len-1)
 
                 # compute the kl divergence
-                kl = approx_kl_divergence(
+                kl: torch.Tensor = approx_kl_divergence(
                     log_probs=log_probs,
                     log_probs_ref=log_probs_ref,
                     action_mask=action_mask,
                 ) # (num_samples * group_size, seq_len-1)
             
-            experience = Experience(
+            experience: Experience = Experience(
                 sequences=sequence_ids,
                 action_log_probs=log_probs,
                 returns=returns,
@@ -257,29 +285,41 @@ def train(args:TrainingConfig, logger: Callable) -> None:
             }
         )
         print(
-            f"batch_idx: {batch_idx} | returns: {batch_mean_returns.item()} | solved_rate: {batch_mean_solved_rate.item()} | format_returns: {batch_mean_format_returns} | outcome_returns: {batch_mean_outcome_returns}"
+            f"batch_idx: {batch_idx} | returns: {batch_mean_returns} | solved_rate: {batch_mean_solved_rate} | format_returns: {batch_mean_format_returns} | outcome_returns: {batch_mean_outcome_returns}"
         )
-        out_dir = os.path.join(args.base_config.log_dir, args.wandb_config.name)
-        os.makedirs(out_dir, exist_ok=True)
+        train_outs.append(
+            {
+                "mean_batch_returns": batch_mean_returns,
+                "mean_batch_solved_rate": batch_mean_solved_rate,
+                "mean_batch_format_returns": batch_mean_format_returns,
+                "mean_batch_outcome_returns": batch_mean_outcome_returns,
+                "mean_num_words_in_completions": batch_mean_num_words_in_completions,
+            }
+        )
+        if (batch_idx + 1) % args.base_config.train_text_log_interval == 0:
+            file_name = os.path.join(out_dir, f"log_{batch_idx}.txt")
+            
+            completions = rollout_out["completions"]
+            questions = batch_inputs["questions"]
+            answers = batch_inputs["answers"]
+            
+            with open(file_name, "a") as f:
+                for i, completion in enumerate(completions):
+                    question = questions[i//args.grpo_config.group_size]
+                    answer = answers[i//args.grpo_config.group_size]
+                    reward = returns[i]
+                    info = info_list[i]     
 
-        delimeter = "*"*50
-        file_name = os.path.join(out_dir, f"log_{batch_idx}.txt")
-        completions = rollout_out["completions"]
-        questions = batch_inputs["questions"]
-        answers = batch_inputs["answers"]
-        with open(file_name, "a") as f:
-            for i, completion in enumerate(completions):
-                question = questions[i//args.grpo_config.group_size]
-                answer = answers[i//args.grpo_config.group_size]
-                reward = returns[i]
-                info = info_list[i]                
-                f.write(
-                    f"{delimeter}\n[Question]:\n{question}\n[Canonical Answer]:\n{answer}\n"
-                    f"[Completion]:\n{completion}\n[Reward]:\n{reward}\n"
-                    f"[Info]:\n{info}\n{delimeter}\n"
-                )
-        f.close()
-        ### ----- Logging phase END ----- ###
+                    text_to_log = LOGGING_TEMPLATE.format(
+                        question=question,
+                        answer=answer,
+                        completion=completion,
+                        reward=reward,
+                        info=info,
+                    )
+                    f.write(text_to_log)
+            f.close()
+            ### ----- Logging phase END ----- ###
         
         ### ----- Training phase START ----- ###
         experience_sampler = DataLoader(
@@ -288,18 +328,16 @@ def train(args:TrainingConfig, logger: Callable) -> None:
             shuffle=False,
             drop_last=False,
             collate_fn=join_experience_batch,
+            num_workers=args.base_config.num_workers,
         )
-        model.train()
 
+        model.train()
         for _ in range(args.grpo_config.epochs_per_step):
             for exp in experience_sampler:
-
+                optimizer.zero_grad()
                 # get the experience to cuda 
                 exp: Experience
                 exp = exp.to(device)
-
-                optimizer.zero_grad()
-
                 log_probs = sequences_log_probs(
                     model, 
                     sequence_ids=exp.sequences, 
@@ -329,7 +367,6 @@ def train(args:TrainingConfig, logger: Callable) -> None:
                 del mean_kl
                 gc.collect()
                 torch.cuda.empty_cache()
-                
                 logger(
                     {
                         "train/mean_kl": mean_kl, 
@@ -345,30 +382,58 @@ def train(args:TrainingConfig, logger: Callable) -> None:
             and args.base_config.checkpoint_interval is not None
             and (batch_idx + 1) % args.base_config.checkpoint_interval == 0
         ):
-            model.save_pretrained(
+            torch.save(
+                model.state_dict(),
                 os.path.join(
                     *[
                         args.base_config.checkpoint_dir, 
                         run_name,
-                        f"step_{batch_idx + 1}"
+                        f"step_{batch_idx + 1}.pt"
                     ]
                 )
             )
-        del batch_inputs
         ### ----- Interval checkpoint phase END ----- ###
+
+        ### ----- Interval evaluation phase START ----- ###
+        if (batch_idx + 1) % args.base_config.eval_interval == 0:
+            eval_results = evaluate(
+                config=eval_config,
+                model=model,
+                tokenizer=tokenizer,
+                logger=logger,
+                **{
+                    "batch_idx": batch_idx + 1,
+                }
+            )  
+            eval_outs.append(eval_results)
+        ### ----- Interval evaluation phase END ----- ###
+        del batch_inputs
 
     ### ----- Final checkpoint phase START ----- ###
     if args.base_config.checkpoint_dir is not None:
-        model.save_pretrained(
+        torch.save(
+            model.state_dict(),
             os.path.join(
                 *[
                     args.base_config.checkpoint_dir, 
                     run_name,
-                    f"step_{batch_idx + 1}_final"
+                    f"step_{batch_idx + 1}_final.pt"
                 ]
             )
         )
+        eval_results = evaluate(
+            config=eval_config,
+            model=model,
+            tokenizer=tokenizer,
+            logger=logger,
+            **{
+                "batch_idx": 0,
+            }
+        )  
+        eval_outs.append(eval_results)
     ### ----- Final checkpoint phase END ----- ###
+
+    return train_outs, eval_outs
 
 if __name__ == "__main__":
 
@@ -388,5 +453,4 @@ if __name__ == "__main__":
     wandb.define_metric("train/mean_batch_outcome_returns", step_metric="num_batches_visited")
     
     logger = wandb.log  
-    
-    train(args, logger)
+    train_outs, eval_outs = train(args, logger)
