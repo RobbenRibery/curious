@@ -12,6 +12,7 @@ from curious.data import GSM8KDataset
 from curious.utils import LOGGING_TEMPLATE, load_model_tokenizer
 from curious.sampling import compute_rewards
 from curious.reward import GSM8KRewardModel
+from curious.prompt import *
 from config import WandbConfig, BaseConfig, RewardConfig
 
 from accelerate.utils import set_seed
@@ -24,7 +25,7 @@ class FixedSamplingConfig:
     A dataclass for storing the fixed sampling configuration.
     """
     
-    max_new_tokens: int = 2048
+    max_new_tokens: int = 1024
     """
     The maximum number of new tokens to use for the evaluation.
     """
@@ -64,7 +65,7 @@ class FixedSamplingConfig:
     The system prompt to use for the sampling.
     """
 
-    model_prompt_length: int = 2048
+    model_prompt_length: int = 1024
     """
     The maximum length of the model to use for the evaluation.
     """
@@ -116,7 +117,6 @@ def evaluate(
         A dictionary containing the rewards, infos and solved rates.
     """
     set_seed(config.base_config.seed) 
-    text_logger = kwargs.get("text_logger", lambda x: print(x))
     batch_idx = kwargs.get("batch_idx", 0)
     print(f"Batch {batch_idx} #### Evaluating...")
 
@@ -134,6 +134,7 @@ def evaluate(
 
     # Load the dataset
     dataset = GSM8KDataset(
+        tokenizer=tokenizer,
         dataset_name=config.base_config.dataset_name,
         seed=config.base_config.seed,
         mode="test",
@@ -178,7 +179,6 @@ def evaluate(
             do_sample=config.sampling_config.do_sample,
             eos_token_id=tokenizer.eos_token_id,
             pad_token_id=tokenizer.eos_token_id,
-            use_cache=config.sampling_config.use_cache, 
             repetition_penalty=config.sampling_config.repetition_penalty,
         )
 
@@ -195,9 +195,9 @@ def evaluate(
             group_size=1,
         )
 
-        batch_rewards: np.ndarray = rewards_out["returns"].numpy()
+        batch_rewards: torch.Tensor = rewards_out["returns"]
         batch_infos: List[Dict[str, str]] = rewards_out["infos"]
-        batch_solved_masks: np.ndarray = rewards_out["solved_masks"].numpy()
+        batch_solved_masks: torch.Tensor = rewards_out["solved_masks"]
         batch_num_words_in_completions: List[int] = [len(completion.split(' ')) for completion in completions]
 
         batch_mean_format_returns: float = np.array([x["format_reward"] for x in batch_infos]).mean()
@@ -219,28 +219,27 @@ def evaluate(
             }
         )
 
-        ## Log the text to logger
-        text_to_log = ""
-        for question, answer, completion, reward, info in zip(
-            questions,
-            oracle_answers,
-            completions,
-            batch_rewards,
-            infos,
-        ):
-            text_to_log += LOGGING_TEMPLATE.format(
-                question=question,
-                answer=answer,
-                completion=completion,
-                reward=reward,
-                info=info,
-            )
-        text_logger(text_to_log)
-
         ## Save the text on disk if the batch index is a multiple of the eval text log interval
         if batch_idx % config.base_config.eval_text_log_interval == 0:
+            # Log the text to logger
+            text_to_log = ""
+            for question, answer, completion, reward, info in zip(
+                questions,
+                oracle_answers,
+                completions,
+                batch_rewards,
+                infos,
+            ):
+                text_to_log += LOGGING_TEMPLATE.format(
+                    question=question,
+                    answer=answer,
+                    completion=completion,
+                    reward=reward,
+                    info=info,
+                )
+
             file_name = f"log_{batch_idx}.txt" if batch_idx > 0 else "final_log.txt"
-            with open(os.path.join(out_dir, file_name), "w") as f:
+            with open(os.path.join(out_dir, file_name), "a") as f:
                 f.write(text_to_log)
             f.close()
         # --------------------- Logging End ---------------------

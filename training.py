@@ -137,10 +137,9 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
 
     ## Objective
     objective = ActorLoss(
-        clip_eps=args.grpo_config.clip_eps,
-        kl_weight=args.grpo_config.kl_weight,
         epsilon=args.grpo_config.clip_eps,
         epsilon_high=args.grpo_config.clip_eps_high,
+        kl_weight=args.grpo_config.kl_weight,
         use_clip_high=args.grpo_config.use_clip_high,
         use_token_level_loss=args.grpo_config.use_token_level_loss,
     )
@@ -179,6 +178,9 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
     os.makedirs(out_dir, exist_ok=True)
 
     for batch_idx, batch_inputs in enumerate(rollout_data_loader):
+
+        questions = batch_inputs["question"]
+        answers = batch_inputs["answer"]
         
         print(f"Batch indx {batch_idx}")
         print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/(1024**3)))
@@ -207,7 +209,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
             # completions: (num_samples * group_size)
             # returns: (num_samples, group_size)
             # solved_masks: (num_samples, group_size)
-            # infos: [[{format_reward: float, outcome_reward: float}, ...], ...]
+            # infos: [{format_reward, outcome_reward, ...}, ...]
 
             info_list: List[Dict[str, float]] = rollout_out["infos"]
             batch_mean_format_returns: float = np.array([x["format_reward"] for x in info_list]).mean()
@@ -223,6 +225,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
 
             sequence_ids: torch.Tensor = rollout_out["sequence_ids"]
             action_mask: torch.Tensor = rollout_out["action_mask"]
+            completions:List[str] = rollout_out["completions"]
         
             attention_mask: torch.Tensor = sequence_ids != pad_token_id # (num_samples * group_size, seq_len)
             log_probs: torch.Tensor = sequences_log_probs(
@@ -298,11 +301,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
         )
         if (batch_idx + 1) % args.base_config.train_text_log_interval == 0:
             file_name = os.path.join(out_dir, f"log_{batch_idx}.txt")
-            
-            completions = rollout_out["completions"]
-            questions = batch_inputs["questions"]
-            answers = batch_inputs["answers"]
-            
+
             with open(file_name, "a") as f:
                 for i, completion in enumerate(completions):
                     question = questions[i//args.grpo_config.group_size]
@@ -343,7 +342,6 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                     sequence_ids=exp.sequences, 
                     attention_mask=exp.attention_mask
                 )
-
                 loss, mean_kl = objective(log_probs=log_probs, experience=exp)
                 loss: torch.Tensor
                 del log_probs
@@ -355,18 +353,12 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                     continue
                 
                 loss.backward()
-
                 grad_norm = clip_grad_norm_(
                     model.parameters(), 
                     max_norm=args.grpo_config.max_grad_norm,
                 )
                 optimizer.step()
-
-                del grad_norm
-                del loss 
-                del mean_kl
-                gc.collect()
-                torch.cuda.empty_cache()
+                
                 logger(
                     {
                         "train/mean_kl": mean_kl, 
@@ -374,6 +366,11 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                         "train/loss": loss,
                     }
                 )
+                del grad_norm
+                del loss 
+                del mean_kl
+                gc.collect()
+                torch.cuda.empty_cache()
         ### ----- Training phase END ----- ###
 
         ### ----- Interval checkpoint phase START ----- ###
@@ -382,14 +379,16 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
             and args.base_config.checkpoint_interval is not None
             and (batch_idx + 1) % args.base_config.checkpoint_interval == 0
         ):
+            state_dict_dir = os.path.join(
+                args.base_config.checkpoint_dir, 
+                run_name,
+            )
+            os.makedirs(state_dict_dir, exist_ok=True)
             torch.save(
                 model.state_dict(),
                 os.path.join(
-                    *[
-                        args.base_config.checkpoint_dir, 
-                        run_name,
-                        f"step_{batch_idx + 1}.pt"
-                    ]
+                    state_dict_dir,
+                    f"step_{batch_idx + 1}.pt"
                 )
             )
         ### ----- Interval checkpoint phase END ----- ###
@@ -411,16 +410,20 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
 
     ### ----- Final checkpoint phase START ----- ###
     if args.base_config.checkpoint_dir is not None:
+        # save the final state dict
+        state_dict_dir = os.path.join(
+            args.base_config.checkpoint_dir, 
+            run_name,
+        )
+        os.makedirs(state_dict_dir, exist_ok=True)
         torch.save(
             model.state_dict(),
             os.path.join(
-                *[
-                    args.base_config.checkpoint_dir, 
-                    run_name,
-                    f"step_{batch_idx + 1}_final.pt"
-                ]
+                state_dict_dir,
+                f"step_{batch_idx + 1}_final.pt"
             )
         )
+        # evaluate the final model
         eval_results = evaluate(
             config=eval_config,
             model=model,

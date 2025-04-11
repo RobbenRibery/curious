@@ -116,7 +116,7 @@ def rollout(
             "sequence_ids": sampled_responses["sequence_ids"],
             "action_mask": sampled_responses["action_mask"],
             "advantages": advantages,
-            "num_words_in_completions": torch.IntTensor(num_words_in_completions, device="cpu"),
+            "num_words_in_completions": torch.tensor(num_words_in_completions, dtype=torch.bfloat16, device="cpu"),
             "completions": completions,
         }
     )
@@ -154,13 +154,13 @@ def compute_rewards(
         )
 
         returns.append(group_rewards)
-        infos.append(group_infos)
+        infos.extend(group_infos)
         solved_masks.append(solved)
     
     return {
-        "returns": torch.FloatTensor(returns, device="cpu"), # (num_questions, group_size)
-        "solved_masks": torch.FloatTensor(solved_masks, device="cpu"), # (num_questions, group_size)
-        "infos": infos, # double list (first level: question, second level: group)
+        "returns": torch.tensor(returns, dtype=torch.bfloat16, device="cpu"), # (num_questions, group_size)
+        "solved_masks": torch.tensor(solved_masks, dtype=torch.bfloat16, device="cpu"), # (num_questions, group_size)
+        "infos": infos, # single list (len = num_questions * group_size)
     }
 
 @torch.compile(dynamic=True)
@@ -223,7 +223,7 @@ def sequences_log_probs(
     Returns:
         torch.Tensor: The log probabilities of the output ids. (num_samples * group_size, seq_len-1, vocab_size)
     """
-    output = model(input_ids=sequence_ids, attention_mask=attention_mask)
+    output = model(input_ids=sequence_ids, attention_mask=attention_mask, use_cache=False)
     logits = output["logits"]
     del output 
 

@@ -119,7 +119,9 @@ class ActorLoss(nn.Module):
 
         # importance sampling ratio
         ratio = (log_probs - old_log_probs).exp()
-
+        #print(f"ratio: {ratio.shape}")
+        #print(f"advantages: {advantages.shape}")
+        
         # surrogate loss 
         surr1 = ratio * advantages
         surr2 = ratio.clamp(1 - self.epsilon_low, 1 + self.epsilon_high) * advantages
