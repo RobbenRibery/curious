@@ -12,6 +12,28 @@ from liger_kernel.transformers import (
     AutoLigerKernelForCausalLM
 )
 
+LOGGING_TEMPLATE = dedent(
+"""
+******************************
+Question: 
+{question}
+----
+Answer: 
+{answer}
+----
+Completion: 
+{completion}
+----
+Reward: 
+{reward}
+----
+Info: 
+{info}
+******************************
+
+"""
+).strip()
+
 def load_model_tokenizer(
     model_name_or_path: str,
     trust_remote_code: bool = True,

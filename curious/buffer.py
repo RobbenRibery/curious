@@ -36,7 +36,7 @@ class Experience:
 
     returns: torch.Tensor  # (num_samples * group_size)
     solved_mask: torch.Tensor  # (num_samples * group_size)
-    advantages: torch.Tensor  # (num_samples * group_size)
+    advantages: torch.Tensor  # (num_samples * group_size, 1)
 
     kl: Optional[torch.Tensor]  = None # (num_samples * group_size, seq_len-1) (boolean)
     log_probs_ref: Optional[torch.Tensor] = None # (num_samples * group_size, seq_len-1)
@@ -123,8 +123,10 @@ def join_experience_batch(items: List[Experience]) -> Experience:
         if all(v is not None for v in vals):            
             data = torch.stack(vals, dim=0) #zero_pad_sequences(vals, "left")
             # for 1 dimensional data, stack the values and reshape them
-            if key in {"returns", "solved_mask", "advantages"}:
+            if key in {"returns", "solved_mask"}:
                 data = data.reshape(-1)
+            elif key == "advantages":
+                data = data.reshape(-1, 1)
         else:
             data = None
         batch_data[key] = data

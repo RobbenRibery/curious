@@ -31,11 +31,10 @@ class BaseConfig:
     """
     A dataclass for storing the evaluation configuration.
     """
-
     # Model and dataset
     model_name: str = "Qwen/Qwen2-0.5B-Instruct"
     """
-    The name of the model to use for the evaluation.
+    The name of the model to use for the training.
     """
     
     device_index: int = 0
@@ -45,27 +44,37 @@ class BaseConfig:
     
     dataset_name: str = "openai/gsm8k"
     """
-    The name of the dataset to use for the evaluation.
+    The name of the dataset to use for the training.
     """
     
-    batch_size: int = 16
+    train_batch_size: int = 16
     """
-    The batch size to use for the evaluation.
+    The batch size to use for training 
+    """
+
+    eval_batch_size: int = 256
+    """
+    The batch size to use for evaluation
     """
     
     num_workers: int = 8
     """
-    The number of cpu workers to use for the evaluation.
+    The number of cpu workers to use for the data loader
     """
     
     mode: str = "train"
     """
-    The mode to use for the evaluation.
+    The mode to use for the training/testing.
     """
     
-    log_dir: str = "train_logs"
+    train_log_dir: str = "train_logs"
     """
-    The directory to use for the evaluation.
+    The directory to use for the train logs.
+    """
+    
+    eval_log_dir: str = "eval_logs"
+    """
+    The directory to use for the eval logs.
     """
     
     seed: int = 42
@@ -80,7 +89,22 @@ class BaseConfig:
     
     checkpoint_interval: int = 100
     """
-    The interval to use for the checkpoint.
+    The interval to use for the checkpoint and to evaluate the model.
+    """
+
+    eval_interval: int = 50
+    """
+    The interval to use for the evaluation.
+    """
+
+    train_text_log_interval: int = 500
+    """
+    The interval to use for the train text log.
+    """
+
+    eval_text_log_interval: int = 500
+    """
+    The interval to use for the eval text log.
     """
 
 @dataclass
@@ -213,10 +237,10 @@ class GRPOConfig:
     
     max_grad_norm: float = 1.0
     """
-    The maximum gradient norm 
+    The maximum gradient norm to use for the GRPO.
     """
 
-    normalize_centered_returns: bool = False
+    normalize_centered_returns: bool = True
     """
     Whether to normalize the returns.
     """

@@ -6,7 +6,7 @@ from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizer
 
 from curious.utils import tokenize_questions
-from curious.prompt import qwen_system_prompt
+from curious.prompt import *
 
 from typing import List, Dict
 
@@ -56,11 +56,20 @@ class GSM8KDataset(Dataset):
         self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer.padding_side = "left"
 
+        ## Train dataset ##
+        train_max_length = max(
+            len(self.tokenizer(x["question"])["input_ids"])
+            for x in self.train
+        )
+        print(f"Detected train_max_length: {train_max_length}")
+        self.train_max_length = train_max_length if train_max_length <= self.max_prompt_length else self.max_prompt_length
+        print(f"Setting train_max_length to {self.train_max_length}")
+
         self.train = self.train.map(
             lambda x: tokenize_questions(
                 self.tokenizer, 
                 x["question"],
-                max_length=self.max_prompt_length,
+                max_length=self.train_max_length,
                 allow_dynamic_padding=False,
                 system_prompt=system_prompt,
             ),
@@ -72,16 +81,26 @@ class GSM8KDataset(Dataset):
             output_all_columns=True,
         )
 
+        ## Test dataset ##
+        test_max_length = max(
+            len(self.tokenizer(x["question"])["input_ids"])
+            for x in self.test
+        )
+        print(f"Detected test_max_length: {test_max_length}")
+        self.test_max_length = test_max_length if test_max_length <= self.max_prompt_length else self.max_prompt_length
+        print(f"Setting test_max_length to {self.test_max_length}")
+    
         self.test = self.test.map(
             lambda x: tokenize_questions(
                 self.tokenizer, 
                 x["question"],
-                max_length=self.max_prompt_length,
+                max_length=self.test_max_length,
                 allow_dynamic_padding=False,
                 system_prompt=system_prompt,
             ),
             batched=True,
         )
+
         self.test.set_format(
             type="pt",
             columns=["input_ids", "attention_mask"],
