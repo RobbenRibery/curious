@@ -8,7 +8,7 @@ python training.py \
     --base_config.model_name "Qwen/Qwen2-0.5B-Instruct" \
     --base_config.device_index 0 \
     --base_config.dataset_name "openai/gsm8k" \
-    --base_config.train_batch_size 10 \
+    --base_config.train_batch_size 8 \
     --base_config.eval_batch_size 256 \
     --base_config.num_workers 8 \
     --base_config.train_log_dir "train_logs" \

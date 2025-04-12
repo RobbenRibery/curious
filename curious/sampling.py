@@ -179,8 +179,7 @@ def compute_group_advantages(returns: torch.Tensor, eps: float = 1e-8, normalize
     if normalize:
         return centered_returns / (centered_returns.std(dim=1, keepdim=True) + eps)
     else:
-        return centered_returns
-
+        return centered_returns    
 
 @torch.compile(dynamic=True)
 def sequence_log_probs_from_logits(
@@ -196,12 +195,30 @@ def sequence_log_probs_from_logits(
     Returns:
         torch.Tensor: The log probabilities of the output ids. (num_samples * num_rollouts, seq_len)
     """
+    
     # Gather the logits corresponding to the output_ids
     gathered_logits = logits.gather(dim=-1, index=output_ids.unsqueeze(-1)).squeeze(-1)  # (num_samples * num_rollouts, seq_len)
 
     # Compute log-sum-exp over the vocabulary dimension
     log_sum_exp = logits.logsumexp(dim=-1)  # (num_samples * num_rollouts, seq_len)
     return gathered_logits - log_sum_exp
+
+@torch.compile(dynamic=True)
+def slow_sequence_log_probs_from_logits(
+    logits: torch.Tensor, output_ids: torch.Tensor
+) -> torch.Tensor:
+    """
+    Computes the log probabilities of the output ids from the logits.
+    """
+    token_logprobs = []
+    for logits_row, index_row in zip(logits, output_ids):
+        token_logprobs.append(
+            sequence_log_probs_from_logits(
+                logits=logits_row,
+                output_ids=index_row,
+            )
+        )
+    return torch.stack(token_logprobs)
 
 
 @torch.compile(dynamic=True)

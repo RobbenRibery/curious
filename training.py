@@ -131,6 +131,10 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
         drop_last=True,
         num_workers=args.base_config.num_workers,
     )
+    lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=len(rollout_data_loader),
+    )
     
     ## Replay buffer
     replay_buffer = ReplayBuffer()
@@ -407,7 +411,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
             eval_outs.append(eval_results)
         ### ----- Interval evaluation phase END ----- ###
         del batch_inputs
-
+        lr_scheduler.step()
     ### ----- Final checkpoint phase START ----- ###
     if args.base_config.checkpoint_dir is not None:
         # save the final state dict
