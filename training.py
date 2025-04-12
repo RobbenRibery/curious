@@ -24,6 +24,8 @@ from evaluate import FixedSamplingConfig, EvaluationConfig, evaluate
 from accelerate.utils import set_seed
 import wandb
 import numpy as np
+from tqdm import tqdm
+from rich import print
 
 from dataclasses import dataclass
 import tyro 
@@ -181,7 +183,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
     out_dir = os.path.join(args.base_config.train_log_dir, args.wandb_config.name)
     os.makedirs(out_dir, exist_ok=True)
 
-    for batch_idx, batch_inputs in enumerate(rollout_data_loader):
+    for batch_idx, batch_inputs in tqdm(enumerate(rollout_data_loader)):
 
         questions = batch_inputs["question"]
         answers = batch_inputs["answer"]
@@ -377,6 +379,17 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                 torch.cuda.empty_cache()
         ### ----- Training phase END ----- ###
 
+        ### ----- Update ref model phase START ----- ###
+        if (
+            args.grpo_config.ref_model_update_freq > 0
+            and (batch_idx + 1) % args.grpo_config.ref_model_update_freq == 0
+        ):
+            reference_model.load_state_dict(
+                model.state_dict()
+            )
+        ### ----- Update ref model phase END ----- ###
+
+
         ### ----- Interval checkpoint phase START ----- ###
         if (
             args.base_config.checkpoint_dir is not None
@@ -398,7 +411,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
         ### ----- Interval checkpoint phase END ----- ###
 
         ### ----- Interval evaluation phase START ----- ###
-        if (batch_idx + 1) % args.base_config.eval_interval == 0:
+        if (batch_idx + 1) % args.base_config.eval_interval == 0 or batch_idx == 0:
             eval_results = evaluate(
                 config=eval_config,
                 model=model,

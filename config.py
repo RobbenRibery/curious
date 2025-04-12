@@ -244,3 +244,8 @@ class GRPOConfig:
     """
     Whether to normalize the returns.
     """
+
+    ref_model_update_freq: int = 0
+    """
+    The interval to update the reference model.
+    """
