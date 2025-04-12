@@ -9,7 +9,7 @@ from transformers import (
 from accelerate.utils import set_seed
 from transformers.generation.utils import GenerateDecoderOnlyOutput
 
-from curious.reward import GSM8KRewardModel
+from curious.reward.rule_rm import GSM8KRewardModel
 
 @torch.no_grad()
 def sample_responses(
@@ -51,7 +51,6 @@ def sample_responses(
             skip_special_tokens=True
         ),
     }
-
 
 @torch.no_grad()
 def rollout(
@@ -122,7 +121,6 @@ def rollout(
     )
 
     return rewards_out
-
 
 def compute_rewards(
     reward_model: GSM8KRewardModel,
@@ -220,7 +218,6 @@ def slow_sequence_log_probs_from_logits(
         )
     return torch.stack(token_logprobs)
 
-
 @torch.compile(dynamic=True)
 def sequences_log_probs(
     model: PreTrainedModel,
@@ -251,7 +248,6 @@ def sequences_log_probs(
     )
     del logits
     return log_probs
-
 
 def sequences_log_probs_with_mask(
     model: PreTrainedModel,

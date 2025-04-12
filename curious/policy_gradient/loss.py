@@ -2,7 +2,7 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 
-from curious.buffer import Experience
+from curious.utils.rl.buffer import Experience
 
 @torch.compile(dynamic=True)
 def approx_kl_divergence(
@@ -49,7 +49,6 @@ def masked_mean(
         return tensor.mean(axis=dim)
     # when dim == None, return the mean of the whole tensor
     return (tensor * mask).sum(axis=dim) / mask.sum(axis=dim)
-
 
 class ActorLoss(nn.Module):
 

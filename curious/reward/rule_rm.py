@@ -1,6 +1,5 @@
 import re
 from typing import List, Tuple, Optional, Dict
-from concurrent.futures import ThreadPoolExecutor, Future
 
 import sympy
 from math_verify import verify, parse

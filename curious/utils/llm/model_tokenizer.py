@@ -7,7 +7,7 @@ from transformers import (
 from typing import List, Dict, Optional, Union
 import torch
 
-from curious.prompt import * 
+from curious.utils.llm.prompt import * 
 from liger_kernel.transformers import (
     AutoLigerKernelForCausalLM
 )

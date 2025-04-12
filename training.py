@@ -10,13 +10,13 @@ import torch.optim as optim
 
 from transformers import GenerationConfig
 
-from curious.data import GSM8KDataset
-from curious.utils import LOGGING_TEMPLATE, load_model_tokenizer
-from curious.sampling import rollout, sequences_log_probs
-from curious.buffer import ReplayBuffer, Experience, join_experience_batch
-from curious.loss import ActorLoss, approx_kl_divergence
-from curious.reward import GSM8KRewardModel
-from curious.prompt import *
+from curious.data.math import GSM8KDataset
+from curious.utils.llm.model_tokenizer import LOGGING_TEMPLATE, load_model_tokenizer
+from curious.utils.rl.sampling import rollout, sequences_log_probs
+from curious.utils.rl.buffer import ReplayBuffer, Experience, join_experience_batch
+from curious.policy_gradient.loss import ActorLoss, approx_kl_divergence
+from curious.reward.rule_rm import GSM8KRewardModel
+from curious.utils.llm.prompt import *
 
 from config import GRPOConfig, WandbConfig, BaseConfig, SamplingConfig, RewardConfig
 from evaluate import FixedSamplingConfig, EvaluationConfig, evaluate

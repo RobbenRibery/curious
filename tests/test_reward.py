@@ -1,7 +1,6 @@
-from curious.reward import GSM8KRewardModel, SOLVED_REWARD, NEGATIVE_REWARD, ZERO_REWARD
-from curious.data import GSM8KDataset
-from curious.reward import QWEN_ANSWER_PATTERN
-from curious.prompt import qwen_system_prompt
+from curious.reward.rule_rm import GSM8KRewardModel, SOLVED_REWARD, NEGATIVE_REWARD, ZERO_REWARD, QWEN_ANSWER_PATTERN
+from curious.data.math  import GSM8KDataset
+from curious.utils.llm.prompt import qwen_system_prompt
 from textwrap import dedent
 
 def test_outcome_reward():
