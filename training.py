@@ -288,6 +288,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                 "train/mean_num_words_in_completions": batch_mean_num_words_in_completions,
                 "train/mean_batch_format_returns": batch_mean_format_returns,
                 "train/mean_batch_outcome_returns": batch_mean_outcome_returns,
+                "train/lr": lr_scheduler.get_lr()[0],
                 "num_batches_visited": batch_idx + 1,
             }
         )
