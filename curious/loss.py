@@ -115,7 +115,7 @@ class ActorLoss(nn.Module):
             )
             kl_loss = self.kl_weight * kl
         else:
-            kl_loss = torch.tensor(0.0)
+            kl_loss = kl = torch.tensor(0.0)
 
         # importance sampling ratio
         ratio = (log_probs - old_log_probs).exp()
