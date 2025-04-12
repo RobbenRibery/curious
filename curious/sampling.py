@@ -214,8 +214,8 @@ def slow_sequence_log_probs_from_logits(
     for logits_row, index_row in zip(logits, output_ids):
         token_logprobs.append(
             sequence_log_probs_from_logits(
-                logits=logits_row.view(1, -1, -1),
-                output_ids=index_row.view(1, -1),
+                logits=logits_row,
+                output_ids=index_row,
             )
         )
     return torch.stack(token_logprobs)
