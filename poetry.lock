@@ -1020,6 +1020,21 @@ testing = ["covdefaults (>=2.3)", "coverage (>=7.6.10)", "diff-cover (>=9.2.1)",
 typing = ["typing-extensions (>=4.12.2) ; python_version < \"3.11\""]
 
 [[package]]
+name = "flash-attn"
+version = "2.7.4.post1"
+description = "Flash Attention: Fast and Memory-Efficient Exact Attention"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "flash_attn-2.7.4.post1.tar.gz", hash = "sha256:f03485c9a49a4d68d0733acdcad80ab0e72afa025a777fdc2966ceccf9d51765"},
+]
+
+[package.dependencies]
+einops = "*"
+torch = "*"
+
+[[package]]
 name = "flax"
 version = "0.10.5"
 description = "Flax: A neural network library for JAX designed for flexibility"
@@ -1826,6 +1841,25 @@ antlr4-11-0 = ["antlr4-python3-runtime (==4.11.0)"]
 antlr4-13-2 = ["antlr4-python3-runtime (==4.13.2)"]
 antlr4-9-3 = ["antlr4-python3-runtime (==4.9.3)"]
 dev = ["pytest"]
+
+[[package]]
+name = "liger-kernel"
+version = "0.5.7"
+description = "Efficient Triton kernels for LLM Training"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "liger_kernel-0.5.7-py3-none-any.whl", hash = "sha256:e6554e5b5c2bfa6384cdeb3b8989c974d508402b9f2e864b834cf12d286925cd"},
+    {file = "liger_kernel-0.5.7.tar.gz", hash = "sha256:45e958d60d1d6f6578aa1fe25cc368ce8db0c96e1c2abe28874c6bac39c70ace"},
+]
+
+[package.dependencies]
+torch = ">=2.1.2"
+triton = ">=2.3.1"
+
+[package.extras]
+dev = ["black (>=24.4.2)", "datasets (>=2.19.2)", "flake8 (>=4.0.1.1)", "isort (>=5.13.2)", "matplotlib (>=3.7.2)", "mkdocs", "mkdocs-material", "pytest (>=7.1.2)", "pytest-rerunfailures", "pytest-xdist", "seaborn", "transformers (>=4.44.2)"]
 
 [[package]]
 name = "lightning"
@@ -5796,4 +5830,4 @@ six = "*"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11.0,<3.14"
-content-hash = "126a165d18e3d904bdfdf665e11b04ceae976c5a0b8c0dbba92b17b962c120ee"
+content-hash = "45c395120f1c98723a2416137a0c9947e38a6d06b25e6c2b215a56be04ee6ce4"

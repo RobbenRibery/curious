@@ -32,6 +32,8 @@ jax = "^0.5.3"
 flax = "^0.10.5"
 chex = "^0.1.89"
 trl = "^0.16.1"
+liger-kernel = "^0.5.7"
+flash-attn = "^2.7.4.post1"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29.5"
