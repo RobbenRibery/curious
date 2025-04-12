@@ -331,7 +331,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
         experience_sampler = DataLoader(
             replay_buffer,
             batch_size=args.grpo_config.mini_batch_size,
-            shuffle=False,
+            shuffle=True if args.grpo_config.use_token_level_loss else False,
             drop_last=False,
             collate_fn=join_experience_batch,
             num_workers=args.base_config.num_workers,
