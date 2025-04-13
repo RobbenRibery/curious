@@ -116,6 +116,7 @@ def evaluate(
     Returns:
         A dictionary containing the rewards, infos and solved rates.
     """
+    model.gradient_checkpointing_disable()
     set_seed(config.base_config.seed) 
     batch_idx = kwargs.get("batch_idx", 0)
     print(f"Batch {batch_idx} #### Evaluating...")
@@ -269,6 +270,7 @@ def evaluate(
     )
     print(f"Batch {batch_idx} #### Mean Eval pass@1: {mean_pass1}")
 
+    model.gradient_checkpointing_enable()
     return {
         "rewards": rewards,
         "infos": infos,
