@@ -260,6 +260,11 @@ class GRPOConfig:
     Whether to normalize the returns.
     """
 
+    use_rloo_scalar: bool = False
+    """
+    Whether to use the rloo scalar.
+    """
+
     ref_model_update_freq: int = 0
     """
     The interval to update the reference model.
