@@ -249,6 +249,10 @@ def sequences_log_probs(
         logits=logits[:, :-1],
         output_ids=sequence_ids[:, 1:],  # right shift 1 block to get the actual output ids
     )
+    # log_probs = slow_sequence_log_probs_from_logits(
+    #     logits=logits[:, :-1],
+    #     output_ids=sequence_ids[:, 1:],  # right shift 1 block to get the actual output ids
+    # )
     del logits
     return log_probs
 

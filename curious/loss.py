@@ -31,6 +31,7 @@ def masked_mean(
     tensor: torch.Tensor,
     mask: Optional[torch.Tensor] = None,
     dim: int = None,
+    use_fixed_response_length: bool = False,
 ) -> torch.Tensor:
     """
     Compute the mean of the tensor over the specified dimension.
@@ -48,7 +49,10 @@ def masked_mean(
     if mask is None:
         return tensor.mean(axis=dim)
     # when dim == None, return the mean of the whole tensor
-    return (tensor * mask).sum(axis=dim) / mask.sum(axis=dim)
+    if use_fixed_response_length:
+        return (tensor * mask).sum(axis=dim) / torch.ones_like(mask).sum(axis=dim)
+    else:
+        return (tensor * mask).sum(axis=dim) / mask.sum(axis=dim)
 
 
 class ActorLoss(nn.Module):
@@ -60,6 +64,8 @@ class ActorLoss(nn.Module):
         kl_weight:float = 0.001, 
         use_clip_high:bool = False, 
         use_token_level_loss:bool = False,
+        use_fixed_response_length:bool = False,
+        use_surrogate_loss:bool = True,
     ) -> None:
         """
         Args:
@@ -68,6 +74,7 @@ class ActorLoss(nn.Module):
             kl_weight: float, default to 0.001
             use_clip_high: bool, default to False
             use_token_level_loss: bool, default to False
+            use_fixed_response_length: bool, default to False
         """
         super().__init__()
 
@@ -86,6 +93,8 @@ class ActorLoss(nn.Module):
         # token-level loss vs group-level loss
         self.use_token_level_loss = use_token_level_loss
         self.aggregation_dim = None if use_token_level_loss else -1
+        self.use_fixed_response_length = False if use_token_level_loss else use_fixed_response_length
+        self.use_surrogate_loss = use_surrogate_loss
 
     @torch.compile(dynamic=True)
     def forward(
@@ -117,19 +126,23 @@ class ActorLoss(nn.Module):
         else:
             kl_loss = kl = torch.tensor(0.0)
 
-        # importance sampling ratio
-        ratio = (log_probs - old_log_probs).exp()
-        #print(f"ratio: {ratio.shape}")
-        #print(f"advantages: {advantages.shape}")
-        
-        # surrogate loss 
-        surr1 = ratio * advantages
-        surr2 = ratio.clamp(1 - self.epsilon_low, 1 + self.epsilon_high) * advantages
+        if self.use_surrogate_loss:
+            # importance sampling ratio
+            ratio = (log_probs - old_log_probs).exp()
+            #print(f"ratio: {ratio.shape}")
+            #print(f"advantages: {advantages.shape}")
+            
+            # surrogate loss 
+            surr1 = ratio * advantages
+            surr2 = ratio.clamp(1 - self.epsilon_low, 1 + self.epsilon_high) * advantages
 
-        policy_loss = -torch.min(surr1, surr2)
-        loss = policy_loss + kl_loss
+            policy_loss = -torch.min(surr1, surr2)
+            loss = policy_loss + kl_loss
+        else:
+            policy_loss = log_probs * advantages
+            loss = policy_loss + kl_loss
 
         # token-level loss vs group-level loss
-        loss = masked_mean(loss, action_mask, dim=self.aggregation_dim).mean()
+        loss = masked_mean(loss, action_mask, dim=self.aggregation_dim, use_fixed_response_length=self.use_fixed_response_length).mean()
 
         return loss, kl.mean()
