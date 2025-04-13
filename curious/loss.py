@@ -139,7 +139,7 @@ class ActorLoss(nn.Module):
             policy_loss = -torch.min(surr1, surr2)
             loss = policy_loss + kl_loss
         else:
-            policy_loss = log_probs * advantages
+            policy_loss = -log_probs * advantages
             loss = policy_loss + kl_loss
 
         # token-level loss vs group-level loss

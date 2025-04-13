@@ -211,6 +211,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                 group_size=args.grpo_config.group_size,
                 seed=args.base_config.seed,
                 normalize_centered_returns=args.grpo_config.normalize_centered_returns,
+                use_rloo_scalar=args.grpo_config.use_rloo_scalar,
             )
             # sequence_ids: (num_samples * group_size, seq_len)
             # action_mask: (num_samples * group_size, seq_len)
