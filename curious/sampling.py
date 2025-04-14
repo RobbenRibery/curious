@@ -117,7 +117,7 @@ def rollout(
             "num_samples_per_group": generation_config.num_return_sequences,
             "sequence_ids": sampled_responses["sequence_ids"],
             "action_mask": sampled_responses["action_mask"],
-            "advantages": advantages,
+            "advantages": advantages, # (num_samples, group_size)
             "num_words_in_completions": torch.tensor(num_words_in_completions, dtype=torch.bfloat16, device="cpu"),
             "completions": completions,
         }
@@ -127,6 +127,7 @@ def rollout(
 
 
 def compute_rewards(
+    model: PreTrainedModel,
     reward_model: GSM8KRewardModel,
     completions: List[str],
     oracle_answers: List[str],
@@ -160,8 +161,8 @@ def compute_rewards(
         solved_masks.append(solved)
     
     return {
-        "returns": torch.tensor(returns, dtype=torch.bfloat16, device="cpu"), # (num_questions, group_size)
-        "solved_masks": torch.tensor(solved_masks, dtype=torch.bfloat16, device="cpu"), # (num_questions, group_size)
+        "returns": torch.tensor(returns, dtype=torch.bfloat16, device=model.device), # (num_questions, group_size)
+        "solved_masks": torch.tensor(solved_masks, dtype=torch.bfloat16, device=model.device), # (num_questions, group_size)
         "infos": infos, # single list (len = num_questions * group_size)
     }
 

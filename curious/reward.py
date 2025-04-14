@@ -140,9 +140,7 @@ class GSM8KRewardModel:
             return None, NEGATIVE_REWARD, {"outcome": FailureMode.NO_ANSWER}
 
         # get the last answer as the final answer and normalize the parsed answer
-        answer_parsed: List[sympy.Expr | str] = parse(
-            answer_match[-1]
-        )
+        answer_parsed: List[sympy.Expr | str] = parse(answer_match[-1])
         if not answer_parsed:
             return None, NEGATIVE_REWARD, {"outcome": FailureMode.NO_NUMBER_IN_ANSWER}
 
