@@ -195,6 +195,11 @@ class GRPOConfig:
     The learning rate to use for the GRPO.
     """
 
+    anneling_lr: bool = True
+    """
+    Whether to use the anneling learning rate.
+    """
+
     weight_decay: float = 0.01
     """
     The weight decay to use for the GRPO.
@@ -225,6 +230,16 @@ class GRPOConfig:
     Whether to use the token level loss.
     """
     
+    use_fixed_response_length: bool = False
+    """
+    Whether to use fixed response length to aggregate loss.
+    """
+
+    use_surrogate_loss: bool = True
+    """
+    Whether to use the surrogate loss (ppo) or policy gradient loss (pg).
+    """
+
     mini_batch_size: int = 16 * 2
     """
     The mini batch size to use for the GRPO.
@@ -243,6 +258,11 @@ class GRPOConfig:
     normalize_centered_returns: bool = True
     """
     Whether to normalize the returns.
+    """
+
+    use_rloo_scalar: bool = False
+    """
+    Whether to use the rloo scalar.
     """
 
     ref_model_update_freq: int = 0
