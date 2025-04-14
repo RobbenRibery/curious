@@ -9,7 +9,7 @@ from dataclasses import dataclass
 ZERO_REWARD = 0.0
 NEGATIVE_REWARD = -1.0
 SOLVED_REWARD = 1.0
-PARTIAL_REWARD = 0.5
+PARTIAL_REWARD = -0.5
 
 THINK_PATTERN = r"<think>(.*?)</think>"
 ANSWER_PATTERN = r"<answer>(.*?)</answer>"

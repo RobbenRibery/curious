@@ -95,6 +95,7 @@ def rollout(
     
     # get the rewards
     rewards_out = compute_rewards(
+        model,
         reward_model,
         completions=sampled_responses["completions"],
         oracle_answers=oracle_answers,

@@ -133,11 +133,11 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
         drop_last=True,
         num_workers=args.base_config.num_workers,
     )
-    if args.grpo_config.anneling_lr:
-        lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=len(rollout_data_loader),
-        )
+
+    lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=len(rollout_data_loader),
+    )
     
     ## Replay buffer
     replay_buffer = ReplayBuffer()

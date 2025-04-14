@@ -20,7 +20,7 @@ python3 training.py \
     --base_config.train_text_log_interval 50 \
     --base_config.eval_text_log_interval 100 \
     --sampling_config.model_prompt_length 1024 \
-    --sampling_config.max_new_tokens 1400 \
+    --sampling_config.max_new_tokens 1000 \
     --sampling_config.temperature 1.0 \
     --sampling_config.top_p 1.0 \
     --sampling_config.top_k 50 \
@@ -30,7 +30,7 @@ python3 training.py \
     --sampling_config.system_prompt "qwen_system_prompt" \
     --reward_config.no-use-format-reward \
     --grpo_config.group_size 16 \
-    --grpo_config.lr 1e-06 \
+    --grpo_config.lr 6e-07 \
     --grpo_config.no-anneling_lr \
     --grpo_config.weight_decay 0.0 \
     --grpo_config.kl_weight 0.0 \
