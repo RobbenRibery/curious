@@ -63,6 +63,7 @@ def rollout(
     group_size: int,
     seed: int = 42,
     normalize_centered_returns: bool = False,
+    use_rloo_scalar: bool = False,
 ) -> Dict[str, torch.Tensor]:
     """
     Performs a rollout of the model.
@@ -103,6 +104,7 @@ def rollout(
     advantages = compute_group_advantages(
         returns=rewards_out["returns"],
         normalize=normalize_centered_returns,
+        use_rloo_scalar=use_rloo_scalar,
     )
 
     # outputs
@@ -164,7 +166,7 @@ def compute_rewards(
     }
 
 @torch.compile(dynamic=True)
-def compute_group_advantages(returns: torch.Tensor, eps: float = 1e-8, normalize: bool = True) -> torch.Tensor:
+def compute_group_advantages(returns: torch.Tensor, eps: float = 1e-8, normalize: bool = True, use_rloo_scalar: bool = False) -> torch.Tensor:
     """
     Normalizes the advantages of a group of returns.
 
@@ -176,10 +178,15 @@ def compute_group_advantages(returns: torch.Tensor, eps: float = 1e-8, normalize
         torch.Tensor: The normalized advantages. (num_samples, num_return_sequences)
     """
     centered_returns = returns - returns.mean(dim=1, keepdim=True)
+
     if normalize:
-        return centered_returns / (centered_returns.std(dim=1, keepdim=True) + eps)
-    else:
-        return centered_returns    
+        centered_returns = centered_returns / (centered_returns.std(dim=1, keepdim=True) + eps)
+
+    if use_rloo_scalar:
+        # unbiased scalar G / (G-1)
+        centered_returns = centered_returns * (returns.shape[1] / (returns.shape[1] - 1))
+
+    return centered_returns    
 
 @torch.compile(dynamic=True)
 def sequence_log_probs_from_logits(
@@ -249,6 +256,10 @@ def sequences_log_probs(
         logits=logits[:, :-1],
         output_ids=sequence_ids[:, 1:],  # right shift 1 block to get the actual output ids
     )
+    # log_probs = slow_sequence_log_probs_from_logits(
+    #     logits=logits[:, :-1],
+    #     output_ids=sequence_ids[:, 1:],  # right shift 1 block to get the actual output ids
+    # )
     del logits
     return log_probs
 

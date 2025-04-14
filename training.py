@@ -24,6 +24,8 @@ from evaluate import FixedSamplingConfig, EvaluationConfig, evaluate
 from accelerate.utils import set_seed
 import wandb
 import numpy as np
+from tqdm import tqdm
+from rich import print
 
 from dataclasses import dataclass
 import tyro 
@@ -146,6 +148,8 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
         kl_weight=args.grpo_config.kl_weight,
         use_clip_high=args.grpo_config.use_clip_high,
         use_token_level_loss=args.grpo_config.use_token_level_loss,
+        use_fixed_response_length=args.grpo_config.use_fixed_response_length,
+        use_surrogate_loss=args.grpo_config.use_surrogate_loss,
     )
 
     ## Reward model
@@ -181,7 +185,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
     out_dir = os.path.join(args.base_config.train_log_dir, args.wandb_config.name)
     os.makedirs(out_dir, exist_ok=True)
 
-    for batch_idx, batch_inputs in enumerate(rollout_data_loader):
+    for batch_idx, batch_inputs in tqdm(enumerate(rollout_data_loader), total=len(rollout_data_loader)):
 
         questions = batch_inputs["question"]
         answers = batch_inputs["answer"]
@@ -207,6 +211,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                 group_size=args.grpo_config.group_size,
                 seed=args.base_config.seed,
                 normalize_centered_returns=args.grpo_config.normalize_centered_returns,
+                use_rloo_scalar=args.grpo_config.use_rloo_scalar,
             )
             # sequence_ids: (num_samples * group_size, seq_len)
             # action_mask: (num_samples * group_size, seq_len)
@@ -305,7 +310,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
             }
         )
         if (batch_idx + 1) % args.base_config.train_text_log_interval == 0:
-            file_name = os.path.join(out_dir, f"log_{batch_idx}.txt")
+            file_name = os.path.join(out_dir, f"log_{batch_idx + 1}.txt")
 
             with open(file_name, "a") as f:
                 for i, completion in enumerate(completions):
@@ -378,6 +383,18 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                 torch.cuda.empty_cache()
         ### ----- Training phase END ----- ###
 
+        ### ----- Update ref model phase START ----- ###
+        if (
+            args.grpo_config.kl_weight > 0
+            and args.grpo_config.ref_model_update_freq > 0
+            and (batch_idx + 1) % args.grpo_config.ref_model_update_freq == 0
+        ):
+            reference_model.load_state_dict(
+                model.state_dict()
+            )
+        ### ----- Update ref model phase END ----- ###
+
+
         ### ----- Interval checkpoint phase START ----- ###
         if (
             args.base_config.checkpoint_dir is not None
@@ -399,7 +416,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
         ### ----- Interval checkpoint phase END ----- ###
 
         ### ----- Interval evaluation phase START ----- ###
-        if (batch_idx + 1) % args.base_config.eval_interval == 0:
+        if (batch_idx + 1) % args.base_config.eval_interval == 0 or batch_idx == 0:
             eval_results = evaluate(
                 config=eval_config,
                 model=model,
@@ -412,7 +429,8 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
             eval_outs.append(eval_results)
         ### ----- Interval evaluation phase END ----- ###
         del batch_inputs
-        lr_scheduler.step()
+        if args.grpo_config.anneling_lr:
+            lr_scheduler.step()
     ### ----- Final checkpoint phase START ----- ###
     if args.base_config.checkpoint_dir is not None:
         # save the final state dict
