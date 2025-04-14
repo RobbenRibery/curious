@@ -30,12 +30,12 @@ class FixedSamplingConfig:
     The maximum number of new tokens to use for the evaluation.
     """
     
-    temperature: float = 0.7
+    temperature: float = 1.0
     """
     The temperature to use for the evaluation.  
     """
     
-    top_p: float = 0.9
+    top_p: float = 1.0
     """
     The top p to use for the evaluation.
     """
@@ -50,7 +50,7 @@ class FixedSamplingConfig:
     Whether to sample from the model.
     """
     
-    repetition_penalty: float = 1.1
+    repetition_penalty: float = 1.0
     """
     The repetition penalty to use for the sampling.
     """
@@ -116,6 +116,8 @@ def evaluate(
     Returns:
         A dictionary containing the rewards, infos and solved rates.
     """
+    model.eval()
+    model.gradient_checkpointing_disable()
     set_seed(config.base_config.seed) 
     batch_idx = kwargs.get("batch_idx", 0)
     print(f"Batch {batch_idx} #### Evaluating...")
@@ -189,6 +191,7 @@ def evaluate(
 
         # get the rewards
         rewards_out: Dict[str, List[Dict[str, str]] | torch.Tensor] = compute_rewards(
+            model,
             reward_model,
             completions=completions,
             oracle_answers=oracle_answers,
@@ -268,6 +271,7 @@ def evaluate(
         }
     )
     print(f"Batch {batch_idx} #### Mean Eval pass@1: {mean_pass1}")
+    model.gradient_checkpointing_enable()
 
     return {
         "rewards": rewards,

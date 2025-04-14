@@ -28,7 +28,7 @@ TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1 python3 training.py \
     --sampling_config.top_k 50 \
     --sampling_config.do_sample \
     --sampling_config.use_cache \
-    --sampling_config.repetition_penalty 1.1 \
+    --sampling_config.repetition_penalty 1.0 \
     --sampling_config.system_prompt "qwen_system_prompt" \
     --reward_config.no-use-format-reward \
     --grpo_config.group_size 16 \

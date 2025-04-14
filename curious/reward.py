@@ -9,6 +9,7 @@ from dataclasses import dataclass
 ZERO_REWARD = 0.0
 NEGATIVE_REWARD = -1.0
 SOLVED_REWARD = 1.0
+PARTIAL_REWARD = -0.5
 
 THINK_PATTERN = r"<think>(.*?)</think>"
 ANSWER_PATTERN = r"<answer>(.*?)</answer>"
@@ -139,9 +140,7 @@ class GSM8KRewardModel:
             return None, NEGATIVE_REWARD, {"outcome": FailureMode.NO_ANSWER}
 
         # get the last answer as the final answer and normalize the parsed answer
-        answer_parsed: List[sympy.Expr | str] = parse(
-            answer_match[-1]
-        )
+        answer_parsed: List[sympy.Expr | str] = parse(answer_match[-1])
         if not answer_parsed:
             return None, NEGATIVE_REWARD, {"outcome": FailureMode.NO_NUMBER_IN_ANSWER}
 
@@ -150,7 +149,7 @@ class GSM8KRewardModel:
         if verify(answer_parsed, oracle_answer):
             return answer_parsed, SOLVED_REWARD, {"outcome": None}
         else:
-            return answer_parsed, ZERO_REWARD, {"outcome": FailureMode.WRONG_ANSWER}
+            return answer_parsed, PARTIAL_REWARD, {"outcome": FailureMode.WRONG_ANSWER}
 
     def format_reward(
         self, completion: str

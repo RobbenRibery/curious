@@ -133,6 +133,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
         drop_last=True,
         num_workers=args.base_config.num_workers,
     )
+
     lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=len(rollout_data_loader),
@@ -201,6 +202,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
         with torch.no_grad():
             
             model.eval()
+            model.gradient_checkpointing_disable()
             # rollout
             rollout_out = rollout(
                 model,
@@ -341,6 +343,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
         )
 
         model.train()
+        model.gradient_checkpointing_enable()
         for _ in range(args.grpo_config.epochs_per_step):
             for exp in experience_sampler:
                 optimizer.zero_grad()
