@@ -263,6 +263,43 @@ def sequences_log_probs(
     del logits
     return log_probs
 
+@torch.compile(dynamic=True)
+def sequences_log_probs_entropy(
+    model: PreTrainedModel,
+    sequence_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Computes the log probabilities of the output ids from the logits.
+
+    Args:
+        model (PreTrainedModel): The model to compute the log probabilities for.
+        sequence_ids (torch.Tensor): The sequence ids to compute the log probabilities for.
+            (num_samples * group_size, seq_len)
+        attention_mask (torch.Tensor): The attention mask to compute the log probabilities for.
+            (num_samples * group_size, seq_len)
+
+    Returns:
+        log_probs: The log probabilities of the output ids. (num_samples * group_size, seq_len-1, vocab_size)
+        entropy: The entropy of the output ids. (num_samples * group_size, seq_len-1, vocab_size)
+    """
+    output = model(input_ids=sequence_ids, attention_mask=attention_mask, use_cache=False)
+    logits = output["logits"]
+    del output 
+
+    # logits: [batch_size * num_rollouts, seq_len, vocab_size]
+    log_probs = sequence_log_probs_from_logits(
+        logits=logits[:, :-1],
+        output_ids=sequence_ids[:, 1:],  # right shift 1 block to get the actual output ids
+    )
+    # log_probs = slow_sequence_log_probs_from_logits(
+    #     logits=logits[:, :-1],
+    #     output_ids=sequence_ids[:, 1:],  # right shift 1 block to get the actual output ids
+    # )
+    entropy = sequence_entropy_from_logits(logits[:, :-1])
+
+    del logits
+    return log_probs, entropy
 
 def sequences_log_probs_with_mask(
     model: PreTrainedModel,
@@ -309,3 +346,23 @@ def sequences_log_probs_with_mask(
     logprobs[:, len_inputs:] = generation_logprobs
     masked_logprobs = logprobs * action_mask
     return masked_logprobs 
+
+@torch.compile(dynamic=True)
+def sequence_entropy_from_logits(
+    logits: torch.Tensor
+) -> torch.Tensor:
+    """
+    Computes the entropy of the output ids from the logits. https://github.com/volcengine/verl/blob/main/verl/utils/torch_functional.py#L106
+
+    Args:
+        logits (torch.Tensor): The logits of the model. (num_samples * num_rollouts, seq_len, vocab_size)
+
+    Returns:
+        torch.Tensor: The entropy of the output ids. (num_samples * num_rollouts, seq_len)
+    """
+    pd = torch.nn.functional.softmax(logits, dim=-1)
+
+    # Compute log-sum-exp over the vocabulary dimension
+    log_sum_exp = logits.logsumexp(dim=-1)  # (num_samples * num_rollouts, seq_len)
+    
+    return log_sum_exp - torch.sum(pd * logits, dim=-1)

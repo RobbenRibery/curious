@@ -25,6 +25,11 @@ class WandbConfig:
     The group to use for the wandb.
     """
 
+    entity: str = "qingyuanwu"
+    """
+    The entity to use for the wandb.
+    """
+
 
 @dataclass
 class BaseConfig:

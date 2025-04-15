@@ -12,7 +12,7 @@ from transformers import GenerationConfig
 
 from curious.data import GSM8KDataset
 from curious.utils import LOGGING_TEMPLATE, load_model_tokenizer
-from curious.sampling import rollout, sequences_log_probs
+from curious.sampling import rollout, sequences_log_probs, sequences_log_probs_entropy
 from curious.buffer import ReplayBuffer, Experience, join_experience_batch
 from curious.loss import ActorLoss, approx_kl_divergence
 from curious.reward import GSM8KRewardModel
@@ -237,16 +237,25 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
             completions:List[str] = rollout_out["completions"]
         
             attention_mask: torch.Tensor = sequence_ids != pad_token_id # (num_samples * group_size, seq_len)
-            log_probs: torch.Tensor = sequences_log_probs(
+            # log_probs: torch.Tensor = sequences_log_probs(
+            #     model=model,
+            #     sequence_ids=sequence_ids,
+            #     attention_mask=attention_mask,
+            # ) # (num_samples * group_size, seq_len-1)
+
+            
+            log_probs, entropy = sequences_log_probs_entropy(
                 model=model,
                 sequence_ids=sequence_ids,
                 attention_mask=attention_mask,
-            ) # (num_samples * group_size, seq_len-1)
+            ) 
+            # log_probs (num_samples * group_size, seq_len-1)
+            # entropy (num_samples * group_size, seq_len-1)
 
             kl, log_probs_ref = None, None
             if args.grpo_config.kl_weight > 0:
                 # compute the log probs of the reference model
-                log_probs_ref: torch.Tensor = sequences_log_probs(
+                log_probs_ref, _ = sequences_log_probs_entropy(
                     model=reference_model,
                     sequence_ids=sequence_ids,
                     attention_mask=attention_mask,
@@ -294,6 +303,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                 "train/mean_batch_format_returns": batch_mean_format_returns,
                 "train/mean_batch_outcome_returns": batch_mean_outcome_returns,
                 "train/lr": lr_scheduler.get_lr()[0],
+                "train/entropy": entropy.mean().item(),
                 "num_batches_visited": batch_idx + 1,
             }
         )
@@ -347,7 +357,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                 # get the experience to cuda 
                 exp: Experience
                 exp = exp.to(device)
-                log_probs = sequences_log_probs(
+                log_probs, _ = sequences_log_probs_entropy(
                     model, 
                     sequence_ids=exp.sequences, 
                     attention_mask=exp.attention_mask
@@ -466,6 +476,7 @@ if __name__ == "__main__":
     args = tyro.cli(TrainingConfig)
     
     wandb.init(
+        entity=args.wandb_config.entity,
         project=args.wandb_config.project,
         name=args.wandb_config.name,
         config=args,
