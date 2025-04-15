@@ -25,7 +25,7 @@ TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1 python3 training.py \
     --sampling_config.max_new_tokens 1024 \
     --sampling_config.temperature 1.0 \
     --sampling_config.top_p 1.0 \
-    --sampling_config.top_k -1 \
+    --sampling_config.top_k 0 \
     --sampling_config.do_sample \
     --sampling_config.use_cache \
     --sampling_config.repetition_penalty 1.0 \
