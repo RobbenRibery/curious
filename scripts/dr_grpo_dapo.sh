@@ -30,7 +30,7 @@ python3 training.py \
     --sampling_config.system_prompt "qwen_system_prompt" \
     --reward_config.no-use-format-reward \
     --grpo_config.group_size 16 \
-    --grpo_config.lr 6e-07 \
+    --grpo_config.lr 1e-06 \
     --grpo_config.no-anneling_lr \
     --grpo_config.weight_decay 0.0 \
     --grpo_config.kl_weight 0.0 \
