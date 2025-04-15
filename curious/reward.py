@@ -19,7 +19,7 @@ STRICT_FORMAT_PATTERN = (
     r"<answer>(?:(?!<think>|</think>).)*?</answer>)"
 )
 
-QWEN_ANSWER_PATTERN = r"boxed\{(.*?)\}\$"
+QWEN_ANSWER_PATTERN = r"boxed\{(.*?)\}"
 
 def normalize_number(answer: str) -> str:
     """
