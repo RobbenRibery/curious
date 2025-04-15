@@ -212,7 +212,7 @@ def evaluate(
                     info=info,
                 )
 
-            file_name = f"log_{batch_idx}.txt" if batch_idx > 0 else "final_log.txt"
+            file_name = f"log_{batch_idx}.txt"
             with open(os.path.join(out_dir, file_name), "a") as f:
                 f.write(text_to_log)
             f.close()

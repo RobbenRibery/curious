@@ -476,7 +476,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
             tokenizer=tokenizer,
             logger=logger,
             **{
-                "batch_idx": 0,
+                "batch_idx": batch_idx+1,
             }
         )  
         eval_outs.append(eval_results)
