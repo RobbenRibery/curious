@@ -2,11 +2,10 @@ make clean;
 export TOKENIZERS_PARALLELISM=true;
 export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:128,expandable_segments:True";
 
-
 TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1 python3 training.py \
-    --wandb_config.project "curious-grpo-gsm8k" \
-    --wandb_config.group "grpo-test" \
-    --wandb_config.name "grpo-qwen25-prompt[qwen]-reward[partial-solved]" \
+    --wandb_config.project "curious-qwen2.5" \
+    --wandb_config.group "test" \
+    --wandb_config.name "grpo-qwen2.5-0.5b" \
     --base_config.model_name "Qwen/Qwen2.5-0.5B-Instruct" \
     --base_config.device_index 0 \
     --base_config.dataset_name "openai/gsm8k" \
@@ -33,8 +32,10 @@ TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1 python3 training.py \
     --reward_config.no-use-format-reward \
     --grpo_config.group_size 16 \
     --grpo_config.lr 1e-06 \
+    --grpo_config.no-anneling-lr \
     --grpo_config.weight_decay 0.01 \
-    --grpo_config.kl_weight 0.0 \
+    --grpo_config.kl_weight 0.01 \
     --grpo_config.clip_eps 0.2 \
     --grpo_config.mini_batch_size 64 \
     --grpo_config.epochs_per_step 2 \
+    --grpo_config.ref_model_update_freq 1 \

@@ -12,7 +12,7 @@ from transformers import GenerationConfig
 
 from curious.data import GSM8KDataset
 from curious.utils import LOGGING_TEMPLATE, load_model_tokenizer
-from curious.sampling import rollout, sequences_log_probs
+from curious.sampling import rollout, sequences_log_probs, sequences_log_probs_entropy
 from curious.buffer import ReplayBuffer, Experience, join_experience_batch
 from curious.loss import ActorLoss, approx_kl_divergence, masked_mean
 from curious.reward import GSM8KRewardModel
@@ -489,6 +489,7 @@ if __name__ == "__main__":
     args = tyro.cli(TrainingConfig)
     
     wandb.init(
+        entity=args.wandb_config.entity,
         project=args.wandb_config.project,
         name=args.wandb_config.name,
         config=args,
