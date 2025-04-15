@@ -5,7 +5,7 @@ python3 training.py \
     --wandb_config.project "curious-grpo-gsm8k" \
     --wandb_config.group "drgrp-dapo-ietrate" \
     --wandb_config.name "drgrpo-dapo-test-prompt[qwen]-reward[no-format]-0kl-partial-reward[wrong-answer]-no-regularization" \
-    --base_config.model_name "Qwen/Qwen2-0.5B-Instruct" \
+    --base_config.model_name "Qwen/Qwen2.5-0.5B-Instruct" \
     --base_config.device_index 0 \
     --base_config.dataset_name "openai/gsm8k" \
     --base_config.train_batch_size 8 \

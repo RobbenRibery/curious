@@ -1,5 +1,5 @@
 import os 
-os.environ["TOKENIZERS_PARALLELIS"] = "true"
+os.environ["TOKENIZERS_PARALLELISM"] = "true"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 from typing import Callable, List, Dict, Any, Tuple
 
@@ -14,7 +14,7 @@ from curious.data import GSM8KDataset
 from curious.utils import LOGGING_TEMPLATE, load_model_tokenizer
 from curious.sampling import rollout, sequences_log_probs
 from curious.buffer import ReplayBuffer, Experience, join_experience_batch
-from curious.loss import ActorLoss, approx_kl_divergence
+from curious.loss import ActorLoss, approx_kl_divergence, masked_mean
 from curious.reward import GSM8KRewardModel
 from curious.prompt import *
 
@@ -111,7 +111,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
     pad_token_id = tokenizer.eos_token_id
 
     ## Optimizer
-    optimizer = optim.AdamW(
+    optimizer = optim.SGD(
         model.parameters(), 
         lr=args.grpo_config.lr,
         weight_decay=args.grpo_config.weight_decay,
@@ -181,6 +181,13 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
         reward_config=args.reward_config,
         wandb_config=args.wandb_config,
     )
+    evaluate(
+        config=eval_config,
+        model=model,
+        tokenizer=tokenizer,
+        logger=logger,
+        **{"batch_idx": 0}
+    )  
 
     # create the logging directory for training logs
     out_dir = os.path.join(args.base_config.train_log_dir, args.wandb_config.name)
@@ -239,19 +246,22 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
             completions:List[str] = rollout_out["completions"]
         
             attention_mask: torch.Tensor = sequence_ids != pad_token_id # (num_samples * group_size, seq_len)
-            log_probs: torch.Tensor = sequences_log_probs(
+            log_probs, entropy = sequences_log_probs(
                 model=model,
                 sequence_ids=sequence_ids,
                 attention_mask=attention_mask,
+                return_entropy=True,
             ) # (num_samples * group_size, seq_len-1)
+            action_entropy = masked_mean(entropy, action_mask, dim=None)
 
             kl, log_probs_ref = None, None
             if args.grpo_config.kl_weight > 0:
                 # compute the log probs of the reference model
-                log_probs_ref: torch.Tensor = sequences_log_probs(
+                log_probs_ref, _ = sequences_log_probs(
                     model=reference_model,
                     sequence_ids=sequence_ids,
                     attention_mask=attention_mask,
+                    return_entropy=False,
                 ) # (num_samples * group_size, seq_len-1)
 
                 # compute the kl divergence
@@ -274,13 +284,15 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
             )
             replay_buffer.append(experience.to(cpu_device))
             
-        del kl
-        del log_probs_ref
-        del log_probs 
-        del attention_mask
-        del sequence_ids
-        del action_mask
-        del rollout_out
+        del (
+            kl,
+            log_probs_ref,
+            log_probs,
+            attention_mask,
+            sequence_ids,
+            action_mask,
+            rollout_out,
+        )
         gc.collect()
         torch.cuda.empty_cache()
         ### ----- Rollout phase END ----- ###
@@ -296,9 +308,13 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                 "train/mean_batch_format_returns": batch_mean_format_returns,
                 "train/mean_batch_outcome_returns": batch_mean_outcome_returns,
                 "train/lr": lr_scheduler.get_lr()[0],
+                "train/mean_action_entropy": action_entropy.item(),
                 "num_batches_visited": batch_idx + 1,
             }
         )
+        del action_entropy
+        gc.collect()
+        torch.cuda.empty_cache()
         print(
             f"batch_idx: {batch_idx} | returns: {batch_mean_returns} | solved_rate: {batch_mean_solved_rate} | format_returns: {batch_mean_format_returns} | outcome_returns: {batch_mean_outcome_returns}"
         )
@@ -336,7 +352,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
         experience_sampler = DataLoader(
             replay_buffer,
             batch_size=args.grpo_config.mini_batch_size,
-            shuffle=True if args.grpo_config.use_token_level_loss else False,
+            shuffle=True,
             drop_last=False,
             collate_fn=join_experience_batch,
             num_workers=args.base_config.num_workers,
@@ -350,10 +366,11 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                 # get the experience to cuda 
                 exp: Experience
                 exp = exp.to(device)
-                log_probs = sequences_log_probs(
+                log_probs, _ = sequences_log_probs(
                     model, 
                     sequence_ids=exp.sequences, 
-                    attention_mask=exp.attention_mask
+                    attention_mask=exp.attention_mask,
+                    return_entropy=False,
                 )
                 loss, mean_kl = objective(log_probs=log_probs, experience=exp)
                 loss: torch.Tensor
@@ -379,9 +396,12 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                         "train/loss": loss,
                     }
                 )
-                del grad_norm
-                del loss 
-                del mean_kl
+
+                del (
+                    grad_norm,
+                    loss,
+                    mean_kl,
+                )
                 gc.collect()
                 torch.cuda.empty_cache()
         ### ----- Training phase END ----- ###
@@ -419,7 +439,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
         ### ----- Interval checkpoint phase END ----- ###
 
         ### ----- Interval evaluation phase START ----- ###
-        if (batch_idx + 1) % args.base_config.eval_interval == 0 or batch_idx == 0:
+        if (batch_idx + 1) % args.base_config.eval_interval == 0:
             eval_results = evaluate(
                 config=eval_config,
                 model=model,

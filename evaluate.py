@@ -30,36 +30,6 @@ class FixedSamplingConfig:
     The maximum number of new tokens to use for the evaluation.
     """
     
-    temperature: float = 1.0
-    """
-    The temperature to use for the evaluation.  
-    """
-    
-    top_p: float = 1.0
-    """
-    The top p to use for the evaluation.
-    """
-
-    top_k: int = 50
-    """
-    The top k to use for the evaluation.
-    """
-
-    do_sample: bool = True
-    """
-    Whether to sample from the model.
-    """
-    
-    repetition_penalty: float = 1.0
-    """
-    The repetition penalty to use for the sampling.
-    """
-    
-    use_cache: bool = True
-    """
-    Whether to use the cache during the sampling.
-    """
-    
     system_prompt: str = "qwen_system_prompt"
     """
     The system prompt to use for the sampling.
@@ -94,6 +64,11 @@ class EvaluationConfig:
     reward_config: RewardConfig
     """
     The reward configuration.
+    """
+
+    multiple_ckpt_evals: bool = False
+    """
+    Whether to evaluate the model on multiple checkpoints.
     """
 
 
@@ -170,23 +145,19 @@ def evaluate(
         questions = batch_inputs["question"]
         oracle_answers = batch_inputs["oracle_answer"]
 
-        # Get the model predictions
+        # Get the model predictions (greedy)
         seq_ids = model.generate(
             input_ids = batch_inputs["input_ids"].to(model.device),
             attention_mask = batch_inputs["attention_mask"].to(model.device),
             max_new_tokens=config.sampling_config.max_new_tokens,
-            temperature=config.sampling_config.temperature,
-            top_p=config.sampling_config.top_p,
-            top_k=config.sampling_config.top_k,
-            do_sample=config.sampling_config.do_sample,
             eos_token_id=tokenizer.eos_token_id,
             pad_token_id=tokenizer.eos_token_id,
-            repetition_penalty=config.sampling_config.repetition_penalty,
         )
 
         # Decode the generations
         completions: List[str] = tokenizer.batch_decode(
-            seq_ids[:, batch_inputs["input_ids"].shape[1] :], skip_special_tokens=True
+            seq_ids[:, batch_inputs["input_ids"].shape[1] :], 
+            skip_special_tokens=True
         )
 
         # get the rewards
@@ -271,7 +242,6 @@ def evaluate(
         }
     )
     print(f"Batch {batch_idx} #### Mean Eval pass@1: {mean_pass1}")
-    model.gradient_checkpointing_enable()
 
     return {
         "rewards": rewards,

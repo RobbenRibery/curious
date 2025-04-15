@@ -6,7 +6,7 @@ TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1 python3 training.py \
     --wandb_config.project "curious-grpo-gsm8k" \
     --wandb_config.group "grpo-test" \
     --wandb_config.name "rloo-test-prompt[qwen]-reward[no-format]" \
-    --base_config.model_name "Qwen/Qwen2-0.5B-Instruct" \
+    --base_config.model_name "Qwen/Qwen2.5-0.5B-Instruct" \
     --base_config.device_index 0 \
     --base_config.dataset_name "openai/gsm8k" \
     --base_config.train_batch_size 8 \
@@ -21,7 +21,7 @@ TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1 python3 training.py \
     --base_config.train_text_log_interval 20 \
     --base_config.eval_text_log_interval 100 \
     --sampling_config.model_prompt_length 1024 \
-    --sampling_config.max_new_tokens 1400 \
+    --sampling_config.max_new_tokens 1024 \
     --sampling_config.temperature 1.0 \
     --sampling_config.top_p 1.0 \
     --sampling_config.top_k 50 \

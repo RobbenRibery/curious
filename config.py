@@ -107,6 +107,11 @@ class BaseConfig:
     The interval to use for the eval text log.
     """
 
+    return_entropy: bool = False
+    """
+    Whether to return the entropy of the tokens.
+    """
+
 @dataclass
 class SamplingConfig:
     """
@@ -195,7 +200,7 @@ class GRPOConfig:
     The learning rate to use for the GRPO.
     """
 
-    anneling_lr: bool = True
+    anneling_lr: bool = False
     """
     Whether to use the anneling learning rate.
     """

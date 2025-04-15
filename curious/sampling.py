@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 import torch
 from transformers import (
@@ -10,6 +10,46 @@ from accelerate.utils import set_seed
 from transformers.generation.utils import GenerateDecoderOnlyOutput
 
 from curious.reward import GSM8KRewardModel
+
+def compute_rewards(
+    model: PreTrainedModel,
+    reward_model: GSM8KRewardModel,
+    completions: List[str],
+    oracle_answers: List[str],
+    group_size: int,
+) -> Dict[str, torch.Tensor]:
+    """
+    Computes the rewards for a list of completions and oracle answers.
+    """
+    assert int(len(completions) / len(oracle_answers)) == group_size, \
+    f"The number of completions must be equal to the number of oracle answers times the group size: {len(completions)} != {len(oracle_answers)} * {group_size}"
+
+    returns = []
+    infos = []
+    solved_masks = []
+
+    for begin_idx in range(0, len(completions), group_size):
+
+        end_idx = begin_idx + group_size
+        group_completions = completions[begin_idx:end_idx]
+
+        group_idx = begin_idx // group_size
+        group_oracle_answers = [oracle_answers[group_idx]] * group_size
+        
+        group_rewards, group_infos, solved = reward_model(
+            group_completions,
+            group_oracle_answers,
+        )
+
+        returns.append(group_rewards)
+        infos.extend(group_infos)
+        solved_masks.append(solved)
+    
+    return {
+        "returns": torch.tensor(returns, dtype=torch.bfloat16, device=model.device), # (num_questions, group_size)
+        "solved_masks": torch.tensor(solved_masks, dtype=torch.bfloat16, device=model.device), # (num_questions, group_size)
+        "infos": infos, # single list (len = num_questions * group_size)
+    }
 
 @torch.no_grad()
 def sample_responses(
@@ -51,7 +91,6 @@ def sample_responses(
             skip_special_tokens=True
         ),
     }
-
 
 @torch.no_grad()
 def rollout(
@@ -126,47 +165,6 @@ def rollout(
 
     return rewards_out
 
-
-def compute_rewards(
-    model: PreTrainedModel,
-    reward_model: GSM8KRewardModel,
-    completions: List[str],
-    oracle_answers: List[str],
-    group_size: int,
-) -> Dict[str, torch.Tensor]:
-    """
-    Computes the rewards for a list of completions and oracle answers.
-    """
-    assert int(len(completions) / len(oracle_answers)) == group_size, \
-    f"The number of completions must be equal to the number of oracle answers times the group size: {len(completions)} != {len(oracle_answers)} * {group_size}"
-
-    returns = []
-    infos = []
-    solved_masks = []
-
-    for begin_idx in range(0, len(completions), group_size):
-
-        end_idx = begin_idx + group_size
-        group_completions = completions[begin_idx:end_idx]
-
-        group_idx = begin_idx // group_size
-        group_oracle_answers = [oracle_answers[group_idx]] * group_size
-        
-        group_rewards, group_infos, solved = reward_model(
-            group_completions,
-            group_oracle_answers,
-        )
-
-        returns.append(group_rewards)
-        infos.extend(group_infos)
-        solved_masks.append(solved)
-    
-    return {
-        "returns": torch.tensor(returns, dtype=torch.bfloat16, device=model.device), # (num_questions, group_size)
-        "solved_masks": torch.tensor(solved_masks, dtype=torch.bfloat16, device=model.device), # (num_questions, group_size)
-        "infos": infos, # single list (len = num_questions * group_size)
-    }
-
 @torch.compile(dynamic=True)
 def compute_group_advantages(returns: torch.Tensor, eps: float = 1e-8, normalize: bool = True, use_rloo_scalar: bool = False) -> torch.Tensor:
     """
@@ -191,9 +189,11 @@ def compute_group_advantages(returns: torch.Tensor, eps: float = 1e-8, normalize
     return centered_returns    
 
 @torch.compile(dynamic=True)
-def sequence_log_probs_from_logits(
-    logits: torch.Tensor, output_ids: torch.Tensor
-) -> torch.Tensor:
+def _sequence_log_probs_from_logits(
+    logits: torch.Tensor, 
+    output_ids: torch.Tensor,
+    return_entropy: bool = False,
+) -> Tuple[torch.Tensor, torch.Tensor | None]:
     """
     Computes the log probabilities of the output ids from the logits.
 
@@ -210,32 +210,47 @@ def sequence_log_probs_from_logits(
 
     # Compute log-sum-exp over the vocabulary dimension
     log_sum_exp = logits.logsumexp(dim=-1)  # (num_samples * num_rollouts, seq_len)
-    return gathered_logits - log_sum_exp
+    log_probs = gathered_logits - log_sum_exp
+
+    if return_entropy:
+        pd = torch.nn.functional.softmax(logits, dim=-1)
+        entropy = log_sum_exp - torch.sum(pd * logits, dim=-1)
+        return log_probs, entropy
+    else:
+        return log_probs, None
 
 @torch.compile(dynamic=True)
-def slow_sequence_log_probs_from_logits(
-    logits: torch.Tensor, output_ids: torch.Tensor
-) -> torch.Tensor:
+def _slow_sequence_log_probs_from_logits(
+    logits: torch.Tensor, 
+    output_ids: torch.Tensor,
+    return_entropy: bool = False,
+) -> Tuple[torch.Tensor, torch.Tensor | None]:
     """
     Computes the log probabilities of the output ids from the logits.
     """
     token_logprobs = []
-    for logits_row, index_row in zip(logits, output_ids):
-        token_logprobs.append(
-            sequence_log_probs_from_logits(
-                logits=logits_row,
-                output_ids=index_row,
-            )
-        )
-    return torch.stack(token_logprobs)
+    if return_entropy:
+        token_entropy = []
 
+    for logits_row, index_row in zip(logits, output_ids):
+        token_logprob, entropy = _sequence_log_probs_from_logits(
+            logits=logits_row,
+            output_ids=index_row,
+            return_entropy=return_entropy,
+        )
+        token_logprobs.append(token_logprob)
+        if return_entropy:
+            token_entropy.append(entropy)
+
+    return torch.stack(token_logprobs), torch.stack(token_entropy) if return_entropy else None
 
 @torch.compile(dynamic=True)
 def sequences_log_probs(
     model: PreTrainedModel,
     sequence_ids: torch.Tensor,
     attention_mask: torch.Tensor,
-) -> torch.Tensor:
+    return_entropy: bool = True,
+) -> Tuple[torch.Tensor, torch.Tensor | None]:
     """
     Computes the log probabilities of the output ids from the logits.
 
@@ -254,17 +269,17 @@ def sequences_log_probs(
     del output 
 
     # logits: [batch_size * num_rollouts, seq_len, vocab_size]
-    log_probs = sequence_log_probs_from_logits(
+    log_probs, entropy = _sequence_log_probs_from_logits(
         logits=logits[:, :-1],
         output_ids=sequence_ids[:, 1:],  # right shift 1 block to get the actual output ids
+        return_entropy=return_entropy,
     )
-    # log_probs = slow_sequence_log_probs_from_logits(
+    # log_probs = _slow_sequence_log_probs_from_logits(
     #     logits=logits[:, :-1],
     #     output_ids=sequence_ids[:, 1:],  # right shift 1 block to get the actual output ids
     # )
     del logits
-    return log_probs
-
+    return log_probs, entropy
 
 def sequences_log_probs_with_mask(
     model: PreTrainedModel,
