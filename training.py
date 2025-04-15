@@ -111,7 +111,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
     pad_token_id = tokenizer.eos_token_id
 
     ## Optimizer
-    optimizer = optim.SGD(
+    optimizer = optim.AdamW(
         model.parameters(), 
         lr=args.grpo_config.lr,
         weight_decay=args.grpo_config.weight_decay,

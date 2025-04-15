@@ -20,12 +20,12 @@ TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1 python3 training.py \
     --base_config.checkpoint_interval 100 \
     --base_config.eval_interval 50 \
     --base_config.train_text_log_interval 50 \
-    --base_config.eval_text_log_interval 100 \
+    --base_config.eval_text_log_interval 50 \
     --sampling_config.model_prompt_length 1024 \
     --sampling_config.max_new_tokens 1024 \
     --sampling_config.temperature 1.0 \
     --sampling_config.top_p 1.0 \
-    --sampling_config.top_k 100 \
+    --sampling_config.top_k -1 \
     --sampling_config.do_sample \
     --sampling_config.use_cache \
     --sampling_config.repetition_penalty 1.0 \
@@ -33,7 +33,7 @@ TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1 python3 training.py \
     --reward_config.no-use-format-reward \
     --grpo_config.group_size 16 \
     --grpo_config.lr 1e-06 \
-    --grpo_config.weight_decay 0.0 \
+    --grpo_config.weight_decay 0.01 \
     --grpo_config.kl_weight 0.0 \
     --grpo_config.clip_eps 0.2 \
     --grpo_config.mini_batch_size 64 \
