@@ -17,10 +17,10 @@ TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1 python3 training.py \
     --base_config.eval_log_dir "eval_logs" \
     --base_config.seed 42 \
     --base_config.checkpoint_dir "checkpoints" \
-    --base_config.checkpoint_interval 100 \
+    --base_config.checkpoint_interval 10000 \
     --base_config.eval_interval 50 \
-    --base_config.train_text_log_interval 50 \
-    --base_config.eval_text_log_interval 50 \
+    --base_config.train_text_log_interval 50000 \
+    --base_config.eval_text_log_interval 50000 \
     --sampling_config.model_prompt_length 1024 \
     --sampling_config.max_new_tokens 1024 \
     --sampling_config.temperature 1.2 \
