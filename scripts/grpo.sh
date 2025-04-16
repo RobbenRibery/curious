@@ -37,4 +37,4 @@ TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1 python3 training.py \
     --grpo_config.kl_weight 0.0 \
     --grpo_config.clip_eps 0.2 \
     --grpo_config.mini_batch_size 64 \
-    --grpo_config.epochs_per_step 2 \
+    --grpo_config.epochs_per_step 3 \
