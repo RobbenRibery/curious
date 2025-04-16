@@ -6,7 +6,7 @@ export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:128,expandable_segments:True";
 TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1 python3 training.py \
     --wandb_config.project "curious-grpo-gsm8k" \
     --wandb_config.group "grpo-test" \
-    --wandb_config.name "grpo-qwen25-prompt[qwen]-reward[partial-solved]-diversed-sampling-5e06rl-attemp2" \
+    --wandb_config.name "grpo-qwen25-prompt[qwen]-reward[partial-solved]-diversed-sampling-5e06rl-attemp3" \
     --base_config.model_name "Qwen/Qwen2.5-0.5B-Instruct" \
     --base_config.device_index 0 \
     --base_config.dataset_name "openai/gsm8k" \
