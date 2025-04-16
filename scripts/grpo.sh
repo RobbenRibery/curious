@@ -3,7 +3,7 @@ export TOKENIZERS_PARALLELISM=true;
 export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:128,expandable_segments:True";
 
 
-TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1 python training.py \
+TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1 /root/.cache/pypoetry/virtualenvs/curious-oMlQ4VcU-py3.11/bin/python training.py \
     --wandb_config.project "curious-grpo-gsm8k" \
     --wandb_config.group "grpo-test" \
     --wandb_config.name "grpo-qwen25-prompt[qwen]-reward[partial-solved]-diversed-sampling-5e06rl-attemp3" \
