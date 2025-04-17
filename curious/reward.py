@@ -130,23 +130,33 @@ class GSM8KRewardModel:
         )
 
         # find all the answer matches
-        answer_match: List[str] | None = []
+        answer_match: List[Dict[str, str | int]] | None = []
         for match_ in re.finditer(self.answer_pattern, completion, flags=re.DOTALL):
-            answer_match.append(match_.group(1))
+            answer_match.append(
+                {
+                    "answer": match_.group(1),
+                    "start": match_.start(),
+                    "end": match_.end(),
+                }
+            )
 
         # return negative reward in case no answer is found
         if not answer_match:
             return None, NEGATIVE_REWARD, {"outcome": FailureMode.NO_ANSWER}
 
         # get the last answer as the final answer and normalize the parsed answer
-        answer_parsed: List[sympy.Expr | str] = parse(answer_match[-1])
+        answer_item = answer_match[-1]
+        answer_parsed: List[sympy.Expr | str] = parse(answer_item["answer"])
         if not answer_parsed:
             return None, NEGATIVE_REWARD, {"outcome": FailureMode.NO_NUMBER_IN_ANSWER}
 
         # return positive reward in case
         # the answer is exactly the same as the oracle answer
         if verify(answer_parsed, oracle_answer):
-            return answer_parsed, SOLVED_REWARD, {"outcome": None}
+            lp = len(completion[:answer_item["start"]].split(" "))
+            ls = len(completion[answer_item["end"]:].split(" "))
+            reward = SOLVED_REWARD - min(ls / (lp + 1e-08), 1)
+            return answer_parsed, reward, {"outcome": None}
         else:
             return answer_parsed, PARTIAL_REWARD, {"outcome": FailureMode.WRONG_ANSWER}
 
