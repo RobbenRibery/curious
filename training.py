@@ -137,6 +137,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
     lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=len(rollout_data_loader),
+        eta_min=1e-06,
     )
     
     ## Replay buffer
