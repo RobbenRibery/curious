@@ -11,7 +11,6 @@ package-mode = false
 python-dotenv = "^1.0.1"
 python = ">=3.11.0,<3.14"
 torch = "^2.6.0"
-reasoning-gym = "^0.1.12"
 transformers = "^4.49.0"
 toml = "^0.10.2"
 wandb = "^0.19.7"
@@ -19,21 +18,13 @@ datasets = "^3.3.2"
 unidiff = "^0.7.5"
 diff-parser = "^1.1"
 tree-sitter = "^0.24.0"
-lightning = "^2.5.0.post0"
-ipython = "8.22.0"
 accelerate = ">=0.26.0"
 tyro = "^0.9.17"
-modal = "^0.73.107"
 setuptools = "^76.0.0"
 math-verify = "^0.7.0"
 memory-profiler = "^0.61.0"
-easydel = "^0.1.2"
-jax = "^0.5.3"
-flax = "^0.10.5"
-chex = "^0.1.89"
 trl = "^0.16.1"
 liger-kernel = "^0.5.7"
-flash-attn = "^2.7.4.post1"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29.5"
@@ -42,9 +33,5 @@ ipykernel = "^6.29.5"
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
-# Add specific configurations for Modal
-[tool.modal]
-dependencies = [
-    "packaging==23.2",
-    "transformers==4.49.0"
-]
+[tool.poetry.build]
+generate-setup-file = true

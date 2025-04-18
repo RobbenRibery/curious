@@ -133,6 +133,9 @@ def evaluate(
         answer_pattern=config.reward_config.answer_pattern,
         think_pattern=config.reward_config.think_pattern,
         use_format_reward=config.reward_config.use_format_reward,
+        use_overlong_penalty=config.reward_config.use_overlong_penalty,
+        l_max=config.reward_config.l_max,
+        l_cache=config.reward_config.l_cache,
     )
 
     rewards: List[float] = []
@@ -176,6 +179,7 @@ def evaluate(
 
         batch_mean_format_returns: float = np.array([x["format_reward"] for x in batch_infos]).mean()
         batch_mean_outcome_returns: float = np.array([x["outcome_reward"] for x in batch_infos]).mean()
+        batch_mean_length_penalty: float = np.array([x["length_penalty"] for x in batch_infos]).mean()
 
         rewards.extend(batch_rewards.tolist())
         infos.extend(batch_infos)
@@ -189,7 +193,10 @@ def evaluate(
                 "eval/batch_solved_masks": batch_solved_masks.mean(),
                 "eval/batch_mean_format_returns": batch_mean_format_returns,
                 "eval/batch_mean_outcome_returns": batch_mean_outcome_returns,
+                "eval/batch_mean_length_penalty": batch_mean_length_penalty,
                 "eval/batch_mean_num_words_in_completions": np.array(batch_num_words_in_completions).mean(),
+                "eval/batch_max_num_words_in_completions": np.array(batch_num_words_in_completions).max(),
+                "eval/batch_min_num_words_in_completions": np.array(batch_num_words_in_completions).min(),
             }
         )
 

@@ -1,6 +1,5 @@
 import re
 from typing import List, Tuple, Optional, Dict
-from concurrent.futures import ThreadPoolExecutor, Future
 
 import sympy
 from math_verify import verify, parse
@@ -53,6 +52,9 @@ class GSM8KRewardModel:
         format_pattern: str = BASE_FORMAT_PATTERN,
         use_format_reward: bool = False,
         use_strict_format_reward: bool = False,
+        use_overlong_penalty: bool = False,
+        l_max: int = 300,
+        l_cache: int = 100,
     ) -> None:
         """
         Initialize the reward model.
@@ -63,6 +65,9 @@ class GSM8KRewardModel:
             format_pattern (str): The pattern to check the format of the completion.
             use_format_reward (bool): Whether to use the format reward.
             use_strict_format_reward (bool): Whether to use the strict format reward.
+            use_overlong_penalty (bool): Whether to use the overlong penalty.
+            l_max (int): The maximum length of the completion.
+            l_cache (int): The cache length of the completion.
         """
         # initialize the patterns
         self.answer_pattern = answer_pattern
@@ -74,6 +79,10 @@ class GSM8KRewardModel:
             self.format_pattern = STRICT_FORMAT_PATTERN
 
         self.use_format_reward = use_format_reward
+        self.use_overlong_penalty = use_overlong_penalty
+        self.l_max = l_max
+        self.l_cache = l_cache
+        self.punish_free_length = self.l_max - self.l_cache
 
     def get_answer_from_gt(self, answer_text: str) -> Dict[str, str]:
         """
@@ -131,25 +140,62 @@ class GSM8KRewardModel:
         )
 
         # find all the answer matches
-        answer_match: List[str] | None = []
+        answer_match: List[Dict[str, str | int]] | None = []
         for match_ in re.finditer(self.answer_pattern, completion, flags=re.DOTALL):
-            answer_match.append(match_.group(1))
+            answer_match.append(
+                {
+                    "answer": match_.group(1),
+                    "start": match_.start(),
+                    "end": match_.end(),
+                }
+            )
 
         # return negative reward in case no answer is found
         if not answer_match:
             return None, NEGATIVE_REWARD, {"outcome": FailureMode.NO_ANSWER}
 
         # get the last answer as the final answer and normalize the parsed answer
-        answer_parsed: List[sympy.Expr | str] = parse(answer_match[-1])
+        answer_item = answer_match[-1]
+        answer_parsed: List[sympy.Expr | str] = parse(answer_item["answer"])
         if not answer_parsed:
             return None, NEGATIVE_REWARD, {"outcome": FailureMode.NO_NUMBER_IN_ANSWER}
+
+        # suffix and prefix penalty
+        lp = len(completion[:answer_item["start"]].split(" "))
+        ls = len(completion[answer_item["end"]:].split(" "))
+        ratio = ls / (lp + 1e-08)
+        penalty = min(ratio, 1)
 
         # return positive reward in case
         # the answer is exactly the same as the oracle answer
         if verify(answer_parsed, oracle_answer):
-            return answer_parsed, SOLVED_REWARD, {"outcome": None}
+            return answer_parsed, SOLVED_REWARD - penalty, {"outcome": None}
         else:
-            return answer_parsed, PARTIAL_REWARD, {"outcome": FailureMode.WRONG_ANSWER}
+            return answer_parsed, PARTIAL_REWARD - penalty, {"outcome": FailureMode.WRONG_ANSWER}
+
+    def length_penalty(self, completion: str) -> float:
+        """
+        Computes the length penalty for a given completion.
+
+        Args:
+            completion (str): The string containing the completion.
+
+        Returns:
+            float: The length penalty.
+        """
+        if not self.use_overlong_penalty:
+            return ZERO_REWARD
+
+        num_words_in_response = len(completion.split(" "))
+        if num_words_in_response == 1:
+            num_words_in_response = len(completion)
+
+        if num_words_in_response <= self.punish_free_length:
+            return ZERO_REWARD
+        elif num_words_in_response <= self.l_max:
+            return (self.punish_free_length - num_words_in_response) / self.l_cache
+        else:
+            return NEGATIVE_REWARD
 
     def format_reward(
         self, completion: str
@@ -242,7 +288,10 @@ class GSM8KRewardModel:
         info.update({"parsed_reasoning": section_parsed})
         info.update({"format_reward": format_reward})
 
-        reward = outcome_reward + format_reward
+        length_penalty = self.length_penalty(completion)
+        info.update({"length_penalty": length_penalty})
+
+        reward = outcome_reward + format_reward + length_penalty
         return reward, info
 
     def __call__(

@@ -137,6 +137,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
     lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=len(rollout_data_loader),
+        eta_min=1e-06,
     )
     
     ## Replay buffer
@@ -158,6 +159,9 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
         answer_pattern=args.reward_config.answer_pattern,
         think_pattern=args.reward_config.think_pattern,
         use_format_reward=args.reward_config.use_format_reward,
+        use_overlong_penalty=args.reward_config.use_overlong_penalty,
+        l_max=args.reward_config.l_max,
+        l_cache=args.reward_config.l_cache,
     )
 
     ## Sampling config
@@ -232,9 +236,14 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
             info_list: List[Dict[str, float]] = rollout_out["infos"]
             batch_mean_format_returns: float = np.array([x["format_reward"] for x in info_list]).mean()
             batch_mean_outcome_returns: float = np.array([x["outcome_reward"] for x in info_list]).mean()
+            batch_mean_length_penalty: float = np.array([x["length_penalty"] for x in info_list]).mean()
+
             batch_mean_returns: float = rollout_out["returns"].mean().item()
             batch_mean_solved_rate: float = rollout_out["solved_masks"].mean().item()
+
             batch_mean_num_words_in_completions: float = rollout_out["num_words_in_completions"].mean().item()
+            batch_max_num_words_in_completions: float = rollout_out["num_words_in_completions"].max().item()
+            batch_min_num_words_in_completions: float = rollout_out["num_words_in_completions"].min().item()
 
             # compute the log probs
             returns: torch.Tensor = rollout_out["returns"].reshape(-1)
@@ -304,9 +313,14 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
             {
                 "train/mean_batch_returns": batch_mean_returns,
                 "train/mean_batch_solved_rate": batch_mean_solved_rate,
+
                 "train/mean_num_words_in_completions": batch_mean_num_words_in_completions,
+                "train/max_num_words_in_completions": batch_max_num_words_in_completions,
+                "train/min_num_words_in_completions": batch_min_num_words_in_completions,
+
                 "train/mean_batch_format_returns": batch_mean_format_returns,
                 "train/mean_batch_outcome_returns": batch_mean_outcome_returns,
+                "train/mean_batch_length_penalty": batch_mean_length_penalty,
                 "train/lr": lr_scheduler.get_lr()[0],
                 "train/mean_action_entropy": action_entropy.item(),
                 "num_batches_visited": batch_idx + 1,
