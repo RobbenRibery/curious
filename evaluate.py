@@ -201,7 +201,7 @@ def evaluate(
         )
 
         ## Save the text on disk if the batch index is a multiple of the eval text log interval
-        if batch_idx % config.base_config.eval_text_log_interval == 0 and batch_idx > 0:
+        if batch_idx % config.base_config.eval_text_log_interval == 0:
             # Log the text to logger
             text_to_log = ""
             for question, answer, completion, reward, info in zip(
