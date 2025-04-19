@@ -216,7 +216,7 @@ class GRPOConfig:
     Whether to use the anneling learning rate.
     """
 
-    weight_decay: float = 0.01
+    weight_decay: float = 0.0
     """
     The weight decay to use for the GRPO.
     """

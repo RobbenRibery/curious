@@ -2,15 +2,14 @@ make clean;
 export TOKENIZERS_PARALLELISM=true;
 export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:128,expandable_segments:True";
 
-
 TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1 python training.py \
     --wandb_config.project "curious-grpo-gsm8k" \
     --wandb_config.group "grpo-test" \
-    --wandb_config.name "grpo-qwen25-prompt[qwen]-reward[partial-solved]-temp1nucleassamping-5e06rl-anneal-trailing-penalty-overlong-filtering" \
+    --wandb_config.name "grpo-qwen25-prompt[qwen]-reward[partial-solved]-temp1nucleassamping-2_5e06rl-anneal-trailing-bsz-16" \
     --base_config.model_name "Qwen/Qwen2.5-0.5B-Instruct" \
     --base_config.device_index 0 \
     --base_config.dataset_name "openai/gsm8k" \
-    --base_config.train_batch_size 8 \
+    --base_config.train_batch_size 16 \
     --base_config.eval_batch_size 1024 \
     --base_config.num_workers 16 \
     --base_config.train_log_dir "train_logs" \
@@ -33,12 +32,13 @@ TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1 python training.py \
     --reward_config.no-use-format-reward \
     --reward_config.l-max 300 \
     --reward_config.l-cache 100 \
-    --reward_config.use-overlong-penalty \
-    --grpo_config.group_size 32 \
-    --grpo_config.lr 5e-06 \
-    --grpo_config.weight_decay 0.01 \
-    --grpo_config.kl_weight 0.0 \
+    --reward_config.no-use-overlong-penalty \
+    --grpo_config.group_size 16 \
+    --grpo_config.lr 2.5e-06 \
+    --grpo_config.weight_decay 0.0 \
+    --grpo_config.kl_weight 0.001 \
     --grpo_config.clip_eps 0.2 \
     --grpo_config.mini_batch_size 64 \
     --grpo_config.epochs_per_step 2 \
     --grpo_config.anneling_lr \
+    --grpo_config.ref_model_update_freq 1 \
