@@ -12,9 +12,15 @@ from transformers import GenerationConfig
 
 from curious.data import GSM8KDataset
 from curious.utils import LOGGING_TEMPLATE, load_model_tokenizer
-from curious.sampling import rollout, sequences_log_probs
+from curious.sampling import rollout, sequences_log_probs, linear_temperature_annealing
 from curious.buffer import ReplayBuffer, Experience, join_experience_batch
-from curious.loss import ActorLoss, approx_kl_divergence, masked_mean
+from curious.loss import (
+    ActorLoss, 
+    AdaptiveKLController, 
+    ConstantKLController, 
+    approx_kl_divergence, 
+    masked_mean,
+)
 from curious.reward import GSM8KRewardModel
 from curious.prompt import *
 
@@ -92,6 +98,19 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
     
     ## ref policy
     if args.grpo_config.kl_weight > 0:
+        if args.grpo_config.kl_controller == "adaptive":
+            kl_controller = AdaptiveKLController(
+                init_kl_coef=args.grpo_config.kl_weight,
+                target_kl=args.grpo_config.kl_target,
+                horizon=args.grpo_config.kl_horizon_factor * args.grpo_config.mini_batch_size,
+            )
+        elif args.grpo_config.kl_controller == "constant":
+            kl_controller = ConstantKLController(
+                init_kl_coef=args.grpo_config.kl_weight,
+            )
+        else:
+            raise ValueError(f"Invalid KL controller: {args.grpo_config.kl_controller}")
+
         reference_model, _ = load_model_tokenizer(
             args.base_config.model_name, 
             device_map=device, 
@@ -137,7 +156,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
     lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=len(rollout_data_loader),
-        eta_min=1e-06,
+        eta_min=args.grpo_config.lr * 1e-03,
     )
     
     ## Replay buffer
@@ -198,10 +217,8 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
     os.makedirs(out_dir, exist_ok=True)
 
     for batch_idx, batch_inputs in tqdm(enumerate(rollout_data_loader), total=len(rollout_data_loader)):
-
         questions = batch_inputs["question"]
         answers = batch_inputs["answer"]
-        
         print(f"Batch indx {batch_idx}")
         print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/(1024**3)))
         print("torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/(1024**3)))
@@ -214,6 +231,15 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
             
             model.eval()
             model.gradient_checkpointing_disable()
+
+            if args.grpo_config.anneling_temperature:
+                generation_config.temperature = linear_temperature_annealing(
+                    current_step=batch_idx,
+                    total_steps=len(rollout_data_loader),
+                    start_temp=args.sampling_config.temperature,
+                    end_temp=args.sampling_config.temperature * 0.7,
+                )
+
             # rollout
             rollout_out = rollout(
                 model,
@@ -386,7 +412,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                     attention_mask=exp.attention_mask,
                     return_entropy=False,
                 )
-                loss, mean_kl = objective(log_probs=log_probs, experience=exp)
+                loss, mean_kl, actor_loss = objective(log_probs=log_probs, experience=exp)
                 loss: torch.Tensor
                 del log_probs
                 del exp 
@@ -402,12 +428,19 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                     max_norm=args.grpo_config.max_grad_norm,
                 )
                 optimizer.step()
+
+                ### cpu ops ### 
+                if args.grpo_config.kl_weight > 0:
+                    kl_controller.update(mean_kl, args.grpo_config.mini_batch_size)
+                    objective.kl_weight = kl_controller.value
                 
                 logger(
                     {
-                        "train/mean_kl": mean_kl, 
                         "train/grad_norm": grad_norm,
                         "train/loss": loss,
+                        "train/actor_loss": actor_loss,
+                        "train/mean_kl": mean_kl, 
+                        "train/kl_weight": kl_controller.value if args.grpo_config.kl_weight > 0 else 0.0,
                     }
                 )
 
@@ -415,9 +448,12 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                     grad_norm,
                     loss,
                     mean_kl,
+                    actor_loss,
                 )
                 gc.collect()
                 torch.cuda.empty_cache()
+                ### cpu ops ### 
+                
         ### ----- Training phase END ----- ###
 
         ### ----- Update ref model phase START ----- ###
@@ -429,6 +465,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
             reference_model.load_state_dict(
                 model.state_dict()
             )
+            reference_model.eval()
         ### ----- Update ref model phase END ----- ###
 
 
