@@ -182,7 +182,18 @@ class RewardConfig:
     """
     Whether to use the format reward.
     """
-
+    use_overlong_penalty: bool = True
+    """
+    Whether to use the overlong penalty.
+    """
+    l_max: int = 300
+    """
+    The maximum length of the completion, beyond which the penalty is applied.
+    """
+    l_cache: int = 100
+    """
+    The cache length of the completion, which indicates the peanlizable span of the completion.
+    """
 
 @dataclass
 class GRPOConfig:
@@ -205,7 +216,7 @@ class GRPOConfig:
     Whether to use the anneling learning rate.
     """
 
-    weight_decay: float = 0.01
+    weight_decay: float = 0.0
     """
     The weight decay to use for the GRPO.
     """

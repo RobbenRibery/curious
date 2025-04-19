@@ -2,6 +2,7 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 
+import numpy as np
 from curious.buffer import Experience
 
 @torch.compile(dynamic=True)
@@ -54,6 +55,39 @@ def masked_mean(
     else:
         return (tensor * mask).sum(axis=dim) / mask.sum(axis=dim)
 
+
+class AdaptiveKLController:
+    """
+    Adaptive KL controller.
+    """
+    def __init__(self, init_kl_coef:float, target_kl:float = 0.5, horizon:int = 100):
+        self.value = init_kl_coef
+        self.target_kl = target_kl
+        self.horizon = horizon
+
+    def update(self, current_kl:float, n_steps:int):
+        """
+        Update the KL coefficient.
+
+        Args:
+            current_kl (float): The current KL divergence.
+            n_steps (int): The number of steps.
+        """
+        # reduce kl penalty if kl is below target, increase if kl is above target
+        proportional_error = np.clip(current_kl / self.target_kl - 1, -0.2, 0.2)
+        mult = 1 + proportional_error * n_steps / self.horizon
+        self.value *= mult
+
+
+class ConstantKLController:
+    """
+    Constant KL controller.
+    """
+    def __init__(self, init_kl_coef:float):
+        self.value = init_kl_coef
+
+    def update(self, *args, **kwargs):
+        pass
 
 class ActorLoss(nn.Module):
 
