@@ -503,6 +503,7 @@ if __name__ == "__main__":
     args = tyro.cli(TrainingConfig)
     
     wandb.init(
+        entity="moed",
         project=args.wandb_config.project,
         name=args.wandb_config.name,
         config=args,
