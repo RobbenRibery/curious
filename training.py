@@ -392,7 +392,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
         experience_sampler = DataLoader(
             replay_buffer,
             batch_size=args.grpo_config.mini_batch_size,
-            shuffle=True,
+            shuffle=True, #if args.grpo_config.use_token_level_loss else False,
             drop_last=False,
             collate_fn=join_experience_batch,
             num_workers=args.base_config.num_workers,
@@ -412,7 +412,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                     attention_mask=exp.attention_mask,
                     return_entropy=False,
                 )
-                loss, mean_kl, actor_loss = objective(log_probs=log_probs, experience=exp)
+                loss, mean_kl, mean_actor_loss = objective(log_probs=log_probs, experience=exp)
                 loss: torch.Tensor
                 del log_probs
                 del exp 
@@ -430,6 +430,9 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                 optimizer.step()
 
                 ### cpu ops ### 
+                mean_kl = mean_kl.cpu().item()
+                mean_actor_loss = mean_actor_loss.cpu().item()
+                
                 if args.grpo_config.kl_weight > 0:
                     kl_controller.update(mean_kl, args.grpo_config.mini_batch_size)
                     objective.kl_weight = kl_controller.value
@@ -438,7 +441,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                     {
                         "train/grad_norm": grad_norm,
                         "train/loss": loss,
-                        "train/actor_loss": actor_loss,
+                        "train/actor_loss": mean_actor_loss,
                         "train/mean_kl": mean_kl, 
                         "train/kl_weight": kl_controller.value if args.grpo_config.kl_weight > 0 else 0.0,
                     }
@@ -448,7 +451,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                     grad_norm,
                     loss,
                     mean_kl,
-                    actor_loss,
+                    mean_actor_loss,
                 )
                 gc.collect()
                 torch.cuda.empty_cache()
