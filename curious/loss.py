@@ -2,7 +2,10 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 
+import numpy as np
 from curious.buffer import Experience
+
+MAX_NEW_TOKENS = 512
 
 @torch.compile(dynamic=True)
 def approx_kl_divergence(
@@ -50,10 +53,43 @@ def masked_mean(
         return tensor.mean(axis=dim)
     # when dim == None, return the mean of the whole tensor
     if use_fixed_response_length:
-        return (tensor * mask).sum(axis=dim) / torch.ones_like(mask).sum(axis=dim)
+        return (tensor * mask).sum(axis=dim) / MAX_NEW_TOKENS
     else:
         return (tensor * mask).sum(axis=dim) / mask.sum(axis=dim)
 
+
+class AdaptiveKLController:
+    """
+    Adaptive KL controller.
+    """
+    def __init__(self, init_kl_coef:float, target_kl:float = 0.5, horizon:int = 100):
+        self.value = init_kl_coef
+        self.target_kl = target_kl
+        self.horizon = horizon
+
+    def update(self, current_kl:float, n_steps:int):
+        """
+        Update the KL coefficient.
+
+        Args:
+            current_kl (float): The current KL divergence.
+            n_steps (int): The number of steps.
+        """
+        # reduce kl penalty if kl is below target, increase if kl is above target
+        proportional_error = np.clip(current_kl / self.target_kl - 1, -0.2, 0.2)
+        mult = 1 + proportional_error * n_steps / self.horizon
+        self.value *= mult
+
+
+class ConstantKLController:
+    """
+    Constant KL controller.
+    """
+    def __init__(self, init_kl_coef:float):
+        self.value = init_kl_coef
+
+    def update(self, *args, **kwargs):
+        pass
 
 class ActorLoss(nn.Module):
 
@@ -143,6 +179,11 @@ class ActorLoss(nn.Module):
             loss = policy_loss + kl_loss
 
         # token-level loss vs group-level loss
-        loss = masked_mean(loss, action_mask, dim=self.aggregation_dim, use_fixed_response_length=self.use_fixed_response_length).mean()
+        loss = masked_mean(
+            loss, 
+            action_mask, 
+            dim=self.aggregation_dim, 
+            use_fixed_response_length=self.use_fixed_response_length
+        ).mean()
 
-        return loss, kl.mean()
+        return loss, kl.mean(), policy_loss.mean()
