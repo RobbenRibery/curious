@@ -21,7 +21,7 @@ from dataclasses import dataclass, fields
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-@torch.compile(dynamic=True)
+
 def sfl_sampling(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizer,
@@ -59,6 +59,12 @@ def sfl_sampling(
             generation_config,
             seed,
         )
+        completions:List[str] = sampling_output["completions"]
+        group_completions:List[str] = []
+        for i in range(0, len(completions), generation_config.num_return_sequences):
+            group_completions_string = "--\n--".join(completions[i:i+generation_config.num_return_sequences])
+            group_completions.append(group_completions_string)
+
         # compute the rewards
         ## compute on cpu device
         ## output on cuda device
@@ -83,6 +89,7 @@ def sfl_sampling(
             question=questions,
             oracle_answer=oracle_answers,
             learnability=learnability,
+            completion=group_completions,
         )
         curriculum_buffer.append(tmp_curriculum.to(cpu_device))
 

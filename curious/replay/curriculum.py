@@ -1,8 +1,10 @@
-from typing import List, Self, Tuple
+from typing import List, Self, Tuple, Dict, Any
 
 import torch
 from dataclasses import dataclass, fields
 from torch.utils.data import Dataset
+
+from textwrap import dedent
 
 @dataclass
 class Curriculum:
@@ -14,6 +16,9 @@ class Curriculum:
 
     oracle_answer: List[str]
     """The oracle answers"""
+
+    completion: List[str]
+    """The completion of the model"""
     
     learnability: torch.Tensor
     """The learnability scores"""
@@ -27,6 +32,31 @@ class Curriculum:
             members[field.name] = v
         return Curriculum(**members)
     
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "question": self.question,
+            "oracle_answer": self.oracle_answer,
+            "completion": self.completion,
+            "learnability": self.learnability.tolist(),
+        }
+    
+
+    def __repr__(self) -> str:
+        return dedent(
+        f"""
+        Curriculum(
+        Question:
+        {self.question}
+        -------------------------
+        Oracle_answer:
+        {self.oracle_answer}
+        -------------------------
+        Completion:
+        {self.completion}
+        -------------------------
+        Learnability:
+        {self.learnability}
+        )""").strip()
 
 class CurriculumBuffer:
     """
@@ -38,6 +68,7 @@ class CurriculumBuffer:
             "question",
             "oracle_answer",
             "learnability",
+            "completion",
         ]
 
     def append(self, curriculum: Curriculum) -> None:
@@ -48,7 +79,6 @@ class CurriculumBuffer:
         individual_curriculums:List[Curriculum] = [{} for _ in range(num_samples)]
 
         for key in self.keys:
-            print(key)
             if key not in curriculum.__dict__:
                 raise ValueError(f"Curriculum must have a {key} attribute")
             
