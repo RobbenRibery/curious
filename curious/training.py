@@ -13,7 +13,7 @@ from transformers import GenerationConfig
 from curious.data.gsm8k import GSM8KDataset
 from curious.utils.utils import LOGGING_TEMPLATE, load_model_tokenizer
 from curious.sampling.sampling import rollout, sequences_log_probs, linear_temperature_annealing
-from curious.replay.buffer import ReplayBuffer, Experience, join_experience_batch
+from curious.replay.experience import ReplayBuffer, Experience, join_experience_batch
 from curious.policy_gradient.loss import (
     ActorLoss, 
     AdaptiveKLController, 
