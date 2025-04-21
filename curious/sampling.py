@@ -11,6 +11,25 @@ from transformers.generation.utils import GenerateDecoderOnlyOutput
 
 from curious.reward import GSM8KRewardModel
 
+def linear_temperature_annealing(current_step: int, total_steps: int, start_temp: float, end_temp: float) -> float:
+    """
+    Computes the linearly decayed temperature at a given step for a linear annealing schedule.
+
+    Args:
+        current_step (int): The current step number, starting from 0.
+        total_steps (int): The total number of steps for which the temperature is annealed.
+        start_temp (float): The starting temperature.
+        end_temp (float): The final temperature.
+
+    Returns:
+        float: The decayed temperature.
+    """
+    if total_steps <= 0:
+        raise ValueError("total_steps must be greater than 0")
+    # Ensure the fraction is between 0 and 1
+    fraction = min(max(current_step / total_steps, 0.0), 1.0)
+    return start_temp * (1.0 - fraction) + end_temp * fraction
+
 def compute_rewards(
     model: PreTrainedModel,
     reward_model: GSM8KRewardModel,
@@ -166,7 +185,12 @@ def rollout(
     return rewards_out
 
 @torch.compile(dynamic=True)
-def compute_group_advantages(returns: torch.Tensor, eps: float = 1e-8, normalize: bool = True, use_rloo_scalar: bool = False) -> torch.Tensor:
+def compute_group_advantages(
+    returns: torch.Tensor, 
+    eps: float = 1e-8, 
+    normalize: bool = True, 
+    use_rloo_scalar: bool = False,
+) -> torch.Tensor:
     """
     Normalizes the advantages of a group of returns.
 
