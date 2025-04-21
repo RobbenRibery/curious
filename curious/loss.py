@@ -5,6 +5,8 @@ import torch.nn as nn
 import numpy as np
 from curious.buffer import Experience
 
+MAX_NEW_TOKENS = 512
+
 @torch.compile(dynamic=True)
 def approx_kl_divergence(
     log_probs: torch.Tensor,
@@ -51,7 +53,7 @@ def masked_mean(
         return tensor.mean(axis=dim)
     # when dim == None, return the mean of the whole tensor
     if use_fixed_response_length:
-        return (tensor * mask).sum(axis=dim) / torch.ones_like(mask).sum(axis=dim)
+        return (tensor * mask).sum(axis=dim) / MAX_NEW_TOKENS
     else:
         return (tensor * mask).sum(axis=dim) / mask.sum(axis=dim)
 
