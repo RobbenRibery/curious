@@ -21,7 +21,7 @@ from curious.policy_gradient.loss import (
     approx_kl_divergence, 
     masked_mean,
 )
-from curious.reward.rule.reward import GSM8KRewardModel
+from curious.reward.rule.gsm8k import GSM8KRewardModel
 from curious.prompt import *
 
 from config import GRPOConfig, WandbConfig, BaseConfig, SamplingConfig, RewardConfig

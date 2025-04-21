@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from uuid import uuid4
 
-from curious.reward.rule.reward import * 
+from curious.reward.rule.gsm8k import * 
 
 @dataclass
 class WandbConfig:

@@ -9,7 +9,7 @@ from transformers import (
 from accelerate.utils import set_seed
 from transformers.generation.utils import GenerateDecoderOnlyOutput
 
-from curious.reward.rule.reward import GSM8KRewardModel
+from curious.reward.rule.gsm8k import GSM8KRewardModel
 
 def linear_temperature_annealing(current_step: int, total_steps: int, start_temp: float, end_temp: float) -> float:
     """
