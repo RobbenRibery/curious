@@ -111,6 +111,12 @@ class BaseConfig:
     Whether to return the entropy of the tokens.
     """
 
+    use_sfl: bool = False
+    """
+    Whether to use Sampling for Learnability (No-regret paper).
+    """
+
+
 @dataclass
 class SamplingConfig:
     """
@@ -302,4 +308,35 @@ class GRPOConfig:
     ref_model_update_freq: int = 0
     """
     The interval to update the reference model.
+    """
+
+@dataclass
+class TrainingConfig:
+    """
+    A dataclass for storing the training configuration.
+    """
+
+    grpo_config: GRPOConfig
+    """
+    The GRPO configuration.
+    """
+
+    wandb_config: WandbConfig
+    """
+    The wandb configuration.
+    """
+
+    base_config: BaseConfig
+    """
+    The base configuration.
+    """
+
+    sampling_config: SamplingConfig
+    """
+    The sampling configuration.
+    """
+
+    reward_config: RewardConfig
+    """
+    The reward configuration.
     """

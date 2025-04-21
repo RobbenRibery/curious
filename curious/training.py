@@ -24,8 +24,8 @@ from curious.policy_gradient.loss import (
 from curious.reward.rule.gsm8k import GSM8KRewardModel
 from curious.prompt import *
 
-from config import GRPOConfig, WandbConfig, BaseConfig, SamplingConfig, RewardConfig
-from evaluate import FixedSamplingConfig, EvaluationConfig, evaluate
+from curious.config import TrainingConfig
+from curious.evaluate import FixedSamplingConfig, EvaluationConfig, evaluate
 
 from accelerate.utils import set_seed
 import wandb
@@ -36,38 +36,6 @@ from rich import print
 from dataclasses import dataclass
 import tyro 
 import gc
-
-@dataclass
-class TrainingConfig:
-    """
-    A dataclass for storing the training configuration.
-    """
-
-    grpo_config: GRPOConfig
-    """
-    The GRPO configuration.
-    """
-
-    wandb_config: WandbConfig
-    """
-    The wandb configuration.
-    """
-
-    base_config: BaseConfig
-    """
-    The base configuration.
-    """
-
-    sampling_config: SamplingConfig
-    """
-    The sampling configuration.
-    """
-
-    reward_config: RewardConfig
-    """
-    The reward configuration.
-    """
-
 
 def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
