@@ -9,9 +9,9 @@ from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizer, PreTrainedModel
 
 from curious.data import GSM8KDataset
-from curious.utils import LOGGING_TEMPLATE, load_model_tokenizer
+from curious.utils.utils import LOGGING_TEMPLATE, load_model_tokenizer
 from curious.sampling import compute_rewards
-from curious.reward import GSM8KRewardModel
+from curious.reward.rule.reward import GSM8KRewardModel
 from curious.prompt import *
 from config import WandbConfig, BaseConfig, RewardConfig
 

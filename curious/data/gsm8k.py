@@ -3,7 +3,7 @@ from datasets import load_dataset
 from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizer
 
-from curious.utils import tokenize_questions
+from curious.utils.utils import tokenize_questions
 from curious.prompt import *
 
 from typing import List, Dict
