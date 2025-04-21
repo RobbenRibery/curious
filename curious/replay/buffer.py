@@ -1,5 +1,5 @@
 from dataclasses import dataclass, fields
-from typing import Optional, Self, List, Tuple
+from typing import Optional, Self, List, Tuple, Any
 
 import torch
 import torch.nn.functional as F
@@ -28,9 +28,11 @@ def zero_pad_sequences(sequences: List[torch.Tensor], side: str = "left") -> tor
 class Experience:
     """
     A 1/2 Dimensional representation of a collection of experiences.
+    The first dimension is the batch size, the second dimension is the sequence length.
+    The batch size is the number of samples in a batch (i.e. number of groups * num_samples)
+    The sequence length is the length of the sequences in the batch.
     """
     sequences: torch.Tensor  # (num_samples * group_size, seq_len)
-    action_log_probs: torch.Tensor  # (num_samples * group_size, seq_len-1)
     attention_mask: torch.Tensor  # (num_samples * group_size, seq_len)
     action_mask: torch.Tensor  # (num_samples * group_size, seq_len-1)
 
@@ -38,8 +40,12 @@ class Experience:
     solved_mask: torch.Tensor  # (num_samples * group_size)
     advantages: torch.Tensor  # (num_samples * group_size, 1)
 
+    action_log_probs: Optional[torch.Tensor]  = None # (num_samples * group_size, seq_len-1)
     kl: Optional[torch.Tensor]  = None # (num_samples * group_size, seq_len-1) (boolean)
     log_probs_ref: Optional[torch.Tensor] = None # (num_samples * group_size, seq_len-1)
+    learnability: Optional[torch.Tensor] = None # (num_samples, )
+
+    completion: Optional[List[str]] = None
 
     def to(self, device: torch.device) -> Self:
         members = {}
@@ -87,9 +93,12 @@ def split_experience_batch(experience: Experience) -> List[Experience]:
         value:torch.Tensor = getattr(experience, key)
         if value is None:
             vals: List[None] = [None] * batch_size
-        else:
+        elif isinstance(value, torch.Tensor):
             vals: Tuple[torch.Tensor, ...] = torch.unbind(value)
-       
+        elif isinstance(value, list):
+            vals: List[Any] = value
+        else:
+            raise ValueError(f"Unsupported type: {type(value)}")
         for i, v in enumerate(vals):
             batch_data[i][key] = v
 
@@ -138,15 +147,16 @@ class ReplayBuffer:
     """
     A buffer that stores experiences.
     """
-    def __init__(self, limit: int = 0) -> None:
+    def __init__(self, items: List[Experience] = None, limit: int = 0) -> None:
         """
         Initialize a ReplayBuffer with a given buffer limit.
 
         Args:
+            items: A list of experiences to initialize the buffer with.
             limit: The maximum number of experiences to store in the buffer. If 0, no limit is applied.
         """
         self.limit = limit
-        self.items: list[Experience] = []
+        self.items: list[Experience] = [item.to("cpu") for item in items] if items else []
 
     def append(self, experience: Experience) -> None:
         """
@@ -169,17 +179,58 @@ class ReplayBuffer:
     def clear(self) -> None:
         """
         Clear the buffer.
+
+        Returns:
+            None
         """
         self.items.clear()
 
     def __len__(self) -> int:
         """
         Get the number of experiences in the buffer.
+
+        Returns:
+            int: The number of experiences in the buffer.
         """
         return len(self.items)
 
     def __getitem__(self, idx: int) -> Experience:
         """
         Get an experience from the buffer.
+
+        Args:
+            idx (int): The index of the experience to get.
+
+        Returns:
+            Experience: The experience at the given index.
         """
         return self.items[idx]
+    
+    def sample_for_learnability(self, num_samples:int, use_top_k:bool=False) -> Self:
+        """
+        Sample experiences from the buffer.
+
+        Args:
+            num_samples (int): The number of experiences to sample.
+            use_top_k (bool): Whether to use the top k experiences.
+
+        Returns:
+            ReplayBuffer: A replay buffer of sampled experiences.
+        """
+        learnability = torch.stack([item.learnability for item in self.items], dim=0).reshape(-1)
+
+        # sample the experiences
+        if use_top_k:
+            # sample the top k experiences
+            indices = torch.topk(learnability, num_samples).indices
+        else:
+            # sample the experiences randomly
+            learnability = F.softmax(learnability, dim=0)
+            indices = torch.multinomial(
+                weights=learnability,
+                num_samples=num_samples,
+                replacement=False,
+            )
+
+        sampled_experiences = [self.items[i] for i in indices]
+        return ReplayBuffer(items=sampled_experiences)

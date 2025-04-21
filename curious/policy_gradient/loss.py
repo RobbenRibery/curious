@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 
 import numpy as np
-from curious.buffer import Experience
+from curious.replay.buffer import Experience
 
 MAX_NEW_TOKENS = 512
 

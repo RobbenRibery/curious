@@ -9,7 +9,7 @@ from transformers import (
 from accelerate.utils import set_seed
 from transformers.generation.utils import GenerateDecoderOnlyOutput
 
-from curious.reward import GSM8KRewardModel
+from curious.reward.rule.reward import GSM8KRewardModel
 
 def linear_temperature_annealing(current_step: int, total_steps: int, start_temp: float, end_temp: float) -> float:
     """
@@ -69,6 +69,19 @@ def compute_rewards(
         "solved_masks": torch.tensor(solved_masks, dtype=torch.bfloat16, device=model.device), # (num_questions, group_size)
         "infos": infos, # single list (len = num_questions * group_size)
     }
+
+def compute_learnability(solved_masks: torch.Tensor) -> torch.Tensor:
+    """
+    Computes the learnability of a group of completions.
+
+    Args:
+        solved_masks (torch.Tensor): The solved masks of the group of completions. (num_questions, group_size)
+
+    Returns:
+        torch.Tensor: The learnability of the group of completions. (num_questions)
+    """
+    solved_rate = solved_masks.mean(dim=1)
+    return solved_rate * (1 - solved_rate)
 
 @torch.no_grad()
 def sample_responses(
