@@ -70,6 +70,7 @@ def compute_rewards(
         "infos": infos, # single list (len = num_questions * group_size)
     }
 
+@torch.compile(dynamic=True)
 def compute_learnability(solved_masks: torch.Tensor) -> torch.Tensor:
     """
     Computes the learnability of a group of completions.

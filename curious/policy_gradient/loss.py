@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 
 import numpy as np
-from curious.replay.buffer import Experience
+from curious.replay.experience import Experience
 
 @torch.compile(dynamic=True)
 def approx_kl_divergence(
