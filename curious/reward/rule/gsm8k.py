@@ -49,7 +49,7 @@ class GSM8KRewardModel:
 
     def __init__(
         self,
-        answer_pattern: str = ANSWER_PATTERN,
+        answer_pattern: str = QWEN_ANSWER_PATTERN,
         think_pattern: str = THINK_PATTERN,
         format_pattern: str = BASE_FORMAT_PATTERN,
         use_format_reward: bool = False,
