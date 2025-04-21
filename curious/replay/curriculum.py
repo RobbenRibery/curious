@@ -100,5 +100,3 @@ class CurriculumBuffer:
     def __getitem__(self, idx: int) -> Curriculum:
         return self.buffer[idx]
     
-    def to_dataset(self) -> Dataset:
-        pass 
