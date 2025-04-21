@@ -29,7 +29,9 @@ def normalize_number(answer: str) -> str:
 
 @dataclass
 class FailureMode:
-
+    """
+    Failure modes for the reward model.
+    """
     # answer failure mode
     NO_ANSWER = "no_answer_in_required_format"
     NO_NUMBER_IN_ANSWER = "no_number_in_answer"

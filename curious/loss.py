@@ -177,6 +177,11 @@ class ActorLoss(nn.Module):
             loss = policy_loss + kl_loss
 
         # token-level loss vs group-level loss
-        loss = masked_mean(loss, action_mask, dim=self.aggregation_dim, use_fixed_response_length=self.use_fixed_response_length).mean()
+        loss = masked_mean(
+            loss, 
+            action_mask, 
+            dim=self.aggregation_dim, 
+            use_fixed_response_length=self.use_fixed_response_length
+        ).mean()
 
-        return loss, kl.mean()
+        return loss, kl.mean(), policy_loss.mean()

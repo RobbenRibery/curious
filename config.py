@@ -25,7 +25,6 @@ class WandbConfig:
     The group to use for the wandb.
     """
 
-
 @dataclass
 class BaseConfig:
     """
@@ -163,7 +162,6 @@ class SamplingConfig:
     The system prompt to use for the sampling.
     """
 
-
 @dataclass
 class RewardConfig:
     """
@@ -216,6 +214,11 @@ class GRPOConfig:
     Whether to use the anneling learning rate.
     """
 
+    anneling_temperature: bool = False
+    """
+    Whether to use the anneling temperature.
+    """
+
     weight_decay: float = 0.0
     """
     The weight decay to use for the GRPO.
@@ -224,6 +227,21 @@ class GRPOConfig:
     kl_weight: float = 0.01
     """
     The KL weight to use for the GRPO.
+    """
+
+    kl_controller: str = "constant"
+    """
+    The KL controller to use for the GRPO.
+    """
+
+    kl_target: float = 0.01
+    """
+    The KL target to use for the GRPO.
+    """
+
+    kl_horizon_factor: int = 5
+    """
+    The KL horizon factor to use for the GRPO.
     """
     
     clip_eps: float = 0.2
