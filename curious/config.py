@@ -311,6 +311,23 @@ class GRPOConfig:
     """
 
 @dataclass
+class SFLConfig:
+    """
+    A dataclass for storing the SFL configuration.
+    """
+    
+    sfl_total_scaning_size: int = 512
+    """
+    The total size of the dataset to scan.
+    """
+
+    sfl_num_samples_to_collect: int = 100
+    """
+    The number of samples to collect.
+    """
+
+
+@dataclass
 class TrainingConfig:
     """
     A dataclass for storing the training configuration.
@@ -339,4 +356,9 @@ class TrainingConfig:
     reward_config: RewardConfig
     """
     The reward configuration.
+    """
+
+    sfl_config: SFLConfig
+    """
+    The SFL configuration.
     """

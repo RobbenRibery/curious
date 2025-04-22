@@ -60,7 +60,7 @@ def form_hf_dataset(
         columns=["input_ids", "attention_mask"],
         output_all_columns=True,
     )
-    df_dataset.shuffle(seed=seed)
+    df_dataset = df_dataset.shuffle(seed=seed)
     return df_dataset
 
 def load_model_tokenizer(

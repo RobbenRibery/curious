@@ -1,14 +1,15 @@
 import os 
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-from typing import Callable, List, Dict, Any, Tuple
+from typing import Callable, List, Dict, Any, Tuple, Optional
 
 import torch 
 from torch.utils.data import DataLoader 
 from torch.nn.utils import clip_grad_norm_
 import torch.optim as optim
 
-from transformers import GenerationConfig
+from transformers import GenerationConfig, PreTrainedModel, PreTrainedTokenizer
+import datasets
 
 from curious.data.gsm8k import GSM8KDataset
 from curious.utils.utils import LOGGING_TEMPLATE, load_model_tokenizer
@@ -36,8 +37,17 @@ from rich import print
 from dataclasses import dataclass
 import tyro 
 import gc
-
-def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    
+def train(
+    args:TrainingConfig, 
+    logger: Callable, 
+    trained_model: Optional[PreTrainedModel] = None,
+    tokenizer: Optional[PreTrainedTokenizer] = None,
+    reward_model: Optional[GSM8KRewardModel] = None,
+    generation_config: Optional[GenerationConfig] = None,
+    eval_config: Optional[EvaluationConfig] = None,
+    dataset: Optional[GSM8KDataset | datasets.Dataset] = None,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Train the model.
     Args:
@@ -47,6 +57,20 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
     Returns:
         Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]: The training outputs and the evaluation outputs.
     """
+    if trained_model is not None:
+        assert tokenizer is not None
+        assert reward_model is not None
+        assert generation_config is not None
+        assert eval_config is not None
+        assert rollout_data_loader is not None
+    else:
+        assert trained_model is None
+        assert tokenizer is None
+        assert reward_model is None
+        assert generation_config is None
+        assert eval_config is None
+        assert rollout_data_loader is None
+    
     # outputs 
     train_outs:List[Dict[str, Any]] = []
     eval_outs:List[Dict[str, Any]] = []
@@ -87,10 +111,14 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
         reference_model.eval()
 
     ## target policy
-    model, tokenizer = load_model_tokenizer(
-        args.base_config.model_name, 
-        device_map=device
-    )
+    if trained_model is None:
+        model, tokenizer = load_model_tokenizer(
+            args.base_config.model_name, 
+            device_map=device
+        )
+    else:
+        model = trained_model
+        tokenizer = tokenizer
     model.gradient_checkpointing_enable()
 
     ## Tokenizer
@@ -105,14 +133,18 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
     )
 
     ## Data
-    dataset = GSM8KDataset(
-        tokenizer=tokenizer,
-        dataset_name=args.base_config.dataset_name,
-        seed=args.base_config.seed,
-        mode=args.base_config.mode,
-        max_prompt_length=args.sampling_config.model_prompt_length,
+    if dataset is None:
+        dataset = GSM8KDataset(
+            tokenizer=tokenizer,
+            dataset_name=args.base_config.dataset_name,
+            seed=args.base_config.seed,
+            mode=args.base_config.mode,
+            max_prompt_length=args.sampling_config.model_prompt_length,
         system_prompt=eval(args.sampling_config.system_prompt),
-    )
+        )
+    else:
+        assert isinstance(dataset, GSM8KDataset) or isinstance(dataset, datasets.Dataset)
+
     rollout_data_loader = DataLoader(
         dataset,
         batch_size=args.base_config.train_batch_size,
@@ -166,12 +198,13 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
     )
 
     ## Evaluation config
-    eval_config = EvaluationConfig(
-        base_config=args.base_config,
-        sampling_config=FixedSamplingConfig(),
-        reward_config=args.reward_config,
-        wandb_config=args.wandb_config,
-    )
+    if eval_config is None:
+        eval_config = EvaluationConfig(
+            base_config=args.base_config,
+            sampling_config=FixedSamplingConfig(),
+            reward_config=args.reward_config,
+            wandb_config=args.wandb_config,
+        )
     evaluate(
         config=eval_config,
         model=model,
@@ -504,7 +537,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
         eval_outs.append(eval_results)
     ### ----- Final checkpoint phase END ----- ###
 
-    return train_outs, eval_outs
+    return model, train_outs, eval_outs
 
 if __name__ == "__main__":
 
