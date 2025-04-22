@@ -7,7 +7,7 @@ from curious.config import TrainingConfig
 from curious.policy_gradient.loss import AdaptiveKLController, ConstantKLController
 from curious.policy_gradient.loss import ActorLoss
 from curious.reward import GSM8KRewardModel
-from curious.evaluate import EvaluationConfig
+from curious.evaluate import EvaluationConfig, FixedSamplingConfig
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -169,6 +169,19 @@ def set_up_training(config:TrainingConfig) -> TrainingSetup:
         repetition_penalty=config.sampling_config.repetition_penalty,
     )
     training_setup["generation_config"] = generation_config
+
+    ## Evaluation config
+    eval_config = EvaluationConfig(
+        wandb_config=config.wandb_config,
+        base_config=config.base_config,
+        sampling_config=FixedSamplingConfig(
+            max_new_tokens=config.sampling_config.max_new_tokens,
+            system_prompt=config.sampling_config.system_prompt,
+            model_prompt_length=config.sampling_config.model_prompt_length,
+        ),
+        reward_config=config.reward_config,
+    )
+    training_setup["eval_config"] = eval_config
     
     # optimizer 
     optimizer = optim.AdamW(
