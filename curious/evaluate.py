@@ -13,11 +13,10 @@ from curious.utils.utils import LOGGING_TEMPLATE, load_model_tokenizer
 from curious.sampling import compute_rewards
 from curious.reward.rule.gsm8k import GSM8KRewardModel
 from curious.prompt import *
-from config import WandbConfig, BaseConfig, RewardConfig
+from curious.config import WandbConfig, BaseConfig, RewardConfig
 
 from accelerate.utils import set_seed
 import gc 
-from textwrap import dedent
 
 @dataclass
 class FixedSamplingConfig:
