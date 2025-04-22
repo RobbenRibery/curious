@@ -2,7 +2,9 @@ make clean;
 export TOKENIZERS_PARALLELISM=true;
 export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:128,expandable_segments:True";
 
-TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1 python training.py \
+export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1; 
+
+python -m curious.training.train_rl \
     --wandb_config.project "curious-gsm8k" \
     --wandb_config.group "drgrpo-test" \
     --wandb_config.name "drgrpo-qwen25-prompt[qwen]-reward[partial-solved-penalize-trailing]-temp1rep11-5e06rl-bsz16" \
