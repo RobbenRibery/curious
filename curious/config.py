@@ -111,11 +111,6 @@ class BaseConfig:
     Whether to return the entropy of the tokens.
     """
 
-    use_sfl: bool = False
-    """
-    Whether to use Sampling for Learnability (No-regret paper).
-    """
-
 
 @dataclass
 class SamplingConfig:
@@ -315,13 +310,22 @@ class SFLConfig:
     """
     A dataclass for storing the SFL configuration.
     """
+    sfl_enabled: bool = False
+    """
+    Whether to use Sampling for Learnability (No-regret paper).
+    """
+
+    sfl_sampling_batch_size: int = 256
+    """
+    The batch size to use for the SFL sampling.
+    """
     
-    sfl_total_scaning_size: int = 512
+    sfl_total_scaning_size: int = 1024
     """
     The total size of the dataset to scan.
     """
 
-    sfl_num_samples_to_collect: int = 100
+    sfl_num_samples_to_collect: int = 256
     """
     The number of samples to collect.
     """

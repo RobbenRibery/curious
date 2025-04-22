@@ -6,7 +6,8 @@ from torch.utils.data import DataLoader
 from curious.reward.rule.gsm8k import GSM8KRewardModel
 from curious.data.gsm8k import GSM8KDataset
 from curious.config import TrainingConfig
-from curious.training.normal import train as train_normal
+from curious.training.training_setup import TrainingSetup
+from curious.training.train_rl import train
 from curious.utils.utils import load_model_tokenizer, form_hf_dataset
 from curious.sampling.sfl import sfl_sampling
 from curious.replay.curriculum import Curriculum
@@ -25,6 +26,7 @@ import gc
 
 def train_sfl(
     args:TrainingConfig, 
+    training_setup:TrainingSetup,
     logger:Callable
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
@@ -104,7 +106,7 @@ def train_sfl(
         ## create the data loader
         sfl_sampling_data_loader = DataLoader(
             dataset.train,
-            batch_size=args.base_config.train_batch_size,
+            batch_size=args.sfl_config.sfl_sampling_batch_size,
             shuffle=False,
             num_workers=args.base_config.num_workers,
         )
@@ -121,8 +123,20 @@ def train_sfl(
             sfl_num_samples_to_collect = args.sfl_config.sfl_num_samples_to_collect,
             cpu_device = cpu_device,
         )
+        assert len(sampled_curriculum) == args.sfl_config.sfl_num_samples_to_collect
+        learnability_scores = np.array(
+            [x.learnability.to(cpu_device).item() for x in sampled_curriculum]
+        )
+        logger(
+            {
+                "sfl/mean_learnability": learnability_scores.mean(),
+                "sfl/std_learnability": learnability_scores.std(),
+                "sfl/min_learnability": learnability_scores.min(),
+                "sfl/max_learnability": learnability_scores.max(),
+            }
+        )
 
-        ## create the training dataset & data set and shuffle 
+        ## create the training dataset & data set and shuffle using the seed
         hf_dataset = form_hf_dataset(
             tokenizer,
             sampled_curriculum,
@@ -131,15 +145,10 @@ def train_sfl(
             system_prompt = eval(args.sampling_config.system_prompt),
         )
         ## sfl training step 
-        model, train_outs, eval_outs = train_normal(
-            args,
-            logger,
-            trained_model=model,
-            tokenizer=tokenizer,
-            reward_model=reward_model,
-            generation_config=generation_config,
-            eval_config=eval_config,
-            dataset=hf_dataset,
+        model, train_outs, eval_outs = train(
+            args=args,
+            training_setup=training_setup,
+            logger=logger,
         )
 
         ## increment the step
@@ -147,7 +156,7 @@ def train_sfl(
 
         ## logging
         logger(f"Step {step} completed")
-        
+
     return train_outs, eval_outs
 
     
@@ -155,6 +164,28 @@ def train_sfl(
 
 if __name__ == "__main__":
     
-    args = tyro.cli(train_sfl)
-    train_sfl(args, print)
+    args = tyro.cli(TrainingConfig)
+    wandb.init(
+        project=args.wandb_config.project,
+        name=args.wandb_config.name,
+        config=args,
+    )
+    
+    # define the metrics
+    wandb.define_metric("sfl_step")
+    wandb.define_metric("sfl/mean_learnability", step_metric="sfl_step")
+    wandb.define_metric("sfl/std_learnability", step_metric="sfl_step")
+    wandb.define_metric("sfl/min_learnability", step_metric="sfl_step")
+    wandb.define_metric("sfl/max_learnability", step_metric="sfl_step")
+
+    # define the training metrics
+    wandb.define_metric("num_batches_visited")
+    wandb.define_metric("train/mean_batch_returns", step_metric="num_batches_visited")
+    wandb.define_metric("train/mean_batch_solved_rate", step_metric="num_batches_visited")
+    wandb.define_metric("train/max_input_length", step_metric="num_batches_visited")
+    wandb.define_metric("train/mean_num_words_in_completions", step_metric="num_batches_visited")
+    wandb.define_metric("train/mean_batch_format_returns", step_metric="num_batches_visited")
+    wandb.define_metric("train/mean_batch_outcome_returns", step_metric="num_batches_visited")
+    
+    train_sfl(args, wandb.log)
 
