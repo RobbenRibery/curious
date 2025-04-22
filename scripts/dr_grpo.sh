@@ -7,7 +7,7 @@ export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1;
 python -m curious.training.train_rl \
     --wandb_config.project "curious-gsm8k" \
     --wandb_config.group "drgrpo-test" \
-    --wandb_config.name "drgrpo-qwen25-prompt[qwen]-reward[partial-solved-penalize-trailing]-temp1rep11-5e06rl-bsz16" \
+    --wandb_config.name "[checkrun]-drgrpo-qwen25-prompt[qwen]-reward[partial-solved-penalize-trailing]-temp1rep11-5e06rl-bsz16" \
     --base_config.model_name "Qwen/Qwen2.5-0.5B-Instruct" \
     --base_config.device_index 0 \
     --base_config.dataset_name "openai/gsm8k" \
