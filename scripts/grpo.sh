@@ -1,8 +1,9 @@
 make clean;
 export TOKENIZERS_PARALLELISM=true;
 export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:128,expandable_segments:True";
+export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1;
 
-TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1 python training.py \
+python -m curious.training.train_rl \
     --wandb_config.project "curious-gsm8k" \
     --wandb_config.group "grpo-baseline" \
     --wandb_config.name "grpo-qwen25-prompt[qwen]-reward[partial-solved-penalize-trailing]-temp1_2rep11-5e06rl-bsz16" \
@@ -40,6 +41,3 @@ TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1 python training.py \
     --grpo_config.epochs_per_step 1 \
     --grpo_config.max_grad_norm 0.5 \
     --grpo_config.anneling_lr
-
-#    --grpo_config.kl_controller "constant" \
-#     --grpo_config.ref_model_update_freq 0 \
