@@ -1,102 +1,56 @@
-from typing import Tuple, List, Dict, Any, Callable
-
-from transformers import PreTrainedModel, PreTrainedTokenizer, GenerationConfig
+from typing import List, Callable, Tuple, Dict, Any
 from torch.utils.data import DataLoader
+from transformers import PreTrainedModel
 
-from curious.reward.rule.gsm8k import GSM8KRewardModel
-from curious.data.gsm8k import GSM8KDataset
 from curious.config import TrainingConfig
 from curious.training.training_setup import TrainingSetup
 from curious.training.train_rl import train
-from curious.utils.utils import load_model_tokenizer, form_hf_dataset
+from curious.utils.utils import form_hf_dataset
 from curious.sampling.sfl import sfl_sampling
 from curious.replay.curriculum import Curriculum
-from curious.evaluate import EvaluationConfig, FixedSamplingConfig
 
-import torch
 from accelerate.utils import set_seed
 import wandb
 import numpy as np
-
-from tqdm import tqdm
-from rich import print
-from dataclasses import dataclass
 import tyro
-import gc
 
 def train_sfl(
     args:TrainingConfig, 
     training_setup:TrainingSetup,
     logger:Callable
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+) -> Tuple[
+    PreTrainedModel,
+    List[Dict[str, Any]],
+    List[Dict[str, Any]]
+]:
     """
-       Train the model using SFL.
+    Train the model using SFL.
+    Args:
+        args (TrainingConfig): The training configuration.
+        training_setup (TrainingSetup): The training setup.
+        logger (Callable): The logger to use.
+    Returns:
+        model (PreTrainedModel): The model to train.
+        train_outs (List[Dict[str, Any]]): The training outputs.
+        eval_outs (List[Dict[str, Any]]): The evaluation outputs.
     """
-
-    # outputs 
-    train_outs:List[Dict[str, Any]] = []
-    eval_outs:List[Dict[str, Any]] = []
-
-    # device & seeding
-    device = torch.device("cuda", args.base_config.device_index)
-    cpu_device = torch.device("cpu")
+    assert args.sfl_config.sfl_num_samples_to_collect % args.base_config.train_batch_size == 0 \
+        and args.sfl_config.sfl_total_scanning_size % args.sfl_config.sfl_sampling_batch_size == 0, \
+        "sfl_num_samples_to_collect must be divisible by train_batch_size and sfl_sampling_batch_size"
+    
+    # set the seed for accelerate
+    set_seed(args.base_config.seed)
     seed = args.base_config.seed
-    set_seed(seed)
-
-    # rng 
     rng = np.random.default_rng(seed)
 
-    # get the run name
-    run_name = args.wandb_config.name.replace("-", "_")
-
-    ## dataset
-    dataset = GSM8KDataset(
-        tokenizer=tokenizer,
-        dataset_name=args.base_config.dataset_name,
-        seed=args.base_config.seed,
-        mode=args.base_config.mode,
-        max_prompt_length=args.sampling_config.model_prompt_length,
-        system_prompt=eval(args.sampling_config.system_prompt),
-    )
+    # unload the training setup 
+    model = training_setup["target_policy"]
+    dataset = training_setup["dataset"]
     train_max_input_length = dataset.train_max_length
 
-    ## load target policy
-    model, tokenizer = load_model_tokenizer(
-        args.base_config.model_name, 
-        device_map=device
-    )
-    model.gradient_checkpointing_enable()
-
-    ## Reward model
-    reward_model = GSM8KRewardModel(
-        answer_pattern=args.reward_config.answer_pattern,
-        think_pattern=args.reward_config.think_pattern,
-        use_format_reward=args.reward_config.use_format_reward,
-        use_overlong_penalty=args.reward_config.use_overlong_penalty,
-        l_max=args.reward_config.l_max,
-        l_cache=args.reward_config.l_cache,
-    )
-
-    # sampling config
-    generation_config = GenerationConfig(
-        num_return_sequences=args.grpo_config.group_size,
-        max_new_tokens=args.sampling_config.max_new_tokens,
-        temperature=args.sampling_config.temperature,
-        top_p=args.sampling_config.top_p,
-        top_k=args.sampling_config.top_k,
-    )
-
-    ## evaluation config
-    eval_config = EvaluationConfig(
-        base_config=args.base_config,
-        sampling_config=FixedSamplingConfig(),
-        reward_config=args.reward_config,
-        wandb_config=args.wandb_config,
-    )
-
-    ## total number of steps scheudled 
-    step = 0
-    while step < args.base_config.total_steps:
+    ## total number of steps scheduled 
+    sfl_step, global_batch_idx = 0, 0
+    while sfl_step < args.sfl_config.sfl_total_steps:
 
         ## shuffle the dataset
         seed = rng.integers(0, 1e03, size=1)[0]
@@ -113,19 +67,24 @@ def train_sfl(
 
         ## sfl sampling step 
         sampled_curriculum:List[Curriculum] = sfl_sampling(
-            model,
-            tokenizer,
-            reward_model,
-            sfl_sampling_data_loader,
-            generation_config,
+            model = model,
+            tokenizer = training_setup["tokenizer"],
+            reward_model = training_setup["reward_model"],
+            data_loader = sfl_sampling_data_loader,
+            generation_config = training_setup["generation_config"],
             seed = seed,
-            sfl_total_scaning_size = args.sfl_config.sfl_total_scaning_size,
+            sfl_total_scanning_size = args.sfl_config.sfl_total_scanning_size,
             sfl_num_samples_to_collect = args.sfl_config.sfl_num_samples_to_collect,
-            cpu_device = cpu_device,
+            cpu_device = training_setup["cpu_device"],
         )
         assert len(sampled_curriculum) == args.sfl_config.sfl_num_samples_to_collect
+        
+        ### logging the learnability scores
         learnability_scores = np.array(
-            [x.learnability.to(cpu_device).item() for x in sampled_curriculum]
+            [
+                x.learnability.to(training_setup["cpu_device"]).item() \
+                for x in sampled_curriculum
+            ]
         )
         logger(
             {
@@ -133,34 +92,63 @@ def train_sfl(
                 "sfl/std_learnability": learnability_scores.std(),
                 "sfl/min_learnability": learnability_scores.min(),
                 "sfl/max_learnability": learnability_scores.max(),
+                "sfl_step": sfl_step,
             }
         )
 
         ## create the training dataset & data set and shuffle using the seed
         hf_dataset = form_hf_dataset(
-            tokenizer,
-            sampled_curriculum,
+            tokenizer = training_setup["tokenizer"],
+            sampled_curriculum = sampled_curriculum,
             seed = seed,
             max_prompt_length = train_max_input_length,
             system_prompt = eval(args.sampling_config.system_prompt),
         )
+        train_data_loader = DataLoader(
+            hf_dataset,
+            batch_size=args.base_config.train_batch_size,
+            shuffle=False,
+            drop_last=False,
+            num_workers=args.base_config.num_workers,
+        )
+        
         ## sfl training step 
+        tmp_train_setup = TrainingSetup(
+            run_name = training_setup["run_name"],
+            device = training_setup["device"],
+            cpu_device = training_setup["cpu_device"],
+            train_log_dir = training_setup["train_log_dir"],
+            eval_log_dir = training_setup["eval_log_dir"],
+            target_policy = model,
+            tokenizer = training_setup["tokenizer"],
+            pad_token_id = training_setup["pad_token_id"],
+            dataset = hf_dataset,
+            rollout_data_loader = train_data_loader,
+            optimizer = training_setup["optimizer"],
+            lr_scheduler = training_setup["lr_scheduler"],
+            actor_loss = training_setup["actor_loss"],
+            reward_model = training_setup["reward_model"],
+            generation_config = training_setup["generation_config"],
+            eval_config = training_setup["eval_config"],
+            kl_controller = training_setup["kl_controller"],
+            reference_model = training_setup["reference_model"],
+        )
         model, train_outs, eval_outs = train(
             args=args,
-            training_setup=training_setup,
+            training_setup=tmp_train_setup,
             logger=logger,
+            **{
+                "global_batch_idx": global_batch_idx,
+            }
         )
 
         ## increment the step
-        step += 1
+        global_batch_idx += len(train_data_loader)
+        sfl_step += 1
 
-        ## logging
-        logger(f"Step {step} completed")
 
-    return train_outs, eval_outs
+    return model,train_outs, eval_outs
 
-    
-    
 
 if __name__ == "__main__":
     

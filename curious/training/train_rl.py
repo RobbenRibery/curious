@@ -1,6 +1,4 @@
 import os 
-os.environ["TOKENIZERS_PARALLELISM"] = "true"
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 from typing import Callable, List, Dict, Any, Tuple
 
 from transformers import PreTrainedModel
@@ -264,12 +262,12 @@ def train(
         gc.collect()
         torch.cuda.empty_cache()
         print(
-            "--------------------------------"
-            f"batch_idx: {batch_idx} | "
-            f"returns: {batch_mean_returns} | "
-            f"solved_rate: {batch_mean_solved_rate} | "
-            f"format_returns: {batch_mean_format_returns} | "
-            f"outcome_returns: {batch_mean_outcome_returns}"
+            "--------------------------------\n"
+            f"batch_idx: {batch_idx} |\n "
+            f"returns: {batch_mean_returns} |\n "
+            f"solved_rate: {batch_mean_solved_rate} |\n "
+            f"format_returns: {batch_mean_format_returns} |\n "
+            f"outcome_returns: {batch_mean_outcome_returns}\n"
             "--------------------------------"
         )
         train_outs.append(

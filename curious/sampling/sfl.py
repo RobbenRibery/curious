@@ -1,4 +1,4 @@
-from typing import Dict, List, Self, Tuple
+from typing import List
 
 import torch
 from transformers import (
@@ -12,15 +12,10 @@ from curious.sampling.sampling import (
     sample_responses, 
     compute_rewards, 
     compute_learnability,
-    compute_group_advantages,
 )
 from curious.replay.curriculum import Curriculum, CurriculumBuffer
 from curious.reward.rule.gsm8k import GSM8KRewardModel
-from dataclasses import dataclass, fields
-
-from torch.utils.data import Dataset
-from tqdm import tqdm
-
+import gc 
 
 def sfl_sampling(
     model: PreTrainedModel,
@@ -29,7 +24,7 @@ def sfl_sampling(
     data_loader: DataLoader,
     generation_config: GenerationConfig,
     seed: int = 42,
-    sfl_total_scaning_size: int = 512,
+    sfl_total_scanning_size: int = 512,
     sfl_num_samples_to_collect: int = 100,
     cpu_device: torch.device = torch.device("cpu"),
 ) -> List[Curriculum]:
@@ -38,17 +33,17 @@ def sfl_sampling(
     """
     # learnability scores
     learnability_scores = torch.zeros(
-        (sfl_total_scaning_size,),
+        (sfl_total_scanning_size,),
         dtype=torch.bfloat16, 
         device=model.device,
     )
-    curriculum_buffer:CurriculumBuffer = CurriculumBuffer()
+    curriculum_buffer = CurriculumBuffer()
 
     # iterate through the dataset
     scanned_samples = 0
     for encoded_batch in data_loader:
         # check if we have scanned enough samples
-        if scanned_samples >= sfl_total_scaning_size:
+        if scanned_samples >= sfl_total_scanning_size:
             break
         
         # sample responses
@@ -107,6 +102,13 @@ def sfl_sampling(
     top_k_output = torch.topk(learnability_scores, k=sfl_num_samples_to_collect)
     top_k_indices = top_k_output.indices
     #top_k_values = top_k_output.values
+
+    del solved_masks
+    del learnability
+    del learnability_scores
+    del top_k_output
+    gc.collect()
+    torch.cuda.empty_cache()
 
     return [
         curriculum_buffer[i] for i in top_k_indices.tolist()
