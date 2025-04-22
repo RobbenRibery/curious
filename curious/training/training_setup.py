@@ -1,4 +1,4 @@
-from typing import Dict, Any, TypedDict, Optional
+from typing import TypedDict, Optional
 import os
 
 from curious.data.gsm8k import GSM8KDataset
@@ -81,7 +81,7 @@ def set_up_training(config:TrainingConfig) -> TrainingSetup:
         device_map=device, 
         freeze_model=False,
     )
-    model.foward = torch.compile(model.forward)
+    model.forward = torch.compile(model.forward)
     tokenizer.padding_side  = 'left'
     pad_token_id = tokenizer.eos_token_id
     

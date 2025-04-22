@@ -310,9 +310,15 @@ class SFLConfig:
     """
     A dataclass for storing the SFL configuration.
     """
+    
     sfl_enabled: bool = False
     """
     Whether to use Sampling for Learnability (No-regret paper).
+    """
+
+    sfl_total_steps: int = 1000
+    """
+    The total number of steps to use for the SFL.
     """
 
     sfl_sampling_batch_size: int = 256
@@ -320,7 +326,7 @@ class SFLConfig:
     The batch size to use for the SFL sampling.
     """
     
-    sfl_total_scaning_size: int = 1024
+    sfl_total_scanning_size: int = 1024
     """
     The total size of the dataset to scan.
     """
