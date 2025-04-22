@@ -79,8 +79,9 @@ def set_up_training(config:TrainingConfig) -> TrainingSetup:
     model, tokenizer = load_model_tokenizer(
         config.base_config.model_name, 
         device_map=device, 
-        freeze_model=True,
+        freeze_model=False,
     )
+    model.foward = torch.compile(model.forward)
     tokenizer.padding_side  = 'left'
     pad_token_id = tokenizer.eos_token_id
     
@@ -101,7 +102,7 @@ def set_up_training(config:TrainingConfig) -> TrainingSetup:
         dataset,
         batch_size=config.base_config.train_batch_size,
         shuffle=True,
-        drop_last=True,
+        drop_last=False,
         num_workers=config.base_config.num_workers,
     )
     training_setup["rollout_data_loader"] = rollout_data_loader
@@ -142,7 +143,7 @@ def set_up_training(config:TrainingConfig) -> TrainingSetup:
         use_fixed_response_length=config.grpo_config.use_fixed_response_length,
         use_surrogate_loss=config.grpo_config.use_surrogate_loss,
     )
-    training_setup["objective"] = objective
+    training_setup["actor_loss"] = objective
 
     ## Reward model
     reward_model = GSM8KRewardModel(
@@ -175,9 +176,7 @@ def set_up_training(config:TrainingConfig) -> TrainingSetup:
         wandb_config=config.wandb_config,
         base_config=config.base_config,
         sampling_config=FixedSamplingConfig(
-            max_new_tokens=config.sampling_config.max_new_tokens,
             system_prompt=config.sampling_config.system_prompt,
-            model_prompt_length=config.sampling_config.model_prompt_length,
         ),
         reward_config=config.reward_config,
     )
