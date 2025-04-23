@@ -79,11 +79,13 @@ def sfl_sampling(
         # update the curriculum buffer
         questions = encoded_batch["question"]
         oracle_answers = encoded_batch["oracle_answer"]
-
+        answers = encoded_batch["answer"]
+        
         # create the curriculum
         tmp_curriculum = Curriculum(
             question=questions,
             oracle_answer=oracle_answers,
+            answer=answers,
             learnability=learnability,
             completion=group_completions,
         )
