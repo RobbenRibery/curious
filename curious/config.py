@@ -316,7 +316,7 @@ class SFLConfig:
     Whether to use Sampling for Learnability (No-regret paper).
     """
 
-    sfl_total_steps: int = 1000
+    sfl_total_steps: int = 200
     """
     The total number of steps to use for the SFL.
     """

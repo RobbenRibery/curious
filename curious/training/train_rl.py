@@ -99,7 +99,7 @@ def train(
         tokenizer=tokenizer,
         logger=logger,
         **{
-            "batch_idx": 0 if not global_batch_idx else global_batch_idx,
+            "batch_idx": 0 if not global_batch_idx else global_batch_idx + 1,
         }
     )  
 
@@ -120,7 +120,7 @@ def train(
     replay_buffer = ReplayBuffer()
     for batch_idx, batch_inputs in tqdm(enumerate(rollout_data_loader), total=len(rollout_data_loader)):
 
-        batch_idx = batch_idx + 1 if not global_batch_idx else global_batch_idx
+        batch_idx = batch_idx + 1 if not global_batch_idx else global_batch_idx + 1
         questions = batch_inputs["question"]
         answers = batch_inputs["answer"]
 
