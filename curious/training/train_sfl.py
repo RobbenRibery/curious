@@ -7,6 +7,7 @@ from curious.training.training_setup import TrainingSetup, set_up_training
 from curious.training.train_rl import train
 from curious.utils.utils import form_hf_dataset
 from curious.sampling.sfl import sfl_sampling
+from curious.prompt import *
 from curious.replay.curriculum import Curriculum
 
 from accelerate.utils import set_seed
@@ -65,7 +66,7 @@ def train_sfl(
     while sfl_step < args.sfl_config.sfl_total_steps:
 
         ## shuffle the dataset
-        seed = rng.integers(0, 1e03, size=1)[0]
+        seed = rng.integers(0, 1e03, size=1)[0].item()
         dataset.train = dataset.train.shuffle(seed=seed)
         rng = np.random.default_rng(seed)
 
@@ -114,7 +115,7 @@ def train_sfl(
         ## create the training dataset & data set and shuffle using the seed
         hf_dataset = form_hf_dataset(
             tokenizer = training_setup["tokenizer"],
-            sampled_curriculum = sampled_curriculum,
+            data = [c.to_dict() for c in sampled_curriculum],
             seed = seed,
             max_prompt_length = train_max_input_length,
             system_prompt = eval(args.sampling_config.system_prompt),
