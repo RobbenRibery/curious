@@ -14,6 +14,9 @@ class Curriculum:
     question: List[str]
     """The quesitons provided"""
 
+    answer: List[str]
+    """The answers provided"""
+
     oracle_answer: List[str]
     """The oracle answers"""
 
@@ -35,6 +38,7 @@ class Curriculum:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "question": self.question,
+            "answer": self.answer,
             "oracle_answer": self.oracle_answer,
             "completion": self.completion,
             "learnability": self.learnability.tolist(),
@@ -48,6 +52,9 @@ class Curriculum:
         Question:
         {self.question}
         -------------------------
+        Answer:
+        {self.answer}
+        -------------------------
         Oracle_answer:
         {self.oracle_answer}
         -------------------------
@@ -56,7 +63,9 @@ class Curriculum:
         -------------------------
         Learnability:
         {self.learnability}
-        )""").strip()
+        )
+        """
+        ).strip()
 
 class CurriculumBuffer:
     """
@@ -66,6 +75,7 @@ class CurriculumBuffer:
         self.buffer = buffer if buffer is not None else []
         self.keys = [
             "question",
+            "answer",
             "oracle_answer",
             "learnability",
             "completion",
@@ -89,7 +99,12 @@ class CurriculumBuffer:
             for i, v in enumerate(values):
                 individual_curriculums[i][key] = v
 
-        self.buffer.extend([Curriculum(**data) for data in individual_curriculums])
+        self.buffer.extend(
+            [
+                Curriculum(**data) for data \
+                in individual_curriculums
+            ]
+        )
 
     def clear(self) -> None:
         self.buffer.clear()
