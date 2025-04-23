@@ -93,6 +93,8 @@ def sample_responses(
     seed: int = 42,
 ) -> Dict[str, torch.Tensor]:
     
+    model.eval()
+    model.gradient_checkpointing_disable()
     # set the seed
     set_seed(seed)
     group_size = generation_config.num_return_sequences

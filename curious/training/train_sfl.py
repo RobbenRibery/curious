@@ -3,7 +3,7 @@ from torch.utils.data import DataLoader
 from transformers import PreTrainedModel
 
 from curious.config import TrainingConfig
-from curious.training.training_setup import TrainingSetup
+from curious.training.training_setup import TrainingSetup, set_up_training
 from curious.training.train_rl import train
 from curious.utils.utils import form_hf_dataset
 from curious.sampling.sfl import sfl_sampling
@@ -13,6 +13,7 @@ from accelerate.utils import set_seed
 import wandb
 import numpy as np
 import tyro
+from rich import print
 
 def train_sfl(
     args:TrainingConfig, 
@@ -34,10 +35,21 @@ def train_sfl(
         train_outs (List[Dict[str, Any]]): The training outputs.
         eval_outs (List[Dict[str, Any]]): The evaluation outputs.
     """
-    assert args.sfl_config.sfl_num_samples_to_collect % args.base_config.train_batch_size == 0 \
-        and args.sfl_config.sfl_total_scanning_size % args.sfl_config.sfl_sampling_batch_size == 0, \
-        "sfl_num_samples_to_collect must be divisible by train_batch_size and sfl_sampling_batch_size"
+    # some sanity checks
+    assert args.sfl_config.sfl_enabled, "SFL is not enabled, please set sfl_enabled to True"
+    assert args.sfl_config.sfl_num_samples_to_collect <= args.sfl_config.sfl_total_scanning_size, \
+        "sfl_num_samples_to_collect must be less than or equal to sfl_total_scanning_size"
+    assert args.sfl_config.sfl_num_samples_to_collect % args.base_config.train_batch_size == 0, \
+        "sfl_num_samples_to_collect must be divisible by train_batch_size"
+    assert args.sfl_config.sfl_total_scanning_size % args.sfl_config.sfl_sampling_batch_size == 0, \
+        "sfl_total_scanning_size must be divisible by sfl_sampling_batch_size"
     
+    assert not args.grpo_config.anneling_lr, "Annealing learning rate is not supported for SFL"
+    assert not args.grpo_config.anneling_temperature, "Annealing temperature is not supported for SFL"
+
+    assert args.grpo_config.kl_weight == 0, "KL weight must be 0 for SFL"
+    assert args.grpo_config.ref_model_update_freq == 0, "Reference model update frequency must be 0 for SFL"
+
     # set the seed for accelerate
     set_seed(args.base_config.seed)
     seed = args.base_config.seed
@@ -77,7 +89,8 @@ def train_sfl(
             sfl_num_samples_to_collect = args.sfl_config.sfl_num_samples_to_collect,
             cpu_device = training_setup["cpu_device"],
         )
-        assert len(sampled_curriculum) == args.sfl_config.sfl_num_samples_to_collect
+        assert len(sampled_curriculum) == args.sfl_config.sfl_num_samples_to_collect, \
+            "The number of sampled curriculum must be equal to sfl_num_samples_to_collect"
         
         ### logging the learnability scores
         learnability_scores = np.array(
@@ -95,6 +108,8 @@ def train_sfl(
                 "sfl_step": sfl_step,
             }
         )
+        print(f"sfl_step: {sfl_step} | mean_learnability: {learnability_scores.mean()}")
+        
 
         ## create the training dataset & data set and shuffle using the seed
         hf_dataset = form_hf_dataset(
@@ -175,5 +190,11 @@ if __name__ == "__main__":
     wandb.define_metric("train/mean_batch_format_returns", step_metric="num_batches_visited")
     wandb.define_metric("train/mean_batch_outcome_returns", step_metric="num_batches_visited")
     
-    train_sfl(args, wandb.log)
+    # set up the training
+    training_setup = set_up_training(args)
+    model, train_outs, eval_outs = train_sfl(
+        args=args,
+        training_setup=training_setup,
+        logger=wandb.log,
+    )
 

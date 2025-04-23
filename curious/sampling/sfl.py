@@ -80,6 +80,7 @@ def sfl_sampling(
         questions = encoded_batch["question"]
         oracle_answers = encoded_batch["oracle_answer"]
 
+        # create the curriculum
         tmp_curriculum = Curriculum(
             question=questions,
             oracle_answer=oracle_answers,
@@ -101,7 +102,6 @@ def sfl_sampling(
     # sample the experiences
     top_k_output = torch.topk(learnability_scores, k=sfl_num_samples_to_collect)
     top_k_indices = top_k_output.indices
-    #top_k_values = top_k_output.values
 
     del solved_masks
     del learnability
