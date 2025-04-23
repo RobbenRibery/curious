@@ -98,6 +98,7 @@ def sfl_sampling(
 
         # increment the scanned samples
         scanned_samples += encoded_batch["input_ids"].shape[0]
+        print(f"scanned: {scanned_samples}/{sfl_total_scanning_size}")
 
     # sample the experiences
     top_k_output = torch.topk(learnability_scores, k=sfl_num_samples_to_collect)

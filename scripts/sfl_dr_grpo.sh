@@ -25,11 +25,11 @@ python -m curious.training.train_sfl \
     --sampling_config.model_prompt_length 1024 \
     --sampling_config.max_new_tokens 512 \
     --sampling_config.temperature 1.0 \
-    --sampling_config.top_p 0.9 \
+    --sampling_config.top_p 1.0 \
     --sampling_config.top_k 50 \
     --sampling_config.do_sample \
     --sampling_config.use_cache \
-    --sampling_config.repetition_penalty 1.1 \
+    --sampling_config.repetition_penalty 1.0 \
     --sampling_config.system_prompt "qwen_system_prompt" \
     --reward_config.no-use-format-reward \
     --reward_config.no-use-overlong-penalty \
