@@ -6,8 +6,8 @@ export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1;
 
 python -m curious.training.train_sfl \
     --wandb_config.project "curious-gsm8k" \
-    --wandb_config.group "sfl-drgrpo-test" \
-    --wandb_config.name "sfl-drgrpo-qwen25-prompt[qwen]-reward[partial-solved-penalize-trailing]-temp1rep1-5e06rl-bsz16" \
+    --wandb_config.group "sfl-grpo-test" \
+    --wandb_config.name "sfl-grpo-qwen25-prompt[qwen]-reward[partial-solved-penalize-trailing]-temp1rep1-1e06rl-bsz16" \
     --base_config.model_name "Qwen/Qwen2.5-0.5B-Instruct" \
     --base_config.device_index 0 \
     --base_config.dataset_name "openai/gsm8k" \
@@ -26,7 +26,7 @@ python -m curious.training.train_sfl \
     --sampling_config.max_new_tokens 512 \
     --sampling_config.temperature 1.0 \
     --sampling_config.top_p 1.0 \
-    --sampling_config.top_k 50 \
+    --sampling_config.top_k 100 \
     --sampling_config.do_sample \
     --sampling_config.use_cache \
     --sampling_config.repetition_penalty 1.0 \
@@ -34,15 +34,13 @@ python -m curious.training.train_sfl \
     --reward_config.no-use-format-reward \
     --reward_config.no-use-overlong-penalty \
     --grpo_config.group_size 16 \
-    --grpo_config.lr 5e-06 \
+    --grpo_config.lr 1e-06 \
     --grpo_config.weight_decay 0.01 \
     --grpo_config.kl_weight 0.0 \
     --grpo_config.clip_eps 0.2 \
     --grpo_config.mini_batch_size 64 \
     --grpo_config.epochs_per_step 1 \
-    --grpo_config.max_grad_norm 0.5 \
-    --grpo_config.no-normalize-centered-returns \
-    --grpo_config.use-fixed-response-length \
+    --grpo_config.max_grad_norm 1.0 \
     --sfl_config.sfl_enabled \
     --sfl_config.sfl_total_steps 30 \
     --sfl_config.sfl_sampling_batch_size 256 \
