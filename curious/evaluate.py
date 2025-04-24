@@ -200,28 +200,29 @@ def evaluate(
         )
 
         ## Save the text on disk if the batch index is a multiple of the eval text log interval
-        if batch_idx % config.base_config.eval_text_log_interval == 0:
-            # Log the text to logger
-            text_to_log = ""
-            for question, answer, completion, reward, info in zip(
-                questions,
-                oracle_answers,
-                completions,
-                batch_rewards,
-                infos,
-            ):
-                text_to_log += LOGGING_TEMPLATE.format(
-                    question=question,
-                    answer=answer,
-                    completion=completion,
-                    reward=reward,
-                    info=info,
-                )
+        if config.base_config.eval_text_log_interval > 0:
+            if batch_idx % config.base_config.eval_text_log_interval == 0:
+                # Log the text to logger
+                text_to_log = ""
+                for question, answer, completion, reward, info in zip(
+                    questions,
+                    oracle_answers,
+                    completions,
+                    batch_rewards,
+                    infos,
+                ):
+                    text_to_log += LOGGING_TEMPLATE.format(
+                        question=question,
+                        answer=answer,
+                        completion=completion,
+                        reward=reward,
+                        info=info,
+                    )
 
-            file_name = f"log_{batch_idx}.txt"
-            with open(os.path.join(out_dir, file_name), "a") as f:
-                f.write(text_to_log)
-            f.close()
+                file_name = f"log_{batch_idx}.txt"
+                with open(os.path.join(out_dir, file_name), "a") as f:
+                    f.write(text_to_log)
+                f.close()
         # --------------------- Logging End ---------------------
         
         # free up memory
