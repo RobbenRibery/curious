@@ -282,24 +282,25 @@ def train(
                 "mean_num_words_in_completions": batch_mean_num_words_in_completions,
             }
         )
-        if batch_idx % args.base_config.train_text_log_interval == 0:
-            file_name = os.path.join(training_setup["train_log_dir"], f"log_{batch_idx}.txt")
-            with open(file_name, "a") as f:
-                for i, completion in enumerate(completions):
-                    question = questions[i//args.grpo_config.group_size]
-                    answer = answers[i//args.grpo_config.group_size]
-                    reward = returns[i]
-                    info = info_list[i]     
+        if args.base_config.train_text_log_interval > 0:
+            if batch_idx % args.base_config.train_text_log_interval == 0:
+                file_name = os.path.join(training_setup["train_log_dir"], f"log_{batch_idx}.txt")
+                with open(file_name, "a") as f:
+                    for i, completion in enumerate(completions):
+                        question = questions[i//args.grpo_config.group_size]
+                        answer = answers[i//args.grpo_config.group_size]
+                        reward = returns[i]
+                        info = info_list[i]     
 
-                    text_to_log = LOGGING_TEMPLATE.format(
-                        question=question,
-                        answer=answer,
-                        completion=completion,
-                        reward=reward,
-                        info=info,
-                    )
-                    f.write(text_to_log)
-            f.close()
+                        text_to_log = LOGGING_TEMPLATE.format(
+                            question=question,
+                            answer=answer,
+                            completion=completion,
+                            reward=reward,
+                            info=info,
+                        )
+                        f.write(text_to_log)
+                f.close()
             ### ----- Logging phase END ----- ###
         
         ### ----- Training phase START ----- ###
@@ -370,55 +371,57 @@ def train(
                 gc.collect()
                 torch.cuda.empty_cache()
                 ### cpu ops ### 
-                
         ### ----- Training phase END ----- ###
 
         ### ----- Update ref model phase START ----- ###
-        if (
-            args.grpo_config.kl_weight > 0
-            and args.grpo_config.ref_model_update_freq > 0
-            and batch_idx % args.grpo_config.ref_model_update_freq == 0
-        ):
-            reference_model.load_state_dict(
-                model.state_dict()
-            )
-            reference_model.eval()
+        if args.grpo_config.ref_model_update_freq > 0:
+            if (
+                args.grpo_config.kl_weight > 0
+                and args.grpo_config.ref_model_update_freq > 0
+                and batch_idx % args.grpo_config.ref_model_update_freq == 0
+            ):
+                reference_model.load_state_dict(
+                    model.state_dict()
+                )
+                reference_model.eval()
         ### ----- Update ref model phase END ----- ###
 
-
         ### ----- Interval checkpoint phase START ----- ###
-        if (
-            args.base_config.checkpoint_dir is not None
-            and args.base_config.checkpoint_interval is not None
-            and batch_idx % args.base_config.checkpoint_interval == 0
-        ):
-            state_dict_dir = os.path.join(
-                args.base_config.checkpoint_dir, 
-                run_name,
-            )
-            os.makedirs(state_dict_dir, exist_ok=True)
-            torch.save(
-                model.state_dict(),
-                os.path.join(
-                    state_dict_dir,
-                    f"step_{batch_idx}.pt"
+        if args.base_config.checkpoint_interval > 0:
+            if (
+                args.base_config.checkpoint_dir is not None
+                and args.base_config.checkpoint_interval is not None
+                and batch_idx % args.base_config.checkpoint_interval == 0
+            ):
+                state_dict_dir = os.path.join(
+                    args.base_config.checkpoint_dir, 
+                    run_name,
                 )
-            )
+                os.makedirs(state_dict_dir, exist_ok=True)
+                torch.save(
+                    model.state_dict(),
+                    os.path.join(
+                        state_dict_dir,
+                        f"step_{batch_idx}.pt"
+                    )
+                )
         ### ----- Interval checkpoint phase END ----- ###
 
         ### ----- Interval evaluation phase START ----- ###
-        if batch_idx % args.base_config.eval_interval == 0:
-            eval_results = evaluate(
-                config=eval_config,
-                model=model,
-                tokenizer=tokenizer,
-                logger=logger,
-                **{
-                    "batch_idx": batch_idx,
-                }
-            )  
-            eval_outs.append(eval_results)
+        if args.base_config.eval_interval > 0:
+            if batch_idx % args.base_config.eval_interval == 0:
+                eval_results = evaluate(
+                    config=eval_config,
+                    model=model,
+                    tokenizer=tokenizer,
+                    logger=logger,
+                    **{
+                        "batch_idx": batch_idx,
+                    }
+                )  
+                eval_outs.append(eval_results)
         ### ----- Interval evaluation phase END ----- ###
+        
         del batch_inputs
         if args.grpo_config.anneling_lr:
             lr_scheduler.step()
