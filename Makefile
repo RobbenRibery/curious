@@ -11,8 +11,10 @@ PYTHON_VERSION = 3.11
 # use this on lighting ai studio
 .PHONY: install 
 install:
-	@poetry lock --no-update
+	@pip install -U poetry
+	@poetry lock 
 	@poetry install
+	@pip install flash-attn --no-build-isolation
 
 
 .PHONY: clean

@@ -4,7 +4,8 @@ from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
 )
-from typing import List, Dict, Optional, Union
+import datasets
+from typing import List, Dict, Optional, Union, Any
 import torch
 
 from curious.prompt import * 
@@ -33,6 +34,44 @@ Info:
 
 """
 ).strip()
+
+def form_hf_dataset(
+    tokenizer: PreTrainedTokenizer,
+    data:List[Dict[str, Any]],
+    seed: int = 42,
+    max_prompt_length: int = 1024,
+    system_prompt: str = qwen_system_prompt,
+) -> datasets.Dataset:
+    """
+    Form a Hugging Face dataset from a dataset name.
+    
+    Args:
+        tokenizer (PreTrainedTokenizer): The tokenizer to use.
+        data (List[Dict[str, Any]]): The data to form the dataset from.
+        seed (int): The seed to use for the dataset.
+        max_prompt_length (int): The maximum length of the prompt.
+        system_prompt (str): The system prompt to use.
+
+    Returns:
+        datasets.Dataset: The huggingface dataset.
+    """
+    df_dataset = datasets.Dataset.from_list(data)
+    df_dataset = df_dataset.map(
+        lambda x: tokenize_questions(
+            tokenizer, 
+            x["question"], 
+            max_length=max_prompt_length, 
+            allow_dynamic_padding=False, 
+            system_prompt=system_prompt),
+        batched=True,
+    )
+    df_dataset.set_format(
+        type="pt",
+        columns=["input_ids", "attention_mask"],
+        output_all_columns=True,
+    )
+    df_dataset = df_dataset.shuffle(seed=seed)
+    return df_dataset
 
 def load_model_tokenizer(
     model_name_or_path: str,

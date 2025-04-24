@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from uuid import uuid4
 
-from curious.reward import * 
+from curious.reward.rule.gsm8k import * 
 
 @dataclass
 class WandbConfig:
@@ -110,6 +110,7 @@ class BaseConfig:
     """
     Whether to return the entropy of the tokens.
     """
+
 
 @dataclass
 class SamplingConfig:
@@ -302,4 +303,72 @@ class GRPOConfig:
     ref_model_update_freq: int = 0
     """
     The interval to update the reference model.
+    """
+
+@dataclass
+class SFLConfig:
+    """
+    A dataclass for storing the SFL configuration.
+    """
+    
+    sfl_enabled: bool = False
+    """
+    Whether to use Sampling for Learnability (No-regret paper).
+    """
+
+    sfl_total_steps: int = 200
+    """
+    The total number of steps to use for the SFL.
+    """
+
+    sfl_sampling_batch_size: int = 256
+    """
+    The batch size to use for the SFL sampling.
+    """
+    
+    sfl_total_scanning_size: int = 1024
+    """
+    The total size of the dataset to scan.
+    """
+
+    sfl_num_samples_to_collect: int = 256
+    """
+    The number of samples to collect.
+    """
+
+
+@dataclass
+class TrainingConfig:
+    """
+    A dataclass for storing the training configuration.
+    """
+
+    grpo_config: GRPOConfig
+    """
+    The GRPO configuration.
+    """
+
+    wandb_config: WandbConfig
+    """
+    The wandb configuration.
+    """
+
+    base_config: BaseConfig
+    """
+    The base configuration.
+    """
+
+    sampling_config: SamplingConfig
+    """
+    The sampling configuration.
+    """
+
+    reward_config: RewardConfig
+    """
+    The reward configuration.
+    """
+
+    sfl_config: SFLConfig
+    """
+    The SFL configuration.
     """

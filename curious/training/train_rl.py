@@ -1,224 +1,133 @@
 import os 
-os.environ["TOKENIZERS_PARALLELISM"] = "true"
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 from typing import Callable, List, Dict, Any, Tuple
+
+from transformers import PreTrainedModel
 
 import torch 
 from torch.utils.data import DataLoader 
 from torch.nn.utils import clip_grad_norm_
-import torch.optim as optim
 
-from transformers import GenerationConfig
-
-from curious.data import GSM8KDataset
-from curious.utils import LOGGING_TEMPLATE, load_model_tokenizer
-from curious.sampling import rollout, sequences_log_probs, linear_temperature_annealing
-from curious.buffer import ReplayBuffer, Experience, join_experience_batch
-from curious.loss import (
-    ActorLoss, 
-    AdaptiveKLController, 
-    ConstantKLController, 
+from curious.utils.utils import LOGGING_TEMPLATE
+from curious.sampling.sampling import (
+    rollout, 
+    sequences_log_probs, 
+    linear_temperature_annealing,
+)
+from curious.replay.experience import (
+    ReplayBuffer, 
+    Experience, 
+    join_experience_batch
+)
+from curious.policy_gradient.loss import (
     approx_kl_divergence, 
     masked_mean,
 )
-from curious.reward import GSM8KRewardModel
+from curious.training.training_setup import (
+    TrainingSetup, 
+    set_up_training,
+    TrainState,
+)
 from curious.prompt import *
 
-from config import GRPOConfig, WandbConfig, BaseConfig, SamplingConfig, RewardConfig
-from evaluate import FixedSamplingConfig, EvaluationConfig, evaluate
+from curious.config import TrainingConfig
+from curious.evaluate import evaluate
 
 from accelerate.utils import set_seed
+
 import wandb
 import numpy as np
 from tqdm import tqdm
 from rich import print
 
-from dataclasses import dataclass
 import tyro 
 import gc
-
-@dataclass
-class TrainingConfig:
-    """
-    A dataclass for storing the training configuration.
-    """
-
-    grpo_config: GRPOConfig
-    """
-    The GRPO configuration.
-    """
-
-    wandb_config: WandbConfig
-    """
-    The wandb configuration.
-    """
-
-    base_config: BaseConfig
-    """
-    The base configuration.
-    """
-
-    sampling_config: SamplingConfig
-    """
-    The sampling configuration.
-    """
-
-    reward_config: RewardConfig
-    """
-    The reward configuration.
-    """
-
-
-def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    
+def train(
+    args:TrainingConfig, 
+    training_setup: TrainingSetup, 
+    logger: Callable,
+    **kwargs,
+    ) -> Tuple[
+        PreTrainedModel, 
+        List[Dict[str, Any]], 
+        List[Dict[str, Any]]
+    ]:
     """
     Train the model.
     Args:
-        args (TrainingConfig): The training configuration.
+        training_setup (TrainingSetup): The training setup.
         logger (Callable): The logger to use.
+        kwargs (Dict[str, Any]): The kwargs to use.
+            - global_batch_idx (int): The global batch index.
 
     Returns:
-        Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]: The training outputs and the evaluation outputs.
+        Tuple[
+            PreTrainedModel, 
+            List[Dict[str, Any]], 
+            List[Dict[str, Any]]
+        ]: The training outputs and the evaluation outputs.
     """
+    # get the kwargs
+    global_batch_idx = kwargs.get("global_batch_idx", None)
+    if args.sfl_config.sfl_enabled:
+        assert global_batch_idx is not None, "global_batch_idx must be provided if SFL is enabled"
+
     # outputs 
     train_outs:List[Dict[str, Any]] = []
     eval_outs:List[Dict[str, Any]] = []
 
-    # get the run name
-    run_name = args.wandb_config.name.replace("-", "_")
-
-    # check that the data mode is train
-    assert args.base_config.mode == "train"
-    assert args.grpo_config.mini_batch_size % args.grpo_config.group_size == 0
-    assert args.base_config.train_batch_size * args.grpo_config.group_size % args.grpo_config.mini_batch_size == 0
-
-    # device & seeding
-    device = torch.device("cuda", args.base_config.device_index)
-    cpu_device = torch.device("cpu")
+    # set the seed for accelerate
     set_seed(args.base_config.seed)
-    
-    ## ref policy
-    if args.grpo_config.kl_weight > 0:
-        if args.grpo_config.kl_controller == "adaptive":
-            kl_controller = AdaptiveKLController(
-                init_kl_coef=args.grpo_config.kl_weight,
-                target_kl=args.grpo_config.kl_target,
-                horizon=args.grpo_config.kl_horizon_factor * args.grpo_config.mini_batch_size,
-            )
-        elif args.grpo_config.kl_controller == "constant":
-            kl_controller = ConstantKLController(
-                init_kl_coef=args.grpo_config.kl_weight,
-            )
-        else:
-            raise ValueError(f"Invalid KL controller: {args.grpo_config.kl_controller}")
 
-        reference_model, _ = load_model_tokenizer(
-            args.base_config.model_name, 
-            device_map=device, 
-            freeze_model=True,
-        )
-        reference_model.eval()
+    # unload the training setup 
+    run_name = training_setup["run_name"]
+    device = training_setup["device"]
+    cpu_device = training_setup["cpu_device"]
 
-    ## target policy
-    model, tokenizer = load_model_tokenizer(
-        args.base_config.model_name, 
-        device_map=device
-    )
-    model.gradient_checkpointing_enable()
+    # get the target policy
+    model = training_setup["target_policy"]
+    tokenizer = training_setup["tokenizer"]
+    pad_token_id = training_setup["pad_token_id"]
 
-    ## Tokenizer
-    tokenizer.padding_side  = 'left'
-    pad_token_id = tokenizer.eos_token_id
+    reference_model = training_setup["reference_model"]
+    kl_controller = training_setup["kl_controller"]
 
-    ## Optimizer
-    optimizer = optim.AdamW(
-        model.parameters(), 
-        lr=args.grpo_config.lr,
-        weight_decay=args.grpo_config.weight_decay,
-    )
+    # Evaluation config
+    eval_config = training_setup["eval_config"]
+    if args.sfl_config.sfl_enabled and global_batch_idx > 0:
+        pass 
+    else:
+        evaluate(
+            config=eval_config,
+            model=model,
+            tokenizer=tokenizer,
+            logger=logger,
+            **{
+                "batch_idx": 0 if not global_batch_idx else global_batch_idx + 1,
+            }
+        )  
 
-    ## Data
-    dataset = GSM8KDataset(
-        tokenizer=tokenizer,
-        dataset_name=args.base_config.dataset_name,
-        seed=args.base_config.seed,
-        mode=args.base_config.mode,
-        max_prompt_length=args.sampling_config.model_prompt_length,
-        system_prompt=eval(args.sampling_config.system_prompt),
-    )
-    rollout_data_loader = DataLoader(
-        dataset,
-        batch_size=args.base_config.train_batch_size,
-        shuffle=True,
-        drop_last=True,
-        num_workers=args.base_config.num_workers,
-    )
+    ## get the rollout data loader
+    rollout_data_loader = training_setup["rollout_data_loader"]
+    ## get the optimizer
+    optimizer = training_setup["optimizer"]
+    ## get the lr scheduler
+    lr_scheduler = training_setup["lr_scheduler"]
+    ## get the objective
+    objective = training_setup["actor_loss"]
+    ## get the reward model
+    reward_model = training_setup["reward_model"]
+    ## get the generation config
+    generation_config = training_setup["generation_config"]
 
-    lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=len(rollout_data_loader),
-        eta_min=args.grpo_config.lr * 1e-03,
-    )
-    
     ## Replay buffer
     replay_buffer = ReplayBuffer()
-
-    ## Objective
-    objective = ActorLoss(
-        epsilon=args.grpo_config.clip_eps,
-        epsilon_high=args.grpo_config.clip_eps_high,
-        kl_weight=args.grpo_config.kl_weight,
-        use_clip_high=args.grpo_config.use_clip_high,
-        use_token_level_loss=args.grpo_config.use_token_level_loss,
-        use_fixed_response_length=args.grpo_config.use_fixed_response_length,
-        use_surrogate_loss=args.grpo_config.use_surrogate_loss,
-    )
-
-    ## Reward model
-    reward_model = GSM8KRewardModel(
-        answer_pattern=args.reward_config.answer_pattern,
-        think_pattern=args.reward_config.think_pattern,
-        use_format_reward=args.reward_config.use_format_reward,
-        use_overlong_penalty=args.reward_config.use_overlong_penalty,
-        l_max=args.reward_config.l_max,
-        l_cache=args.reward_config.l_cache,
-    )
-
-    ## Sampling config
-    generation_config = GenerationConfig(
-        num_return_sequences=args.grpo_config.group_size,
-        max_new_tokens=args.sampling_config.max_new_tokens,
-        temperature=args.sampling_config.temperature,
-        top_p=args.sampling_config.top_p,
-        top_k=args.sampling_config.top_k,
-        do_sample =args.sampling_config.do_sample,
-        eos_token_id=tokenizer.eos_token_id,
-        pad_token_id= tokenizer.eos_token_id,
-        use_cache=args.sampling_config.use_cache,
-        repetition_penalty=args.sampling_config.repetition_penalty,
-    )
-
-    ## Evaluation config
-    eval_config = EvaluationConfig(
-        base_config=args.base_config,
-        sampling_config=FixedSamplingConfig(),
-        reward_config=args.reward_config,
-        wandb_config=args.wandb_config,
-    )
-    evaluate(
-        config=eval_config,
-        model=model,
-        tokenizer=tokenizer,
-        logger=logger,
-        **{"batch_idx": 0}
-    )  
-
-    # create the logging directory for training logs
-    out_dir = os.path.join(args.base_config.train_log_dir, args.wandb_config.name)
-    os.makedirs(out_dir, exist_ok=True)
-
     for batch_idx, batch_inputs in tqdm(enumerate(rollout_data_loader), total=len(rollout_data_loader)):
+
+        batch_idx = batch_idx + 1 if not global_batch_idx else global_batch_idx + 1
         questions = batch_inputs["question"]
         answers = batch_inputs["answer"]
+
         print(f"Batch indx {batch_idx}")
         print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/(1024**3)))
         print("torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/(1024**3)))
@@ -332,7 +241,6 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
         torch.cuda.empty_cache()
         ### ----- Rollout phase END ----- ###
 
-
         ### ----- Logging phase START ----- ###
         # log the stats to wandb 
         logger(
@@ -347,16 +255,24 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                 "train/mean_batch_format_returns": batch_mean_format_returns,
                 "train/mean_batch_outcome_returns": batch_mean_outcome_returns,
                 "train/mean_batch_length_penalty": batch_mean_length_penalty,
+                
                 "train/lr": lr_scheduler.get_lr()[0],
                 "train/mean_action_entropy": action_entropy.item(),
-                "num_batches_visited": batch_idx + 1,
+                
+                "num_batches_visited": batch_idx,
             }
         )
         del action_entropy
         gc.collect()
         torch.cuda.empty_cache()
         print(
-            f"batch_idx: {batch_idx} | returns: {batch_mean_returns} | solved_rate: {batch_mean_solved_rate} | format_returns: {batch_mean_format_returns} | outcome_returns: {batch_mean_outcome_returns}"
+            "--------------------------------\n"
+            f"batch_idx: {batch_idx} |\n "
+            f"returns: {batch_mean_returns} |\n "
+            f"solved_rate: {batch_mean_solved_rate} |\n "
+            f"format_returns: {batch_mean_format_returns} |\n "
+            f"outcome_returns: {batch_mean_outcome_returns}\n"
+            "--------------------------------"
         )
         train_outs.append(
             {
@@ -367,25 +283,25 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                 "mean_num_words_in_completions": batch_mean_num_words_in_completions,
             }
         )
-        if (batch_idx + 1) % args.base_config.train_text_log_interval == 0:
-            file_name = os.path.join(out_dir, f"log_{batch_idx + 1}.txt")
+        if args.base_config.train_text_log_interval > 0:
+            if batch_idx % args.base_config.train_text_log_interval == 0:
+                file_name = os.path.join(training_setup["train_log_dir"], f"log_{batch_idx}.txt")
+                with open(file_name, "a") as f:
+                    for i, completion in enumerate(completions):
+                        question = questions[i//args.grpo_config.group_size]
+                        answer = answers[i//args.grpo_config.group_size]
+                        reward = returns[i]
+                        info = info_list[i]     
 
-            with open(file_name, "a") as f:
-                for i, completion in enumerate(completions):
-                    question = questions[i//args.grpo_config.group_size]
-                    answer = answers[i//args.grpo_config.group_size]
-                    reward = returns[i]
-                    info = info_list[i]     
-
-                    text_to_log = LOGGING_TEMPLATE.format(
-                        question=question,
-                        answer=answer,
-                        completion=completion,
-                        reward=reward,
-                        info=info,
-                    )
-                    f.write(text_to_log)
-            f.close()
+                        text_to_log = LOGGING_TEMPLATE.format(
+                            question=question,
+                            answer=answer,
+                            completion=completion,
+                            reward=reward,
+                            info=info,
+                        )
+                        f.write(text_to_log)
+                f.close()
             ### ----- Logging phase END ----- ###
         
         ### ----- Training phase START ----- ###
@@ -413,7 +329,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                     return_entropy=False,
                 )
                 loss, mean_kl, mean_actor_loss = objective(log_probs=log_probs, experience=exp)
-                loss: torch.Tensor
+                
                 del log_probs
                 del exp 
 
@@ -456,58 +372,64 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
                 gc.collect()
                 torch.cuda.empty_cache()
                 ### cpu ops ### 
-                
         ### ----- Training phase END ----- ###
 
         ### ----- Update ref model phase START ----- ###
-        if (
-            args.grpo_config.kl_weight > 0
-            and args.grpo_config.ref_model_update_freq > 0
-            and (batch_idx + 1) % args.grpo_config.ref_model_update_freq == 0
-        ):
-            reference_model.load_state_dict(
-                model.state_dict()
-            )
-            reference_model.eval()
+        if args.grpo_config.ref_model_update_freq > 0:
+            if (
+                args.grpo_config.kl_weight > 0
+                and args.grpo_config.ref_model_update_freq > 0
+                and batch_idx % args.grpo_config.ref_model_update_freq == 0
+            ):
+                reference_model.load_state_dict(
+                    model.state_dict()
+                )
+                reference_model.eval()
         ### ----- Update ref model phase END ----- ###
 
-
         ### ----- Interval checkpoint phase START ----- ###
-        if (
-            args.base_config.checkpoint_dir is not None
-            and args.base_config.checkpoint_interval is not None
-            and (batch_idx + 1) % args.base_config.checkpoint_interval == 0
-        ):
-            state_dict_dir = os.path.join(
-                args.base_config.checkpoint_dir, 
-                run_name,
-            )
-            os.makedirs(state_dict_dir, exist_ok=True)
-            torch.save(
-                model.state_dict(),
-                os.path.join(
-                    state_dict_dir,
-                    f"step_{batch_idx + 1}.pt"
+        if args.base_config.checkpoint_interval > 0:
+            if (
+                args.base_config.checkpoint_dir is not None
+                and args.base_config.checkpoint_interval is not None
+                and batch_idx % args.base_config.checkpoint_interval == 0
+            ):
+                state_dict_dir = os.path.join(
+                    args.base_config.checkpoint_dir, 
+                    run_name,
                 )
-            )
+                os.makedirs(state_dict_dir, exist_ok=True)
+                torch.save(
+                    model.state_dict(),
+                    os.path.join(
+                        state_dict_dir,
+                        f"step_{batch_idx}.pt"
+                    )
+                )
         ### ----- Interval checkpoint phase END ----- ###
 
         ### ----- Interval evaluation phase START ----- ###
-        if (batch_idx + 1) % args.base_config.eval_interval == 0:
-            eval_results = evaluate(
-                config=eval_config,
-                model=model,
-                tokenizer=tokenizer,
-                logger=logger,
-                **{
-                    "batch_idx": batch_idx + 1,
-                }
-            )  
-            eval_outs.append(eval_results)
+        if args.base_config.eval_interval > 0:
+            if batch_idx % args.base_config.eval_interval == 0:
+                eval_results = evaluate(
+                    config=eval_config,
+                    model=model,
+                    tokenizer=tokenizer,
+                    logger=logger,
+                    **{
+                        "batch_idx": batch_idx,
+                    }
+                )  
+                eval_outs.append(eval_results)
         ### ----- Interval evaluation phase END ----- ###
+        
         del batch_inputs
         if args.grpo_config.anneling_lr:
             lr_scheduler.step()
+
+        if args.sfl_config.sfl_enabled:
+            global_batch_idx += 1
+    
     ### ----- Final checkpoint phase START ----- ###
     if args.base_config.checkpoint_dir is not None:
         # save the final state dict
@@ -520,7 +442,7 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
             model.state_dict(),
             os.path.join(
                 state_dict_dir,
-                f"step_{batch_idx + 1}_final.pt"
+                f"step_{batch_idx}_final.pt"
             )
         )
         # evaluate the final model
@@ -530,19 +452,31 @@ def train(args:TrainingConfig, logger: Callable) -> Tuple[List[Dict[str, Any]], 
             tokenizer=tokenizer,
             logger=logger,
             **{
-                "batch_idx": batch_idx+1,
+                "batch_idx": batch_idx,
             }
         )  
         eval_outs.append(eval_results)
     ### ----- Final checkpoint phase END ----- ###
+    
+    return TrainState(
+        run_name=run_name,
+        device=device,
+        cpu_device=cpu_device,
+        model=model,
+        optimizer=optimizer,
+        lr_scheduler=lr_scheduler,
+        reference_model=reference_model,
+        kl_controller=kl_controller,
+    ), train_outs, eval_outs
 
-    return train_outs, eval_outs
 
 if __name__ == "__main__":
-
+    
     args = tyro.cli(TrainingConfig)
+    training_setup = set_up_training(args)
     
     wandb.init(
+        entity="moed",
         project=args.wandb_config.project,
         name=args.wandb_config.name,
         config=args,
@@ -555,5 +489,8 @@ if __name__ == "__main__":
     wandb.define_metric("train/mean_batch_format_returns", step_metric="num_batches_visited")
     wandb.define_metric("train/mean_batch_outcome_returns", step_metric="num_batches_visited")
     
-    logger = wandb.log  
-    train_outs, eval_outs = train(args, logger)
+    final_model, train_outs, eval_outs = train(
+        args=args,
+        training_setup=training_setup,
+        logger=wandb.log,
+    )
