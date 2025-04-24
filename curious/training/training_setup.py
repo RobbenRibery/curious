@@ -96,7 +96,7 @@ def set_up_training(config:TrainingConfig) -> TrainingSetup:
         device_map=device, 
         freeze_model=False,
     )
-    model.forward = torch.compile(model.forward)
+   
     tokenizer.padding_side  = 'left'
     pad_token_id = tokenizer.eos_token_id
     
