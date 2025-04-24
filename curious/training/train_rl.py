@@ -22,7 +22,11 @@ from curious.policy_gradient.loss import (
     approx_kl_divergence, 
     masked_mean,
 )
-from curious.training.training_setup import TrainingSetup, set_up_training
+from curious.training.training_setup import (
+    TrainingSetup, 
+    set_up_training,
+    TrainState,
+)
 from curious.prompt import *
 
 from curious.config import TrainingConfig
@@ -85,11 +89,8 @@ def train(
     tokenizer = training_setup["tokenizer"]
     pad_token_id = training_setup["pad_token_id"]
 
-    if "reference_model" in training_setup:
-        reference_model = training_setup["reference_model"]
-    
-    if "kl_controller" in training_setup:
-        kl_controller = training_setup["kl_controller"]
+    reference_model = training_setup["reference_model"]
+    kl_controller = training_setup["kl_controller"]
 
     # Evaluation config
     eval_config = training_setup["eval_config"]
@@ -457,7 +458,16 @@ def train(
         eval_outs.append(eval_results)
     ### ----- Final checkpoint phase END ----- ###
     
-    return model, train_outs, eval_outs
+    return TrainState(
+        run_name=run_name,
+        device=device,
+        cpu_device=cpu_device,
+        model=model,
+        optimizer=optimizer,
+        lr_scheduler=lr_scheduler,
+        reference_model=reference_model,
+        kl_controller=kl_controller,
+    ), train_outs, eval_outs
 
 
 if __name__ == "__main__":

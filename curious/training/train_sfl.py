@@ -3,7 +3,11 @@ from torch.utils.data import DataLoader
 from transformers import PreTrainedModel
 
 from curious.config import TrainingConfig
-from curious.training.training_setup import TrainingSetup, set_up_training
+from curious.training.training_setup import (
+    TrainState, 
+    TrainingSetup, 
+    set_up_training,
+)
 from curious.training.train_rl import train
 from curious.utils.utils import form_hf_dataset
 from curious.sampling.sfl import sfl_sampling
@@ -21,7 +25,7 @@ def train_sfl(
     training_setup:TrainingSetup,
     logger:Callable
 ) -> Tuple[
-    PreTrainedModel,
+    TrainState,
     List[Dict[str, Any]],
     List[Dict[str, Any]]
 ]:
@@ -44,9 +48,6 @@ def train_sfl(
         "sfl_num_samples_to_collect must be divisible by train_batch_size"
     assert args.sfl_config.sfl_total_scanning_size % args.sfl_config.sfl_sampling_batch_size == 0, \
         "sfl_total_scanning_size must be divisible by sfl_sampling_batch_size"
-    
-    assert not args.grpo_config.anneling_lr, "Annealing learning rate is not supported for SFL"
-    assert not args.grpo_config.anneling_temperature, "Annealing temperature is not supported for SFL"
 
     assert args.grpo_config.kl_weight == 0, "KL weight must be 0 for SFL"
     assert args.grpo_config.ref_model_update_freq == 0, "Reference model update frequency must be 0 for SFL"
@@ -60,6 +61,22 @@ def train_sfl(
     model = training_setup["target_policy"]
     dataset = training_setup["dataset"]
     train_max_input_length = dataset.train_max_length
+
+    training_setup["lr_scheduler"].T_max = args.sfl_config.sfl_total_steps * (
+        args.sfl_config.sfl_num_samples_to_collect // args.base_config.train_batch_size
+    )
+
+    # get the train state
+    train_state = TrainState(
+        run_name=training_setup["run_name"],
+        device=training_setup["device"],
+        cpu_device=training_setup["cpu_device"],
+        model=model,
+        optimizer=training_setup["optimizer"],
+        lr_scheduler=training_setup["lr_scheduler"],
+        reference_model=training_setup["reference_model"],
+        kl_controller=training_setup["kl_controller"],
+    )
 
     ## total number of steps scheduled 
     sfl_step, global_batch_idx = 0, 0
@@ -80,7 +97,7 @@ def train_sfl(
 
         ## sfl sampling step 
         sampled_curriculum:List[Curriculum] = sfl_sampling(
-            model = model,
+            model = train_state["model"],
             tokenizer = training_setup["tokenizer"],
             reward_model = training_setup["reward_model"],
             data_loader = sfl_sampling_data_loader,
@@ -88,7 +105,7 @@ def train_sfl(
             seed = seed,
             sfl_total_scanning_size = args.sfl_config.sfl_total_scanning_size,
             sfl_num_samples_to_collect = args.sfl_config.sfl_num_samples_to_collect,
-            cpu_device = training_setup["cpu_device"],
+            cpu_device = train_state["cpu_device"],
         )
         assert len(sampled_curriculum) == args.sfl_config.sfl_num_samples_to_collect, \
             "The number of sampled curriculum must be equal to sfl_num_samples_to_collect"
@@ -96,7 +113,7 @@ def train_sfl(
         ### logging the learnability scores
         learnability_scores = np.array(
             [
-                x.learnability.to(training_setup["cpu_device"]).item() \
+                x.learnability.to(train_state["cpu_device"]).item() \
                 for x in sampled_curriculum
             ]
         )
@@ -135,21 +152,21 @@ def train_sfl(
             cpu_device = training_setup["cpu_device"],
             train_log_dir = training_setup["train_log_dir"],
             eval_log_dir = training_setup["eval_log_dir"],
-            target_policy = model,
+            target_policy = train_state["model"],
             tokenizer = training_setup["tokenizer"],
             pad_token_id = training_setup["pad_token_id"],
             dataset = hf_dataset,
             rollout_data_loader = train_data_loader,
-            optimizer = training_setup["optimizer"],
-            lr_scheduler = training_setup["lr_scheduler"],
+            optimizer = train_state["optimizer"],
+            lr_scheduler = train_state["lr_scheduler"],
             actor_loss = training_setup["actor_loss"],
             reward_model = training_setup["reward_model"],
             generation_config = training_setup["generation_config"],
             eval_config = training_setup["eval_config"],
-            kl_controller = training_setup["kl_controller"],
-            reference_model = training_setup["reference_model"],
+            kl_controller = train_state["kl_controller"],
+            reference_model = train_state["reference_model"],
         )
-        model, train_outs, eval_outs = train(
+        train_state, train_outs, eval_outs = train(
             args=args,
             training_setup=tmp_train_setup,
             logger=logger,
@@ -163,7 +180,7 @@ def train_sfl(
         sfl_step += 1
 
 
-    return model,train_outs, eval_outs
+    return train_state, train_outs, eval_outs
 
 
 if __name__ == "__main__":

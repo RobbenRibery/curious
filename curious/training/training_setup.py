@@ -14,6 +14,21 @@ from torch.utils.data import DataLoader
 
 from transformers import PreTrainedModel, PreTrainedTokenizer, GenerationConfig
 
+class TrainState(TypedDict):
+    """
+    A typed dictionary for storing the training state.
+    """
+    run_name: str
+    device: torch.device
+    
+    model: PreTrainedModel
+    optimizer: optim.Optimizer
+    lr_scheduler: optim.lr_scheduler.CosineAnnealingLR
+
+    reference_model: Optional[PreTrainedModel] = None
+    kl_controller: Optional[AdaptiveKLController | ConstantKLController] = None
+    
+
 class TrainingSetup(TypedDict):
     """
     A typed dictionary for storing the training setup.
