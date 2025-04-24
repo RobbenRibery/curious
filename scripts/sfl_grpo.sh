@@ -18,7 +18,7 @@ python -m curious.training.train_sfl \
     --base_config.eval_log_dir "eval_logs" \
     --base_config.seed 42 \
     --base_config.checkpoint_dir "checkpoints" \
-    --base_config.checkpoint_interval 16 \
+    --base_config.checkpoint_interval 0 \
     --base_config.eval_interval 0 \
     --base_config.train_text_log_interval 16 \
     --base_config.eval_text_log_interval 16 \
