@@ -91,6 +91,7 @@ def sample_responses(
     batch_inputs: Dict[str, torch.Tensor],
     generation_config: GenerationConfig,
     seed: int = 42,
+    use_vllm: bool = False,
 ) -> Dict[str, torch.Tensor]:
     
     model.eval()
@@ -102,30 +103,67 @@ def sample_responses(
     num_samples = batch_inputs["input_ids"].shape[0]
     pad_token_id = tokenizer.eos_token_id
 
-    # get the sequence ids
-    sequence_ids = model.generate(
-        input_ids=batch_inputs["input_ids"].to(model.device),
-        attention_mask=batch_inputs["attention_mask"].to(model.device),
-        generation_config=generation_config
-    )
-
-    # action mask (state that has performed an action = 1)
-    # interpretation: an `action` has been performed to produce the token at the current position
-    action_mask = torch.zeros_like(sequence_ids, dtype=torch.bool)
-    action_mask[:, batch_inputs["input_ids"].shape[1] :] = True
-    action_mask[sequence_ids == pad_token_id] = False
-    action_mask = action_mask[:, 1:]  # (num_samples * group_size, seq_len-1)
-
-    return {
-        "num_samples": num_samples * group_size,
-        "input_ids": batch_inputs["input_ids"],
-        "sequence_ids": sequence_ids,
-        "action_mask": action_mask,
-        "completions": tokenizer.batch_decode(
-            sequence_ids[:, batch_inputs["input_ids"].shape[1] :], 
-            skip_special_tokens=True
-        ),
-    }
+    if use_vllm:
+        from vllm import LLMEngine, SamplingParams
+        prompt_texts = [tokenizer.decode(ids, skip_special_tokens=True) for ids in batch_inputs["input_ids"]]
+        sampling_params = SamplingParams(
+             temperature=generation_config.temperature,
+             top_p=generation_config.top_p,
+             max_tokens=generation_config.max_new_tokens,
+             top_k=generation_config.top_k,
+             do_sample=generation_config.do_sample
+        )
+        engine = LLMEngine(model=model, tokenizer=tokenizer, sampling_params=sampling_params)
+        completions = []
+        sequence_list = []
+        for prompt in prompt_texts:
+             outputs = engine.generate(prompt)
+             for out in outputs:
+                  completions.append(tokenizer.decode(out.output_ids, skip_special_tokens=True))
+                  sequence_list.append(torch.tensor(out.output_ids))
+        max_len = max(seq.size(0) for seq in sequence_list)
+        pad_token_id = tokenizer.eos_token_id
+        padded_sequences = []
+        for seq in sequence_list:
+             if seq.size(0) < max_len:
+                  pad_size = max_len - seq.size(0)
+                  padded_seq = torch.cat([seq, torch.full((pad_size,), pad_token_id, dtype=seq.dtype)])
+             else:
+                  padded_seq = seq
+             padded_sequences.append(padded_seq.unsqueeze(0))
+        sequence_ids = torch.cat(padded_sequences, dim=0)
+        prompt_length = batch_inputs["input_ids"].shape[1]
+        action_mask = torch.zeros_like(sequence_ids, dtype=torch.bool)
+        action_mask[:, prompt_length:] = True
+        action_mask[sequence_ids == pad_token_id] = False
+        return {
+             "num_samples": len(completions),
+             "input_ids": batch_inputs["input_ids"],
+             "sequence_ids": sequence_ids,
+             "action_mask": action_mask,
+             "completions": completions,
+        }
+    else:
+        sequence_ids = model.generate(
+             input_ids=batch_inputs["input_ids"].to(model.device),
+             attention_mask=batch_inputs["attention_mask"].to(model.device),
+             generation_config=generation_config
+        )
+        pad_token_id = tokenizer.eos_token_id
+        action_mask = torch.zeros_like(sequence_ids, dtype=torch.bool)
+        action_mask[:, batch_inputs["input_ids"].shape[1] :] = True
+        action_mask[sequence_ids == pad_token_id] = False
+        action_mask = action_mask[:, 1:]
+        return {
+             "num_samples": batch_inputs["input_ids"].shape[0] * generation_config.num_return_sequences,
+             "input_ids": batch_inputs["input_ids"],
+             "sequence_ids": sequence_ids,
+             "action_mask": action_mask,
+             "completions": tokenizer.batch_decode(
+                   sequence_ids[:, batch_inputs["input_ids"].shape[1] :], 
+                   skip_special_tokens=True
+             ),
+        }
 
 @torch.no_grad()
 def rollout(
@@ -138,6 +176,7 @@ def rollout(
     seed: int = 42,
     normalize_centered_returns: bool = False,
     use_rloo_scalar: bool = False,
+    use_vllm: bool = False,
 ) -> Dict[str, torch.Tensor]:
     """
     Performs a rollout of the model.
@@ -165,6 +204,7 @@ def rollout(
         batch_inputs,
         generation_config,
         seed=seed,
+        use_vllm=use_vllm
     )
     
     # get the rewards
