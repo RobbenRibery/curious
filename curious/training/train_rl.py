@@ -93,15 +93,18 @@ def train(
 
     # Evaluation config
     eval_config = training_setup["eval_config"]
-    evaluate(
-        config=eval_config,
-        model=model,
-        tokenizer=tokenizer,
-        logger=logger,
-        **{
-            "batch_idx": 0 if not global_batch_idx else global_batch_idx + 1,
-        }
-    )  
+    if args.sfl_config.sfl_enabled and global_batch_idx > 0:
+        pass 
+    else:
+        evaluate(
+            config=eval_config,
+            model=model,
+            tokenizer=tokenizer,
+            logger=logger,
+            **{
+                "batch_idx": 0 if not global_batch_idx else global_batch_idx + 1,
+            }
+        )  
 
     ## get the rollout data loader
     rollout_data_loader = training_setup["rollout_data_loader"]
