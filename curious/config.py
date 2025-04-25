@@ -79,10 +79,6 @@ class BaseConfig:
     """
     The seed to use for the evaluation.
     """
-    use_vllm: bool = False
-    """
-    Whether to use vllm for accelerated sampling. If False, the standard HuggingFace generation is used.
-    """
     checkpoint_dir: str = "checkpoints/"
     """
     The directory to use for the checkpoint.

@@ -96,9 +96,10 @@ def set_up_training(config:TrainingConfig) -> TrainingSetup:
         device_map=device, 
         freeze_model=False,
     )
+    assert model.generation_config.pad_token_id == tokenizer.pad_token_id
    
     tokenizer.padding_side  = 'left'
-    pad_token_id = tokenizer.eos_token_id
+    pad_token_id = tokenizer.pad_token_id
     
     training_setup["target_policy"] = model
     training_setup["tokenizer"] = tokenizer
@@ -183,8 +184,6 @@ def set_up_training(config:TrainingConfig) -> TrainingSetup:
         top_p=config.sampling_config.top_p,
         top_k=config.sampling_config.top_k,
         do_sample =config.sampling_config.do_sample,
-        eos_token_id=tokenizer.eos_token_id,
-        pad_token_id= tokenizer.eos_token_id,
         use_cache=config.sampling_config.use_cache,
         repetition_penalty=config.sampling_config.repetition_penalty,
     )
