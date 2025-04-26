@@ -253,10 +253,11 @@ def _sequence_log_probs_from_logits(
         return log_probs, None
 
 @torch.compile(dynamic=True)
-def _slow_sequence_log_probs_from_logits(
+def _minibatch_sequence_log_probs_from_logits(
     logits: torch.Tensor, 
     output_ids: torch.Tensor,
     return_entropy: bool = False,
+    logits_minibatch_size: int = 128,
 ) -> Tuple[torch.Tensor, torch.Tensor | None]:
     """
     Computes the log probabilities of the output ids from the logits.
@@ -265,10 +266,12 @@ def _slow_sequence_log_probs_from_logits(
     if return_entropy:
         token_entropy = []
 
-    for logits_row, index_row in zip(logits, output_ids):
+    for i in range(0, logits.shape[0], logits_minibatch_size):
+        logits_rows = logits[i:i+logits_minibatch_size]
+        index_rows = output_ids[i:i+logits_minibatch_size]
         token_logprob, entropy = _sequence_log_probs_from_logits(
-            logits=logits_row,
-            output_ids=index_row,
+            logits=logits_rows,
+            output_ids=index_rows,
             return_entropy=return_entropy,
         )
         token_logprobs.append(token_logprob)
@@ -283,6 +286,7 @@ def sequences_log_probs(
     sequence_ids: torch.Tensor,
     attention_mask: torch.Tensor,
     return_entropy: bool = True,
+    logits_minibatch_size: int = 128,
 ) -> Tuple[torch.Tensor, torch.Tensor | None]:
     """
     Computes the log probabilities of the output ids from the logits.
@@ -302,60 +306,11 @@ def sequences_log_probs(
     del output 
 
     # logits: [batch_size * num_rollouts, seq_len, vocab_size]
-    log_probs, entropy = _sequence_log_probs_from_logits(
+    log_probs, entropy = _minibatch_sequence_log_probs_from_logits(
         logits=logits[:, :-1],
         output_ids=sequence_ids[:, 1:],  # right shift 1 block to get the actual output ids
         return_entropy=return_entropy,
+        logits_minibatch_size=logits_minibatch_size,
     )
-    # log_probs = _slow_sequence_log_probs_from_logits(
-    #     logits=logits[:, :-1],
-    #     output_ids=sequence_ids[:, 1:],  # right shift 1 block to get the actual output ids
-    # )
     del logits
     return log_probs, entropy
-
-def sequences_log_probs_with_mask(
-    model: PreTrainedModel,
-    tokenizer: PreTrainedTokenizer,
-    generation_output: GenerateDecoderOnlyOutput,
-) -> torch.Tensor:
-    """
-    Computes the log probabilities of a sequence of tokens, given the output of a generate() call from a HuggingFace model.
-
-    Args:
-        model (PreTrainedModel): The model to use for computing the log probabilities.
-        tokenizer (PreTrainedTokenizer): The tokenizer to use for computing the log probabilities.
-        generation_output (GenerateDecoderOnlyOutput): The output of the generate() call.
-
-    Returns:
-        logprobs (torch.Tensor): The log probabilities of the sequence of tokens. (num_seqs, seq_len)
-        action_mask (torch.Tensor): A boolean mask indicating where the action was taken. (num_seqs, seq_len)
-    """
-    seq_ids = generation_output.sequences 
-    len_inputs = seq_ids.shape[1] - len(generation_output.logits)
-
-    pad_token_id = tokenizer.pad_token_id 
-
-    logprobs = torch.zeros_like(
-        seq_ids, 
-        dtype= torch.float, 
-        device= seq_ids.device,
-    )
-    action_mask = torch.zeros_like(
-        seq_ids, 
-        dtype=torch.bool,
-        device=seq_ids.device
-    )
-    action_mask[:, seq_ids.shape[1] :] = True
-    action_mask[seq_ids == pad_token_id] = False
-    # action_mask = action_mask[:, 1:]  
-    # (num_seqs, seq_len-1)
-    generation_logprobs = model.compute_transition_scores(
-        generation_output.sequences, 
-        generation_output.logits, 
-        normalize_logits=True, 
-    )
-    # (num_seqs, generation_length)
-    logprobs[:, len_inputs:] = generation_logprobs
-    masked_logprobs = logprobs * action_mask
-    return masked_logprobs 

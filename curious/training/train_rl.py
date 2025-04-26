@@ -195,6 +195,7 @@ def train(
                 sequence_ids=sequence_ids,
                 attention_mask=attention_mask,
                 return_entropy=True,
+                logits_minibatch_size=args.grpo_config.logits_minibatch_size,
             ) # (num_samples * group_size, seq_len-1)
             action_entropy = masked_mean(entropy, action_mask, dim=None)
 
@@ -206,6 +207,7 @@ def train(
                     sequence_ids=sequence_ids,
                     attention_mask=attention_mask,
                     return_entropy=False,
+                    logits_minibatch_size=args.grpo_config.logits_minibatch_size,
                 ) # (num_samples * group_size, seq_len-1)
 
                 # compute the kl divergence
@@ -327,6 +329,7 @@ def train(
                     sequence_ids=exp.sequences, 
                     attention_mask=exp.attention_mask,
                     return_entropy=False,
+                    logits_minibatch_size=args.grpo_config.logits_minibatch_size,
                 )
                 loss, mean_kl, mean_actor_loss = objective(log_probs=log_probs, experience=exp)
                 

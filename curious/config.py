@@ -303,6 +303,11 @@ class GRPOConfig:
     The interval to update the reference model.
     """
 
+    logits_minibatch_size: int = 128
+    """
+    The minibatch size to use for the logits.
+    """
+
 @dataclass
 class SFLConfig:
     """
