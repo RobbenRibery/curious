@@ -1,4 +1,5 @@
 from typing import List, Dict, Tuple
+import gc
 
 import torch
 from transformers import (
@@ -97,34 +98,27 @@ def sample_responses(
     model.gradient_checkpointing_disable()
     # set the seed
     set_seed(seed)
-    group_size = generation_config.num_return_sequences
+    pad_token_id = tokenizer.pad_token_id
 
-    num_samples = batch_inputs["input_ids"].shape[0]
-    pad_token_id = tokenizer.eos_token_id
-
-    # get the sequence ids
     sequence_ids = model.generate(
         input_ids=batch_inputs["input_ids"].to(model.device),
         attention_mask=batch_inputs["attention_mask"].to(model.device),
         generation_config=generation_config
     )
 
-    # action mask (state that has performed an action = 1)
-    # interpretation: an `action` has been performed to produce the token at the current position
     action_mask = torch.zeros_like(sequence_ids, dtype=torch.bool)
     action_mask[:, batch_inputs["input_ids"].shape[1] :] = True
     action_mask[sequence_ids == pad_token_id] = False
-    action_mask = action_mask[:, 1:]  # (num_samples * group_size, seq_len-1)
-
+    action_mask = action_mask[:, 1:]
     return {
-        "num_samples": num_samples * group_size,
-        "input_ids": batch_inputs["input_ids"],
-        "sequence_ids": sequence_ids,
-        "action_mask": action_mask,
-        "completions": tokenizer.batch_decode(
-            sequence_ids[:, batch_inputs["input_ids"].shape[1] :], 
-            skip_special_tokens=True
-        ),
+            "num_samples": batch_inputs["input_ids"].shape[0] * generation_config.num_return_sequences,
+            "input_ids": batch_inputs["input_ids"],
+            "sequence_ids": sequence_ids,
+            "action_mask": action_mask,
+            "completions": tokenizer.batch_decode(
+                sequence_ids[:, batch_inputs["input_ids"].shape[1] :], 
+                skip_special_tokens=True
+            ),
     }
 
 @torch.no_grad()
@@ -260,10 +254,11 @@ def _sequence_log_probs_from_logits(
         return log_probs, None
 
 @torch.compile(dynamic=True)
-def _slow_sequence_log_probs_from_logits(
+def _minibatch_sequence_log_probs_from_logits(
     logits: torch.Tensor, 
     output_ids: torch.Tensor,
     return_entropy: bool = False,
+    logits_minibatch_size: int = 128,
 ) -> Tuple[torch.Tensor, torch.Tensor | None]:
     """
     Computes the log probabilities of the output ids from the logits.
@@ -272,17 +267,23 @@ def _slow_sequence_log_probs_from_logits(
     if return_entropy:
         token_entropy = []
 
-    for logits_row, index_row in zip(logits, output_ids):
+    for i in range(0, logits.shape[0], logits_minibatch_size):
+        logits_rows = logits[i:i+logits_minibatch_size]
+        index_rows = output_ids[i:i+logits_minibatch_size]
         token_logprob, entropy = _sequence_log_probs_from_logits(
-            logits=logits_row,
-            output_ids=index_row,
+            logits=logits_rows,
+            output_ids=index_rows,
             return_entropy=return_entropy,
         )
         token_logprobs.append(token_logprob)
         if return_entropy:
             token_entropy.append(entropy)
 
-    return torch.stack(token_logprobs), torch.stack(token_entropy) if return_entropy else None
+        del logits_rows, index_rows, token_logprob, entropy
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    return torch.cat(token_logprobs, dim=0), torch.cat(token_entropy, dim=0) if return_entropy else None
 
 @torch.compile(dynamic=True)
 def sequences_log_probs(
@@ -290,6 +291,7 @@ def sequences_log_probs(
     sequence_ids: torch.Tensor,
     attention_mask: torch.Tensor,
     return_entropy: bool = True,
+    logits_minibatch_size: int = 128,
 ) -> Tuple[torch.Tensor, torch.Tensor | None]:
     """
     Computes the log probabilities of the output ids from the logits.
@@ -304,65 +306,32 @@ def sequences_log_probs(
     Returns:
         torch.Tensor: The log probabilities of the output ids. (num_samples * group_size, seq_len-1, vocab_size)
     """
-    output = model(input_ids=sequence_ids, attention_mask=attention_mask, use_cache=False)
-    logits = output["logits"]
-    del output 
+    torch.cuda.empty_cache()
 
-    # logits: [batch_size * num_rollouts, seq_len, vocab_size]
-    log_probs, entropy = _sequence_log_probs_from_logits(
-        logits=logits[:, :-1],
-        output_ids=sequence_ids[:, 1:],  # right shift 1 block to get the actual output ids
-        return_entropy=return_entropy,
-    )
-    # log_probs = _slow_sequence_log_probs_from_logits(
-    #     logits=logits[:, :-1],
-    #     output_ids=sequence_ids[:, 1:],  # right shift 1 block to get the actual output ids
-    # )
-    del logits
-    return log_probs, entropy
+    token_logprobs = []
+    if return_entropy:
+        token_entropy = []
 
-def sequences_log_probs_with_mask(
-    model: PreTrainedModel,
-    tokenizer: PreTrainedTokenizer,
-    generation_output: GenerateDecoderOnlyOutput,
-) -> torch.Tensor:
-    """
-    Computes the log probabilities of a sequence of tokens, given the output of a generate() call from a HuggingFace model.
+    for i in range(0, sequence_ids.shape[0], logits_minibatch_size):
+        mini_ids = sequence_ids[i:i+logits_minibatch_size]
+        mini_mask = attention_mask[i:i+logits_minibatch_size]
+        mini_output = model(input_ids=mini_ids, attention_mask=mini_mask, use_cache=False)
+        mini_logits = mini_output["logits"]
 
-    Args:
-        model (PreTrainedModel): The model to use for computing the log probabilities.
-        tokenizer (PreTrainedTokenizer): The tokenizer to use for computing the log probabilities.
-        generation_output (GenerateDecoderOnlyOutput): The output of the generate() call.
+        del mini_mask, mini_output
 
-    Returns:
-        logprobs (torch.Tensor): The log probabilities of the sequence of tokens. (num_seqs, seq_len)
-        action_mask (torch.Tensor): A boolean mask indicating where the action was taken. (num_seqs, seq_len)
-    """
-    seq_ids = generation_output.sequences 
-    len_inputs = seq_ids.shape[1] - len(generation_output.logits)
+        # logits: [batch_size * num_rollouts, seq_len, vocab_size]
+        log_probs, entropy = _sequence_log_probs_from_logits(
+            logits=mini_logits[:, :-1],
+            output_ids = mini_ids[:, 1:],  # right shift 1 block to get the actual output ids
+            return_entropy=return_entropy,
+        )
+        del mini_logits, mini_ids
+        gc.collect()
+        torch.cuda.empty_cache()
 
-    pad_token_id = tokenizer.eos_token_id 
-
-    logprobs = torch.zeros_like(
-        seq_ids, 
-        dtype= torch.float, 
-        device= seq_ids.device,
-    )
-    action_mask = torch.zeros_like(
-        seq_ids, 
-        dtype=torch.bool,
-        device=seq_ids.device
-    )
-    action_mask[:, seq_ids.shape[1] :] = True
-    action_mask[seq_ids == pad_token_id] = False
-    # action_mask = action_mask[:, 1:]  
-    # (num_seqs, seq_len-1)
-    generation_logprobs = model.compute_transition_scores(
-        generation_output.sequences, 
-        generation_output.logits, 
-        normalize_logits=True, 
-    )
-    # (num_seqs, generation_length)
-    logprobs[:, len_inputs:] = generation_logprobs
-    masked_logprobs = logprobs * action_mask
-    return masked_logprobs 
+        token_logprobs.append(log_probs)
+        if return_entropy:
+            token_entropy.append(entropy)
+            
+    return torch.cat(token_logprobs, dim=0), torch.cat(token_entropy, dim=0) if return_entropy else None

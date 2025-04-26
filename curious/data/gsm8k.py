@@ -51,7 +51,6 @@ class GSM8KDataset(Dataset):
         self.max_prompt_length = max_prompt_length
 
         self.tokenizer = tokenizer
-        self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer.padding_side = "left"
 
         ## Train dataset ##

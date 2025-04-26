@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass
 from uuid import uuid4
 
@@ -80,7 +79,6 @@ class BaseConfig:
     """
     The seed to use for the evaluation.
     """
-    
     checkpoint_dir: str = "checkpoints/"
     """
     The directory to use for the checkpoint.
@@ -303,6 +301,11 @@ class GRPOConfig:
     ref_model_update_freq: int = 0
     """
     The interval to update the reference model.
+    """
+
+    logits_minibatch_size: int = 64
+    """
+    The minibatch size to use for the logits.
     """
 
 @dataclass
