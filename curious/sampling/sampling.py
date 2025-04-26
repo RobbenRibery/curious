@@ -279,7 +279,11 @@ def _minibatch_sequence_log_probs_from_logits(
         if return_entropy:
             token_entropy.append(entropy)
 
-    return torch.stack(token_logprobs), torch.stack(token_entropy) if return_entropy else None
+        del logits_rows, index_rows, token_logprob, entropy
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    return torch.cat(token_logprobs, dim=0), torch.cat(token_entropy, dim=0) if return_entropy else None
 
 @torch.compile(dynamic=True)
 def sequences_log_probs(
