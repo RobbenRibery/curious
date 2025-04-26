@@ -6,7 +6,7 @@ export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1;
 python -m curious.training.train_rl \
     --wandb_config.project "curious-gsm8k" \
     --wandb_config.group "grpo-improve" \
-    --wandb_config.name "[grpo-padtoken-fixed]-grpo-qwen25-prompt[qwen]-reward[partial-solved-penalize-trailing]-temp1-5e06rl-bsz16" \
+    --wandb_config.name "[grpo-padtoken-fixed]-grpo-qwen25-prompt[qwen]-reward[partial-solved-penalize-trailing]-temp1rep11-5e06rl-bsz16" \
     --base_config.model_name "Qwen/Qwen2.5-0.5B-Instruct" \
     --base_config.device_index 0 \
     --base_config.dataset_name "openai/gsm8k" \
@@ -28,7 +28,7 @@ python -m curious.training.train_rl \
     --sampling_config.top_k 50 \
     --sampling_config.do_sample \
     --sampling_config.use_cache \
-    --sampling_config.repetition_penalty 1.0 \
+    --sampling_config.repetition_penalty 1.1 \
     --sampling_config.system_prompt "qwen_system_prompt" \
     --reward_config.no-use-format-reward \
     --reward_config.no-use-overlong-penalty \

@@ -94,9 +94,6 @@ def load_model_tokenizer(
         tuple: A tuple containing the model and its tokenizer.
     """
     tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
-    tokenizer.pad_token = tokenizer.eos_token
-
-
     model: PreTrainedModel = AutoLigerKernelForCausalLM.from_pretrained(
         model_name_or_path if checkpoint_path is None else checkpoint_path,
         trust_remote_code=trust_remote_code,
@@ -153,6 +150,8 @@ def tokenize_questions(
         truncation=True,
         return_tensors="pt",
         max_length=max_length,
+        padding_side="left",
+        return_attention_mask=True,
     )
 
     return encodings

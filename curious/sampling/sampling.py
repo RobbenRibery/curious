@@ -131,7 +131,6 @@ def rollout(
     seed: int = 42,
     normalize_centered_returns: bool = False,
     use_rloo_scalar: bool = False,
-    use_vllm: bool = False,
 ) -> Dict[str, torch.Tensor]:
     """
     Performs a rollout of the model.
@@ -159,7 +158,6 @@ def rollout(
         batch_inputs,
         generation_config,
         seed=seed,
-        use_vllm=use_vllm
     )
     
     # get the rewards
@@ -336,7 +334,7 @@ def sequences_log_probs_with_mask(
     seq_ids = generation_output.sequences 
     len_inputs = seq_ids.shape[1] - len(generation_output.logits)
 
-    pad_token_id = tokenizer.eos_token_id 
+    pad_token_id = tokenizer.pad_token_id 
 
     logprobs = torch.zeros_like(
         seq_ids, 

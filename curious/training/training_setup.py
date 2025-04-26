@@ -96,7 +96,8 @@ def set_up_training(config:TrainingConfig) -> TrainingSetup:
         device_map=device, 
         freeze_model=False,
     )
-    assert model.generation_config.pad_token_id == tokenizer.pad_token_id
+    assert model.generation_config.pad_token_id == tokenizer.pad_token_id, \
+    print(model.generation_config.pad_token_id, tokenizer.pad_token_id, tokenizer.pad_token)
    
     tokenizer.padding_side  = 'left'
     pad_token_id = tokenizer.pad_token_id
