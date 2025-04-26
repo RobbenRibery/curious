@@ -33,7 +33,7 @@ python -m curious.training.train_rl \
     --reward_config.no-use-format-reward \
     --reward_config.no-use-overlong-penalty \
     --grpo_config.group_size 16 \
-    --grpo_config.lr 2e-06 \
+    --grpo_config.lr 1e-06 \
     --grpo_config.weight_decay 0.0 \
     --grpo_config.kl_weight 0.001 \
     --grpo_config.clip_eps 0.2 \
