@@ -6,11 +6,11 @@ export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1;
 python -m curious.training.train_rl \
     --wandb_config.project "curious" \
     --wandb_config.group "grpo-improve" \
-    --wandb_config.name "[grpo-largebatch-padtoken-fixed]-grpo-qwen25-prompt[qwen]-reward[partial-solved-penalize-trailing]-temp12-1e06rl-epochperstep1-grad1-bsz128" \
+    --wandb_config.name "[grpo-largebatch-padtoken-fixed]-grpo-qwen25-prompt[qwen]-reward[partial-solved-penalize-trailing]-temp1-1e06rl-epochperstep4-grad1-bsz128" \
     --base_config.model_name "Qwen/Qwen2.5-0.5B-Instruct" \
     --base_config.device_index 0 \
     --base_config.dataset_name "openai/gsm8k" \
-    --base_config.train_batch_size 128 \
+    --base_config.train_batch_size 64 \
     --base_config.eval_batch_size 2048 \
     --base_config.num_workers 16 \
     --base_config.train_log_dir "train_logs" \
@@ -23,7 +23,7 @@ python -m curious.training.train_rl \
     --base_config.eval_text_log_interval 25 \
     --sampling_config.model_prompt_length 1024 \
     --sampling_config.max_new_tokens 512 \
-    --sampling_config.temperature 1.2 \
+    --sampling_config.temperature 1.0 \
     --sampling_config.top_p 1.0 \
     --sampling_config.top_k 0 \
     --sampling_config.do_sample \
@@ -38,6 +38,6 @@ python -m curious.training.train_rl \
     --grpo_config.kl_weight 0 \
     --grpo_config.clip_eps 0.2 \
     --grpo_config.mini_batch_size 64 \
-    --grpo_config.epochs_per_step 1 \
+    --grpo_config.epochs_per_step 4 \
     --grpo_config.max_grad_norm 1.0 \
-    --grpo_config.logits_minibatch_size 128 \
+    --grpo_config.logits_minibatch_size 256 \
