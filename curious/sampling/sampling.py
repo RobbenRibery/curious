@@ -306,18 +306,21 @@ def sequences_log_probs(
     Returns:
         torch.Tensor: The log probabilities of the output ids. (num_samples * group_size, seq_len-1, vocab_size)
     """
+    torch.cuda.empty_cache()
     logits_list = []
     for i in range(0, sequence_ids.shape[0], logits_minibatch_size):
         mini_ids = sequence_ids[i:i+logits_minibatch_size]
         mini_mask = attention_mask[i:i+logits_minibatch_size]
+        print(f'#### {i}')
         mini_output = model(input_ids=mini_ids, attention_mask=mini_mask, use_cache=False)
-        logits_list.append(mini_output["logits"])
+        logits_list.append(mini_output["logits"].cpu())
         
         del mini_ids, mini_mask, mini_output
         gc.collect()
         torch.cuda.empty_cache()
     
     logits = torch.cat(logits_list, dim=0)
+    logits = logits.to(model.device)
 
     # logits: [batch_size * num_rollouts, seq_len, vocab_size]
     log_probs, entropy = _minibatch_sequence_log_probs_from_logits(

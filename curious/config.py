@@ -303,7 +303,7 @@ class GRPOConfig:
     The interval to update the reference model.
     """
 
-    logits_minibatch_size: int = 128
+    logits_minibatch_size: int = 64
     """
     The minibatch size to use for the logits.
     """
