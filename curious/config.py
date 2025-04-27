@@ -185,21 +185,21 @@ class RewardConfig:
     """
     The pattern to use for the think.
     """
-    use_format_reward: bool = True
+    use_format_reward: bool = False
     """
     Whether to use the format reward.
     """
-    use_overlong_penalty: bool = True
+    use_overlong_penalty: bool = False
     """
     Whether to use the overlong penalty.
     """
     l_max: int = 300
     """
-    The maximum length of the completion, beyond which the penalty is applied.
+    The maximum length of the completion, beyond which the penalty is applied. (in number of words)
     """
     l_cache: int = 100
     """
-    The cache length of the completion, which indicates the peanlizable span of the completion.
+    The cache length of the completion, which indicates the peanlizable span of the completion. (in number of words)
     """
 
 @dataclass

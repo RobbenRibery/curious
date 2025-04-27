@@ -31,7 +31,9 @@ python -m curious.training.train_rl \
     --sampling_config.repetition_penalty 1.0 \
     --sampling_config.system_prompt "qwen_system_prompt" \
     --reward_config.no-use-format-reward \
-    --reward_config.no-use-overlong-penalty \
+    --reward_config.use-overlong-penalty \
+    --reward_config.l_max 500 \
+    --reward_config.l_cache 400 \
     --grpo_config.group_size 16 \
     --grpo_config.lr 5e-06 \
     --grpo_config.weight_decay 0.01 \
