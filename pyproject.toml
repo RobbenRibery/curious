@@ -9,7 +9,7 @@ package-mode = false
 
 [tool.poetry.dependencies]
 python-dotenv = "^1.0.1"
-python = ">=3.11.0,<3.14"
+python = ">=3.11.0,<3.13"
 torch = "^2.6.0"
 transformers = "^4.49.0"
 toml = "^0.10.2"
@@ -26,6 +26,7 @@ memory-profiler = "^0.61.0"
 trl = "^0.16.1"
 liger-kernel = "^0.5.7"
 deepspeed = "^0.16.7"
+vllm = "^0.8.4"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29.5"

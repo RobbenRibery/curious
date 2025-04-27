@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import List, Callable, Dict, Any
 import os
+from torch.cuda import temperature
 import tyro
 import wandb
 import numpy as np
@@ -152,8 +153,11 @@ def evaluate(
             input_ids = batch_inputs["input_ids"].to(model.device),
             attention_mask = batch_inputs["attention_mask"].to(model.device),
             max_new_tokens=config.sampling_config.max_new_tokens,
-            eos_token_id=tokenizer.eos_token_id,
-            pad_token_id=tokenizer.eos_token_id,
+            temperature = 0.7,
+            top_p = 0.8,
+            top_k = 20,
+            do_sample = True,
+            use_cache = True
         )
 
         # Decode the generations

@@ -1,7 +1,7 @@
 make clean;
 export TOKENIZERS_PARALLELISM=true;
 export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:128,expandable_segments:True";
-
+export CUDA_LAUNCH_BLOCKING=1;
 export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1; 
 
 python -m curious.training.train_rl \
