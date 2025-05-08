@@ -11,7 +11,7 @@ from accelerate.utils import set_seed
 from transformers.generation.utils import GenerateDecoderOnlyOutput
 
 from curious.reward.rule.gsm8k import GSM8KRewardModel
-
+from vllm import LLM
 def linear_temperature_annealing(current_step: int, total_steps: int, start_temp: float, end_temp: float) -> float:
     """
     Computes the linearly decayed temperature at a given step for a linear annealing schedule.
@@ -86,7 +86,7 @@ def compute_learnability(solved_masks: torch.Tensor) -> torch.Tensor:
     return solved_rate * (1 - solved_rate)
 
 @torch.no_grad()
-def sample_responses(
+def sample_responses_hf(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizer,
     batch_inputs: Dict[str, torch.Tensor],
@@ -119,6 +119,72 @@ def sample_responses(
                 sequence_ids[:, batch_inputs["input_ids"].shape[1] :], 
                 skip_special_tokens=True
             ),
+    }
+
+@torch.no_grad()
+def sample_response_vllm(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizer,
+    batch_inputs: Dict[str, torch.Tensor],
+    generation_config: GenerationConfig,
+    seed: int = 42,
+) -> Dict[str, torch.Tensor]:
+    set_seed(seed)
+    # Ensure inputs are on the correct device
+    batch_inputs["input_ids"] = batch_inputs["input_ids"].to(model.device)
+    batch_inputs["attention_mask"] = batch_inputs["attention_mask"].to(model.device)
+    
+    # Decode prompts from input_ids
+    prompts = tokenizer.batch_decode(batch_inputs["input_ids"], skip_special_tokens=True)
+    batch_size, prompt_length = batch_inputs["input_ids"].shape
+
+    # Setup vLLM sampling parameters from generation_config
+    from vllm import LLM, SamplingParams
+    sampling_params = SamplingParams(
+        max_tokens=generation_config.max_new_tokens,
+        temperature=generation_config.temperature,
+        top_k=getattr(generation_config, 'top_k', 0) or 0,
+        top_p=getattr(generation_config, 'top_p', 1.0) or 1.0,
+        do_sample=getattr(generation_config, 'do_sample', True),
+        num_return_sequences=generation_config.num_return_sequences,
+    )
+
+    # Instantiate the vLLM LLM instance using the provided model and tokenizer
+    llm = LLM(model, tokenizer=tokenizer, sampling_params=sampling_params)
+    # Generate completions for the prompts using vLLM
+    results = llm.generate(prompts)
+
+    all_token_ids = []
+    completions_list = []
+    # Iterate over each prompt and its corresponding generation results
+    for prompt, prompt_results in zip(prompts, results):
+        for gen in prompt_results:
+            # Assume each gen has token_ids and text attributes
+            all_token_ids.append(gen.token_ids)
+            # Remove the prompt part from the generated text to get the completion
+            completion = gen.text[len(prompt):].strip()
+            completions_list.append(completion)
+
+    # Pad the generated token sequences to a uniform length
+    pad_token_id = tokenizer.pad_token_id
+    max_len = max(len(tokens) for tokens in all_token_ids)
+    padded_token_ids = [tokens + [pad_token_id] * (max_len - len(tokens)) for tokens in all_token_ids]
+
+    import torch
+    sequence_ids = torch.tensor(padded_token_ids, dtype=torch.long, device=model.device)
+
+    # Create action mask: True for generated tokens beyond the prompt length, but mask out pads
+    action_mask = torch.zeros_like(sequence_ids, dtype=torch.bool)
+    action_mask[:, prompt_length:] = True
+    action_mask[sequence_ids == pad_token_id] = False
+    action_mask = action_mask[:, 1:]
+
+    return {
+        "num_samples": batch_size * generation_config.num_return_sequences,
+        "input_ids": batch_inputs["input_ids"],
+        "sequence_ids": sequence_ids,
+        "action_mask": action_mask,
+        "completions": completions_list,
     }
 
 @torch.no_grad()
