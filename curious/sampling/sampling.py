@@ -9,7 +9,6 @@ from transformers import (
 )
 from accelerate.utils import set_seed
 from transformers.generation.utils import GenerateDecoderOnlyOutput
-import vllm.outputs
 
 from curious.reward.rule.gsm8k import GSM8KRewardModel
 import vllm 
@@ -178,7 +177,7 @@ def rollout(
     oracle_answers = batch_inputs["oracle_answer"]
     
     # get the sequence ids
-    sampled_responses = sample_responses(
+    sampled_responses = sample_responses_hf(
         model,
         tokenizer,
         batch_inputs,
