@@ -51,6 +51,8 @@ class TrainingSetup(TypedDict):
     dataset: GSM8KDataset
     rollout_data_loader: DataLoader
 
+    use_vllm: bool
+
     optimizer: optim.Optimizer
     lr_scheduler: optim.lr_scheduler.CosineAnnealingLR
 

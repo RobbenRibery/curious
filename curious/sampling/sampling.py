@@ -133,6 +133,7 @@ def rollout(
     seed: int = 42,
     normalize_centered_returns: bool = False,
     use_rloo_scalar: bool = False,
+    use_vllm: bool = False,
 ) -> Dict[str, torch.Tensor]:
     """
     Performs a rollout of the model.
@@ -153,14 +154,22 @@ def rollout(
     # get the batch size
     oracle_answers = batch_inputs["oracle_answer"]
     
-    # get the sequence ids
-    sampled_responses = sample_responses_hf(
-        model,
-        tokenizer,
-        batch_inputs,
-        generation_config,
-        seed=seed,
-    )
+    if use_vllm:
+        # get the sequence ids
+        sampled_responses = sample_response_vllm(
+            inputs=batch_inputs["input_ids"],
+            vllm=vllm,
+            sampling_params=sampling_params,
+        )
+    else:
+        # get the sequence ids from huggingface
+        sampled_responses = sample_responses_hf(
+            model,
+            tokenizer,
+            batch_inputs,
+            generation_config,
+            seed=seed,
+        )
     
     # get the rewards
     rewards_out = compute_rewards(
