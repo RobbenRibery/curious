@@ -9,7 +9,6 @@ from transformers import (
 )
 from accelerate.utils import set_seed
 from transformers.generation.utils import GenerateDecoderOnlyOutput
-import vllm.outputs
 
 from curious.reward.rule.gsm8k import GSM8KRewardModel
 from vllm import LLM

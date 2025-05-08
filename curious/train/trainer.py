@@ -203,5 +203,4 @@ class PolicyGradientTrainer:
                         )
                         f.write(text_to_log)
                 f.close()
-        
-    pass 
+    
