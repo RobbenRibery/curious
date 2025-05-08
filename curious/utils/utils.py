@@ -163,5 +163,7 @@ def tokenize_questions(
         padding_side="left",
         return_attention_mask=True,
     )
-
+    
+    # add the prompt to the output dict
+    encodings["prompt"] = texts
     return encodings
