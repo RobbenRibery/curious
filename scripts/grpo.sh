@@ -6,7 +6,7 @@ export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1;
 python -m curious.training.train_rl \
     --wandb_config.project "curious" \
     --wandb_config.group "grpo-improve" \
-    --wandb_config.name "[grpo-largebatch-padtoken-fixed-evalaligned]-grpo-qwen25-prompt[qwen-language-english]-reward[partial-solved-penalize-trailing]-temp1-5e06rl-epochperstep4-grad1-bsz64" \
+    --wandb_config.name "[grpo-largebatch-padtoken-fixed-evalaligned]-grpo-qwen25-prompt[qwen-language-english]-reward[partial-solved-penalize-trailing-overlongfilter300]-temp07-5e06rl-epochperstep4-grad1-bsz64" \
     --base_config.model_name "Qwen/Qwen2.5-0.5B-Instruct" \
     --base_config.device_index 0 \
     --base_config.dataset_name "openai/gsm8k" \
@@ -23,17 +23,17 @@ python -m curious.training.train_rl \
     --base_config.eval_text_log_interval 10 \
     --sampling_config.model_prompt_length 512 \
     --sampling_config.max_new_tokens 512 \
-    --sampling_config.temperature 1.0 \
-    --sampling_config.top_p 1.0 \
-    --sampling_config.top_k 0 \
+    --sampling_config.temperature 0.7 \
+    --sampling_config.top_p 0.8 \
+    --sampling_config.top_k 50 \
     --sampling_config.do_sample \
     --sampling_config.use_cache \
     --sampling_config.repetition_penalty 1.0 \
     --sampling_config.system_prompt "qwen_system_prompt" \
     --reward_config.no-use-format-reward \
     --reward_config.use-overlong-penalty \
-    --reward_config.l_max 500 \
-    --reward_config.l_cache 400 \
+    --reward_config.l_max 300 \
+    --reward_config.l_cache 100 \
     --grpo_config.group_size 16 \
     --grpo_config.lr 5e-06 \
     --grpo_config.weight_decay 0.01 \
