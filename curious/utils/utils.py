@@ -13,6 +13,9 @@ from liger_kernel.transformers import (
     AutoLigerKernelForCausalLM
 )
 
+import gc 
+
+
 LOGGING_TEMPLATE = dedent(
 """
 ******************************
@@ -34,6 +37,13 @@ Info:
 
 """
 ).strip()
+
+
+def release_memory(vars:List[Any]):
+    for var in vars:
+        del var
+    gc.collect()
+    torch.cuda.empty_cache()
 
 def form_hf_dataset(
     tokenizer: PreTrainedTokenizer,
@@ -76,7 +86,7 @@ def form_hf_dataset(
 def load_model_tokenizer(
     model_name_or_path: str,
     trust_remote_code: bool = True,
-    bf16: bool = True,
+    dtype_: torch.dtype = torch.bfloat16,
     device_map: Optional[str] = "auto",
     freeze_model: bool = False,
     checkpoint_path: Optional[str] = None,
@@ -98,15 +108,15 @@ def load_model_tokenizer(
         model_name_or_path if checkpoint_path is None else checkpoint_path,
         trust_remote_code=trust_remote_code,
         attn_implementation="flash_attention_2",
-        torch_dtype=torch.bfloat16 if bf16 else "auto",
+        torch_dtype=dtype_,
         device_map=device_map,
     )
+    model.forward = torch.compile(model.forward, dynamic=True)
     if freeze_model:
         for param in model.parameters():
             param.requires_grad = False
 
     return model, tokenizer
-
 
 def tokenize_questions(
     tokenizer: PreTrainedTokenizer,

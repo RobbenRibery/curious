@@ -38,6 +38,6 @@ python -m curious.training.train_rl \
     --grpo_config.kl_weight 0 \
     --grpo_config.clip_eps 0.2 \
     --grpo_config.mini_batch_size 64 \
-    --grpo_config.epochs_per_step 4 \
+    --grpo_config.epochs_per_step 2 \
     --grpo_config.max_grad_norm 1.0 \
     --grpo_config.logits_minibatch_size 256 \

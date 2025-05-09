@@ -54,6 +54,11 @@ class BaseConfig:
     """
     The batch size to use for evaluation
     """
+
+    num_epochs:int = 1
+    """
+    The number of epochs to use for the training.
+    """
     
     num_workers: int = 8
     """
@@ -107,6 +112,11 @@ class BaseConfig:
     return_entropy: bool = False
     """
     Whether to return the entropy of the tokens.
+    """
+
+    deepspeed_config: str = "deepspeed_config.json"
+    """
+    The path to the deepspeed config file.
     """
 
 
@@ -193,9 +203,9 @@ class RewardConfig:
     """
 
 @dataclass
-class GRPOConfig:
+class RLConfig:
     """
-    A dataclass for storing the GRPO configuration.
+    A dataclass for storing the RL configuration.
     """
 
     group_size: int = 16
@@ -346,9 +356,9 @@ class TrainingConfig:
     A dataclass for storing the training configuration.
     """
 
-    grpo_config: GRPOConfig
+    rl_config: RLConfig
     """
-    The GRPO configuration.
+    The RL configuration.
     """
 
     wandb_config: WandbConfig

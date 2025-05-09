@@ -3,12 +3,12 @@ from torch.utils.data import DataLoader
 from transformers import PreTrainedModel
 
 from curious.config import TrainingConfig
-from curious.training.training_setup import (
+from curious.train.training_setup import (
     TrainState, 
     TrainingSetup, 
     set_up_training,
 )
-from curious.training.train_rl import train
+from curious.train.train_rl import train
 from curious.utils.utils import form_hf_dataset
 from curious.sampling.sfl import sfl_sampling
 from curious.prompt import *

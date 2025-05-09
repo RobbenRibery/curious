@@ -22,7 +22,7 @@ from curious.policy_gradient.loss import (
     approx_kl_divergence, 
     masked_mean,
 )
-from curious.training.training_setup import (
+from curious.train.training_setup import (
     TrainingSetup, 
     set_up_training,
     TrainState,
