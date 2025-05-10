@@ -11,7 +11,6 @@ from torch.utils.data import DataLoader
 import torch
 
 import numpy as np
-import gc
 from rich import print
 
 
@@ -30,12 +29,16 @@ class PolicyGradientTrainer:
         self.generation_config = self.training_setup["generation_config"]
         self.logger = lambda x: print(x)
 
-    def train(self, train_state: TrainState) -> None:
+    def train(self, train_state: TrainState) -> TrainState:
         for epoch_idx in range(self.num_epochs):
             print(f"Epoch {epoch_idx} of {self.num_epochs}")
             for batch_idx, batch_inputs in enumerate(self.rollout_data_loader):
-                self.collect_trajectories(train_state, batch_inputs, batch_idx)
-
+                replay_buffer = self.collect_trajectories(train_state, batch_inputs, batch_idx)
+                #train_state = self.update_policy(train_state, replay_buffer)
+                print(len(replay_buffer))
+        
+        return train_state, replay_buffer
+    
     @torch.no_grad()
     def collect_trajectories(self, train_state: TrainState, batch_inputs: Dict[str, torch.Tensor], batch_indx:int) -> ReplayBuffer:
         
@@ -139,10 +142,9 @@ class PolicyGradientTrainer:
         )
         return replay_buffer
 
-    def update_policy(self,) -> None:
+    def update_policy(self, train_state: TrainState, replay_buffer: ReplayBuffer) -> TrainState:
         pass
     
-
     def log_rollout_stats(self, rollout_stats: Dict[str, Any]) -> None:
         
         batch_idx = rollout_stats["batch_idx"]

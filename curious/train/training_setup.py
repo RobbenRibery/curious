@@ -15,8 +15,6 @@ import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-import deepspeed
-
 class TrainState(TypedDict):
     """
     A typed dictionary for storing the training state.
@@ -250,7 +248,7 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
 
     # deepspeed
     if config.base_config.deepspeed_config is not None:
-        print(f"#### Setting up deepspeed ####")
+        print(f"#### Setting up deepspeed from {config.base_config.deepspeed_config} ####")
         with open(config.base_config.deepspeed_config, "r") as f:
             deepspeed_config = json.load(f)
         f.close()
@@ -258,6 +256,7 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
         deepspeed_config["train_micro_batch_size_per_gpu"] = config.rl_config.mini_batch_size
         assert deepspeed_config["bf16"]["enabled"], "Only bfloat16 is supported for now"
 
+        import deepspeed
         engine, optimizer, _, lr_scheduler = deepspeed.initialize(
             model = model,
             model_parameters = model.parameters(),

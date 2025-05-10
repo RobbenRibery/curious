@@ -114,7 +114,7 @@ class BaseConfig:
     Whether to return the entropy of the tokens.
     """
 
-    deepspeed_config: str = "deepspeed_config.json"
+    deepspeed_config: str = None
     """
     The path to the deepspeed config file.
     """

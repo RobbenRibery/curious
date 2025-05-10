@@ -11,7 +11,6 @@ from accelerate.utils import set_seed
 from transformers.generation.utils import GenerateDecoderOnlyOutput
 
 from curious.reward.rule.gsm8k import GSM8KRewardModel
-from vllm import LLM
 
 def linear_temperature_annealing(current_step: int, total_steps: int, start_temp: float, end_temp: float) -> float:
     """
@@ -133,7 +132,6 @@ def rollout(
     seed: int = 42,
     normalize_centered_returns: bool = False,
     use_rloo_scalar: bool = False,
-    use_vllm: bool = False,
 ) -> Dict[str, torch.Tensor]:
     """
     Performs a rollout of the model.
@@ -154,22 +152,14 @@ def rollout(
     # get the batch size
     oracle_answers = batch_inputs["oracle_answer"]
     
-    if use_vllm:
-        # get the sequence ids
-        sampled_responses = sample_response_vllm(
-            inputs=batch_inputs["input_ids"],
-            vllm=vllm,
-            sampling_params=sampling_params,
-        )
-    else:
-        # get the sequence ids from huggingface
-        sampled_responses = sample_responses_hf(
-            model,
-            tokenizer,
-            batch_inputs,
-            generation_config,
-            seed=seed,
-        )
+    # get the sequence ids from huggingface
+    sampled_responses = sample_responses_hf(
+        model,
+        tokenizer,
+        batch_inputs,
+        generation_config,
+        seed=seed,
+    )
     
     # get the rewards
     rewards_out = compute_rewards(
@@ -266,7 +256,6 @@ def _sequence_log_probs_from_logits(
     else:
         return log_probs, None
 
-
 @torch.compile(dynamic=True)
 def sequences_log_probs(
     model: PreTrainedModel,
@@ -308,12 +297,12 @@ def sequences_log_probs(
             output_ids = mini_ids[:, 1:],  # right shift 1 block to get the actual output ids
             return_entropy=return_entropy,
         )
-        del mini_logits, mini_ids
-        gc.collect()
-        torch.cuda.empty_cache()
 
         token_logprobs.append(log_probs)
         if return_entropy:
             token_entropy.append(entropy)
-            
+
+    del mini_logits, mini_ids
+    gc.collect()
+    torch.cuda.empty_cache()   
     return torch.cat(token_logprobs, dim=0), torch.cat(token_entropy, dim=0) if return_entropy else None
