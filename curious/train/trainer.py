@@ -2,7 +2,7 @@ from typing import Dict, List, Any
 
 from pathlib import Path
 from curious.utils.utils import release_memory, LOGGING_TEMPLATE
-from curious.replay.experience import Experience, ReplayBuffer
+from curious.replay.experience import Experience, ReplayBuffer, join_experience_batch
 from curious.train.training_setup import TrainingSetup, TrainState
 from curious.sampling.sampling import rollout, sequences_log_probs
 from curious.policy_gradient.loss import masked_mean, approx_kl_divergence
@@ -143,8 +143,15 @@ class PolicyGradientTrainer:
         return replay_buffer
 
     def update_policy(self, train_state: TrainState, replay_buffer: ReplayBuffer) -> TrainState:
-        pass
-    
+        
+        experience_sampler = DataLoader(
+            replay_buffer,
+            batch_size=self.training_setup["rl_config"].mini_batch_size,
+            shuffle= False,
+            drop_last=False,
+            collate_fn=join_experience_batch,
+            num_workers=self.training_setup["base_config"].num_workers,
+        )
     def log_rollout_stats(self, rollout_stats: Dict[str, Any]) -> None:
         
         batch_idx = rollout_stats["batch_idx"]
