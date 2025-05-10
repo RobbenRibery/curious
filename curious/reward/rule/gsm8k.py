@@ -163,17 +163,17 @@ class GSM8KRewardModel:
             return None, NEGATIVE_REWARD, {"outcome": FailureMode.NO_NUMBER_IN_ANSWER}
 
         # suffix and prefix penalty
-        lp = len(completion[:answer_item["start"]].split(" "))
-        ls = len(completion[answer_item["end"]:].split(" "))
-        ratio = ls / (lp + 1e-08)
-        penalty = min(ratio, 1)
+        #lp = len(completion[:answer_item["start"]].split(" "))
+        #ls = len(completion[answer_item["end"]:].split(" "))
+        #ratio = ls / (lp + 1e-08)
+        #penalty = min(ratio, 1)
 
         # return positive reward in case
         # the answer is exactly the same as the oracle answer
         if verify(answer_parsed, oracle_answer):
-            return answer_parsed, SOLVED_REWARD - penalty, {"outcome": None}
+            return answer_parsed, SOLVED_REWARD, {"outcome": None}
         else:
-            return answer_parsed, PARTIAL_REWARD - penalty, {"outcome": FailureMode.WRONG_ANSWER}
+            return answer_parsed, PARTIAL_REWARD, {"outcome": FailureMode.WRONG_ANSWER}
 
     def length_penalty(self, completion: str) -> float:
         """

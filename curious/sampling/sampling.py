@@ -8,9 +8,9 @@ from transformers import (
     PreTrainedModel,
 )
 from accelerate.utils import set_seed
-from transformers.generation.utils import GenerateDecoderOnlyOutput
 
 from curious.reward.rule.gsm8k import GSM8KRewardModel
+from curious.utils.utils import release_memory, move_paddings_to_right
 
 def linear_temperature_annealing(current_step: int, total_steps: int, start_temp: float, end_temp: float) -> float:
     """
@@ -92,10 +92,8 @@ def sample_responses_hf(
     batch_inputs: Dict[str, torch.Tensor],
     generation_config: GenerationConfig,
     seed: int = 42,
+    move_paddings_to_right_and_truncate:bool = True,
 ) -> Dict[str, torch.Tensor]:
-    
-    model.eval()
-    model.gradient_checkpointing_disable()
     # set the seed
     set_seed(seed)
     pad_token_id = tokenizer.pad_token_id
@@ -105,20 +103,28 @@ def sample_responses_hf(
         attention_mask=batch_inputs["attention_mask"].to(model.device),
         generation_config=generation_config
     )
+    if move_paddings_to_right_and_truncate:
+        sequence_ids, action_mask = move_paddings_to_right(
+            input_ids = batch_inputs["input_ids"],
+            attention_mask = batch_inputs["attention_mask"],
+            sequence_ids = sequence_ids,
+            pad_token_id = pad_token_id,
+        )
+    else:
+        action_mask = torch.zeros_like(sequence_ids, dtype=torch.bool, device=sequence_ids.device)
+        action_mask[:, batch_inputs["input_ids"].shape[1] :] = True
+        action_mask[sequence_ids == pad_token_id] = False
+        action_mask = action_mask[:, 1:]
 
-    action_mask = torch.zeros_like(sequence_ids, dtype=torch.bool, device=sequence_ids.device)
-    action_mask[:, batch_inputs["input_ids"].shape[1] :] = True
-    action_mask[sequence_ids == pad_token_id] = False
-    action_mask = action_mask[:, 1:]
     return {
-            "num_samples": batch_inputs["input_ids"].shape[0] * generation_config.num_return_sequences,
-            "input_ids": batch_inputs["input_ids"],
-            "sequence_ids": sequence_ids,
-            "action_mask": action_mask,
-            "completions": tokenizer.batch_decode(
-                sequence_ids[:, batch_inputs["input_ids"].shape[1] :], 
-                skip_special_tokens=True
-            ),
+        "num_samples": batch_inputs["input_ids"].shape[0] * generation_config.num_return_sequences,
+        "input_ids": batch_inputs["input_ids"],
+        "sequence_ids": sequence_ids,
+        "action_mask": action_mask,
+        "completions": tokenizer.batch_decode(
+            sequence_ids[:, batch_inputs["input_ids"].shape[1] :], 
+            skip_special_tokens=True
+        ),
     }
 
 @torch.no_grad()
@@ -277,8 +283,6 @@ def sequences_log_probs(
     Returns:
         torch.Tensor: The log probabilities of the output ids. (num_samples * group_size, seq_len-1, vocab_size)
     """
-    torch.cuda.empty_cache()
-
     token_logprobs = []
     if return_entropy:
         token_entropy = []
@@ -302,7 +306,5 @@ def sequences_log_probs(
         if return_entropy:
             token_entropy.append(entropy)
 
-    del mini_logits, mini_ids
-    gc.collect()
-    torch.cuda.empty_cache()   
+    release_memory([mini_logits, mini_ids]) 
     return torch.cat(token_logprobs, dim=0), torch.cat(token_entropy, dim=0) if return_entropy else None

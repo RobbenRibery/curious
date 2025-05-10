@@ -1,3 +1,4 @@
+from datasets.utils.tf_utils import minimal_tf_collate_fn_with_renaming
 from transformers import (
     PreTrainedTokenizer,
     PreTrainedModel,
@@ -44,11 +45,13 @@ def release_memory(vars:List[Any]):
 
 
 def move_paddings_to_right(
+    input_ids:torch.Tensor,
     attention_mask: torch.Tensor,
     sequence_ids: torch.Tensor,
     pad_token_id: int,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Moves padding tokens from the left side to the right side of sequences.
+    And then truncate the unecessary padding tokens
 
     This function takes sequences with left padding and rearranges them to have right padding
     instead, while preserving the actual content of the sequences.
@@ -72,8 +75,26 @@ def move_paddings_to_right(
     """
     # get the least left padded amount 
     right_padded_seq_ids = []
-    for attn_mask, seq_id in zip(attention_mask, sequence_ids):
+    left_padded_prompt_length = input_ids.shape[1]
+    new_action_mask = torch.zeros_like(
+        sequence_ids, 
+        dtype=torch.bool, 
+        device=sequence_ids.device,
+    )
+    minimum_right_padding_tokens = sequence_ids.shape[1]
+
+    # expand the attention mask 
+    group_size = sequence_ids.shape[0] // attention_mask.shape[0]
+    attention_mask = attention_mask.repeat_interleave(
+        repeats = group_size, 
+        dim = 0 
+    )
+
+    for new_act_mask, attn_mask, seq_id in zip(new_action_mask, attention_mask, sequence_ids):
+        
         left_padding_amount = (attn_mask == 0).sum()
+        new_act_mask[left_padded_prompt_length - left_padding_amount:] = True
+
         right_padding_tensor = torch.full(
             (left_padding_amount,), 
             pad_token_id, 
@@ -87,10 +108,23 @@ def move_paddings_to_right(
             ],
             dim=0,
         )
+        minimum_right_padding_tokens = min(
+            (new_seq_id == pad_token_id).sum().item(),
+            minimum_right_padding_tokens,
+        )
         right_padded_seq_ids.append(new_seq_id)
     
-    return torch.stack(right_padded_seq_ids)
+    right_padded_seq_ids = torch.stack(right_padded_seq_ids)
+    new_seq_length = right_padded_seq_ids.shape[1] - minimum_right_padding_tokens
+    print(minimum_right_padding_tokens, right_padded_seq_ids.shape[1], new_seq_length, )
+    
+    new_action_mask[right_padded_seq_ids == pad_token_id] = False 
+    
+    new_seq_ids = right_padded_seq_ids[:,:new_seq_length]
+    new_action_mask = new_action_mask[:, :new_seq_length]
 
+    new_action_mask = new_action_mask[:, 1:]
+    return new_seq_ids, new_action_mask
 
 
 def form_hf_dataset(
@@ -168,7 +202,7 @@ def load_model_tokenizer(
             trust_remote_code=trust_remote_code,
             torch_dtype=dtype_,
         )
-    model.forward = torch.compile(model.forward, dynamic=True)
+    #model.forward = torch.compile(model.forward, dynamic=True)
     if freeze_model:
         for param in model.parameters():
             param.requires_grad = False

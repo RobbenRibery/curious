@@ -37,7 +37,7 @@ class PolicyGradientTrainer:
                 #train_state = self.update_policy(train_state, replay_buffer)
                 print(len(replay_buffer))
         
-        return train_state, replay_buffer
+                return train_state, replay_buffer
     
     @torch.no_grad()
     def collect_trajectories(self, train_state: TrainState, batch_inputs: Dict[str, torch.Tensor], batch_indx:int) -> ReplayBuffer:
@@ -92,7 +92,7 @@ class PolicyGradientTrainer:
         ) 
 
         mean_action_entropy = masked_mean(entropy, action_mask, dim=None)
-        stats["mean_action_entropy"] = mean_action_entropy
+        stats["mean_action_entropy"] = mean_action_entropy.item()
 
         kl, log_probs_ref = None, None
         if self.training_setup["rl_config"].kl_weight > 0:
@@ -155,9 +155,9 @@ class PolicyGradientTrainer:
         print("torch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/(1024**3)))
 
         info_list: List[Dict[str, float]] = rollout_stats["infos"]
-        batch_mean_format_returns: float = np.array([x["format_reward"] for x in info_list]).mean()
-        batch_mean_outcome_returns: float = np.array([x["outcome_reward"] for x in info_list]).mean()
-        batch_mean_length_penalty: float = np.array([x["length_penalty"] for x in info_list]).mean()
+        batch_mean_format_returns: float = np.array([x["format_reward"] for x in info_list]).mean().item()
+        batch_mean_outcome_returns: float = np.array([x["outcome_reward"] for x in info_list]).mean().item()
+        batch_mean_length_penalty: float = np.array([x["length_penalty"] for x in info_list]).mean().item()
 
         batch_mean_returns: float = rollout_stats["returns"].mean().item()
         batch_mean_solved_rate: float = rollout_stats["solved_masks"].mean().item()
