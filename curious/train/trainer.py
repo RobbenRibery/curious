@@ -1,11 +1,11 @@
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Tuple
 
 from pathlib import Path
 from curious.utils.utils import release_memory, LOGGING_TEMPLATE
 from curious.replay.experience import Experience, ReplayBuffer, join_experience_batch
 from curious.train.training_setup import TrainingSetup, TrainState
 from curious.sampling.sampling import rollout, sequences_log_probs
-from curious.policy_gradient.loss import masked_mean, approx_kl_divergence
+from curious.policy_gradient.loss import masked_mean, approx_kl_divergence, ActorLoss
 
 from torch.utils.data import DataLoader
 import torch
@@ -19,6 +19,10 @@ class PolicyGradientTrainer:
     def __init__(self, trainining_setup: TrainingSetup) -> None:
         
         self.training_setup = trainining_setup
+        self.rl_config = self.training_setup["rl_config"]
+        self.base_config = self.training_setup["base_config"]
+        self.generation_config = self.training_setup["generation_config"]
+
         self.num_epochs = self.training_setup["num_epochs"]
         self.rollout_data_loader = self.training_setup["rollout_data_loader"]
 
@@ -26,18 +30,17 @@ class PolicyGradientTrainer:
         self.tokenizer = self.training_setup["tokenizer"]
         self.reward_model = self.training_setup["reward_model"]
 
-        self.generation_config = self.training_setup["generation_config"]
+        self.actor_loss: ActorLoss= self.training_setup["actor_loss"]
         self.logger = lambda x: print(x)
 
-    def train(self, train_state: TrainState) -> TrainState:
+    def train(self, train_state: TrainState) -> Tuple[TrainState, ReplayBuffer]:
         for epoch_idx in range(self.num_epochs):
             print(f"Epoch {epoch_idx} of {self.num_epochs}")
             for batch_idx, batch_inputs in enumerate(self.rollout_data_loader):
                 replay_buffer = self.collect_trajectories(train_state, batch_inputs, batch_idx)
-                #train_state = self.update_policy(train_state, replay_buffer)
-                print(len(replay_buffer))
+                train_state = self.update_policy(train_state, replay_buffer)
         
-                return train_state, replay_buffer
+        return train_state, replay_buffer
     
     @torch.no_grad()
     def collect_trajectories(self, train_state: TrainState, batch_inputs: Dict[str, torch.Tensor], batch_indx:int) -> ReplayBuffer:
@@ -144,14 +147,70 @@ class PolicyGradientTrainer:
 
     def update_policy(self, train_state: TrainState, replay_buffer: ReplayBuffer) -> TrainState:
         
+        model = train_state["model"]
+        device = train_state["device"]
+        optimizer = train_state["optimizer"]
+        lr_scheduler = train_state["lr_scheduler"]
+
         experience_sampler = DataLoader(
             replay_buffer,
-            batch_size=self.training_setup["rl_config"].mini_batch_size,
+            batch_size=self.rl_config.mini_batch_size,
             shuffle= False,
             drop_last=False,
             collate_fn=join_experience_batch,
-            num_workers=self.training_setup["base_config"].num_workers,
+            num_workers=self.base_config.num_workers,
         )
+
+        for _ in range(self.rl_config.epochs_per_step):
+            for experience in experience_sampler:
+                experience: Experience
+
+                optimizer.zero_grad()
+                experience = experience.to(device)
+                log_probs, _ = sequences_log_probs(
+                    model, 
+                    sequence_ids=experience.sequences, 
+                    attention_mask=experience.attention_mask,
+                    return_entropy=False,
+                    logits_minibatch_size=self.rl_config.logits_minibatch_size,
+                )
+                loss, mean_kl, mean_actor_loss = self.actor_loss(
+                    log_probs=log_probs, 
+                    experience=experience
+                )
+
+                if not loss.isfinite():
+                    print(f"Loss not finite, skipping backward, loss={loss}")
+                    print(f"experience.advantages={experience.advantages}")
+                    continue
+
+                loss.backward()
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), 
+                    max_norm=self.rl_config.max_grad_norm,
+                )
+                optimizer.step()
+
+                release_memory(
+                    [
+                        log_probs,
+                        experience,
+                        loss,
+                        mean_kl,
+                        mean_actor_loss,
+                    ]
+                )
+
+        if self.rl_config.anneling_lr:
+            lr_scheduler.step()
+
+
+        train_state["model"] = model
+        train_state["optimizer"] = optimizer
+        train_state["lr_scheduler"] = lr_scheduler
+
+        return train_state
+
     def log_rollout_stats(self, rollout_stats: Dict[str, Any]) -> None:
         
         batch_idx = rollout_stats["batch_idx"]

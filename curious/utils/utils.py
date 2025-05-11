@@ -116,7 +116,6 @@ def move_paddings_to_right(
     
     right_padded_seq_ids = torch.stack(right_padded_seq_ids)
     new_seq_length = right_padded_seq_ids.shape[1] - minimum_right_padding_tokens
-    print(minimum_right_padding_tokens, right_padded_seq_ids.shape[1], new_seq_length, )
     
     new_action_mask[right_padded_seq_ids == pad_token_id] = False 
     
@@ -202,7 +201,8 @@ def load_model_tokenizer(
             trust_remote_code=trust_remote_code,
             torch_dtype=dtype_,
         )
-    #model.forward = torch.compile(model.forward, dynamic=True)
+    model.forward = torch.compile(model.forward, dynamic=True)
+    model.generation_config.cache_implementation = "static"
     if freeze_model:
         for param in model.parameters():
             param.requires_grad = False

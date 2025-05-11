@@ -149,8 +149,16 @@ class ActorLoss(nn.Module):
             Tuple[torch.Tensor, torch.Tensor]: The actor loss and the KL divergence.
         """
         old_log_probs = experience.action_log_probs
+        assert old_log_probs.shape == log_probs.shape
+
         action_mask = experience.action_mask
+        assert action_mask.shape == log_probs.shape
+
         advantages = experience.advantages
+        if advantages.ndim == 1:
+            advantages = advantages.unsqueeze(1)
+        assert advantages.shape[0] == log_probs.shape[0]
+        assert advantages.shape[1] == 1
 
         if self.kl_weight > 0:
             kl = approx_kl_divergence(
@@ -160,14 +168,11 @@ class ActorLoss(nn.Module):
             )
             kl_loss = self.kl_weight * kl
         else:
-            kl_loss = kl = torch.tensor(0.0)
+            kl_loss, kl = 0, 0
 
         if self.use_surrogate_loss:
             # importance sampling ratio
             ratio = (log_probs - old_log_probs).exp()
-            #print(f"ratio: {ratio.shape}")
-            #print(f"advantages: {advantages.shape}")
-            
             # surrogate loss 
             surr1 = ratio * advantages
             surr2 = ratio.clamp(1 - self.epsilon_low, 1 + self.epsilon_high) * advantages
@@ -186,4 +191,9 @@ class ActorLoss(nn.Module):
             use_fixed_response_length=self.use_fixed_response_length
         ).mean()
 
-        return loss, kl.mean(), policy_loss.mean()
+        return loss, kl.mean(), masked_mean(
+            policy_loss,
+            action_mask,
+            dim = None, 
+            use_fixed_response_length = False
+        )
