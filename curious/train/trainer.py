@@ -95,7 +95,7 @@ class PolicyGradientTrainer:
         ) 
 
         mean_action_entropy = masked_mean(entropy, action_mask, dim=None)
-        stats["mean_action_entropy"] = mean_action_entropy.item()
+        stats["mean_action_entropy"] = mean_action_entropy
 
         kl, log_probs_ref = None, None
         if self.training_setup["rl_config"].kl_weight > 0:
@@ -220,33 +220,43 @@ class PolicyGradientTrainer:
         print("torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/(1024**3)))
         print("torch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/(1024**3)))
 
-        info_list: List[Dict[str, float]] = rollout_stats["infos"]
-        batch_mean_format_returns: float = np.array([x["format_reward"] for x in info_list]).mean().item()
-        batch_mean_outcome_returns: float = np.array([x["outcome_reward"] for x in info_list]).mean().item()
-        batch_mean_length_penalty: float = np.array([x["length_penalty"] for x in info_list]).mean().item()
+        returns: torch.Tensor = rollout_stats["returns"]
 
-        batch_mean_returns: float = rollout_stats["returns"].mean().item()
+        info_list: List[Dict[str, float]] = rollout_stats["infos"]
+        format_returns: np.ndarray = np.array([x["format_reward"] for x in info_list])
+        outcome_returns: np.ndarray = np.array([x["outcome_reward"] for x in info_list])
+        length_penalty: np.ndarray = np.array([x["length_penalty"] for x in info_list])
+
         batch_mean_solved_rate: float = rollout_stats["solved_masks"].mean().item()
 
-        batch_mean_num_words_in_completions: float = rollout_stats["num_words_in_completions"].mean().item()
-        batch_max_num_words_in_completions: float = rollout_stats["num_words_in_completions"].max().item()
-        batch_min_num_words_in_completions: float = rollout_stats["num_words_in_completions"].min().item()
-        
+        num_words_in_completions: torch.Tensor = rollout_stats["num_words_in_completions"]
+
         self.logger(
             {
-                "train/mean_batch_returns": batch_mean_returns,
+                "train/mean_batch_returns": returns.mean().item(),
+                "train/max_batch_returns": returns.max().item(),
+                "train/min_batch_returns": returns.min().item(),
+                
                 "train/mean_batch_solved_rate": batch_mean_solved_rate,
 
-                "train/mean_num_words_in_completions": batch_mean_num_words_in_completions,
-                "train/max_num_words_in_completions": batch_max_num_words_in_completions,
-                "train/min_num_words_in_completions": batch_min_num_words_in_completions,
+                "train/mean_batch_format_returns": format_returns.mean().item(),
+                "train/max_batch_format_returns": format_returns.max().item(),
+                "train/min_batch_format_returns": format_returns.min().item(),
 
-                "train/mean_batch_format_returns": batch_mean_format_returns,
-                "train/mean_batch_outcome_returns": batch_mean_outcome_returns,
-                "train/mean_batch_length_penalty": batch_mean_length_penalty,
+                "train/mean_batch_outcome_returns": outcome_returns.mean().item(),
+                "train/max_batch_outcome_returns": outcome_returns.max().item(),
+                "train/min_batch_outcome_returns": outcome_returns.min().item(),
+
+                "train/mean_batch_length_penalty": length_penalty.mean().item(),
+                "train/max_batch_length_penalty": length_penalty.max().item(),
+                "train/min_batch_length_penalty": length_penalty.min().item(),
+
+                "train/mean_num_words_in_completions": num_words_in_completions.mean().item(),
+                "train/max_num_words_in_completions": num_words_in_completions.max().item(),
+                "train/min_num_words_in_completions": num_words_in_completions.min().item(),
                 
                 "train/lr": rollout_stats["rl_scheduler"].get_lr()[0],
-                "train/mean_action_entropy": rollout_stats["mean_action_entropy"],
+                "train/mean_action_entropy": rollout_stats["mean_action_entropy"].item(),
                 
                 "num_batches_visited": batch_idx,
             }
