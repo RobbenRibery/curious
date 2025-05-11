@@ -191,9 +191,4 @@ class ActorLoss(nn.Module):
             use_fixed_response_length=self.use_fixed_response_length
         ).mean()
 
-        return loss, kl.mean(), masked_mean(
-            policy_loss,
-            action_mask,
-            dim = None, 
-            use_fixed_response_length = False
-        )
+        return loss, kl_loss, policy_loss

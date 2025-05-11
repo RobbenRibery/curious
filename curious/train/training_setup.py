@@ -176,6 +176,7 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
         training_setup["kl_controller"] = kl_controller
         training_setup["reference_model"] = reference_model
     else:
+        reference_model, kl_controller = None, None
         training_setup["kl_controller"] = None
         training_setup["reference_model"] = None
 
