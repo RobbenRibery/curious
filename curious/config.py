@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 from uuid import uuid4
 
 from curious.reward.rule.gsm8k import * 
@@ -54,6 +55,11 @@ class BaseConfig:
     """
     The batch size to use for evaluation
     """
+
+    num_epochs:int = 1
+    """
+    The number of epochs to use for the training.
+    """
     
     num_workers: int = 8
     """
@@ -107,6 +113,11 @@ class BaseConfig:
     return_entropy: bool = False
     """
     Whether to return the entropy of the tokens.
+    """
+
+    deepspeed_config: str = None
+    """
+    The path to the deepspeed config file.
     """
 
 
@@ -175,27 +186,27 @@ class RewardConfig:
     """
     The pattern to use for the think.
     """
-    use_format_reward: bool = True
+    use_format_reward: bool = False
     """
     Whether to use the format reward.
     """
-    use_overlong_penalty: bool = True
+    use_overlong_penalty: bool = False
     """
     Whether to use the overlong penalty.
     """
     l_max: int = 300
     """
-    The maximum length of the completion, beyond which the penalty is applied.
+    The maximum length of the completion, beyond which the penalty is applied. (in number of words)
     """
     l_cache: int = 100
     """
-    The cache length of the completion, which indicates the peanlizable span of the completion.
+    The cache length of the completion, which indicates the peanlizable span of the completion. (in number of words)
     """
 
 @dataclass
-class GRPOConfig:
+class RLConfig:
     """
-    A dataclass for storing the GRPO configuration.
+    A dataclass for storing the RL configuration.
     """
 
     group_size: int = 16
@@ -273,6 +284,36 @@ class GRPOConfig:
     Whether to use the surrogate loss (ppo) or policy gradient loss (pg).
     """
 
+    use_ad_cispo: bool = False
+    """
+    Whether to use AD-CISPO token-level upper clipping thresholds.
+    """
+
+    ad_cispo_saliency_method: str = "kv_norm"
+    """
+    The saliency method to use for AD-CISPO. Currently only kv_norm is supported.
+    """
+
+    ad_cispo_top_layers: int = 4
+    """
+    The number of final decoder layers to use for AD-CISPO KV-norm saliency.
+    """
+
+    ad_cispo_min_multiplier: float = 0.0
+    """
+    The lower bound for token-level AD-CISPO clip multipliers.
+    """
+
+    ad_cispo_max_multiplier: Optional[float] = None
+    """
+    The optional upper bound for token-level AD-CISPO clip multipliers.
+    """
+
+    ad_cispo_eps: float = 1e-8
+    """
+    The numerical epsilon used by AD-CISPO saliency normalization.
+    """
+
     mini_batch_size: int = 16 * 2
     """
     The mini batch size to use for the GRPO.
@@ -346,9 +387,9 @@ class TrainingConfig:
     A dataclass for storing the training configuration.
     """
 
-    grpo_config: GRPOConfig
+    rl_config: RLConfig
     """
-    The GRPO configuration.
+    The RL configuration.
     """
 
     wandb_config: WandbConfig

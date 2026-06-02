@@ -3,12 +3,12 @@ from torch.utils.data import DataLoader
 from transformers import PreTrainedModel
 
 from curious.config import TrainingConfig
-from curious.training.training_setup import (
+from curious.train.training_setup import (
     TrainState, 
     TrainingSetup, 
     set_up_training,
 )
-from curious.training.train_rl import train
+from curious.train.train_rl import train
 from curious.utils.utils import form_hf_dataset
 from curious.sampling.sfl import sfl_sampling
 from curious.prompt import *
@@ -49,8 +49,8 @@ def train_sfl(
     assert args.sfl_config.sfl_total_scanning_size % args.sfl_config.sfl_sampling_batch_size == 0, \
         "sfl_total_scanning_size must be divisible by sfl_sampling_batch_size"
 
-    assert args.grpo_config.kl_weight == 0, "KL weight must be 0 for SFL"
-    assert args.grpo_config.ref_model_update_freq == 0, "Reference model update frequency must be 0 for SFL"
+    assert args.rl_config.kl_weight == 0, "KL weight must be 0 for SFL"
+    assert args.rl_config.ref_model_update_freq == 0, "Reference model update frequency must be 0 for SFL"
 
     # set the seed for accelerate
     set_seed(args.base_config.seed)
@@ -209,10 +209,9 @@ if __name__ == "__main__":
     wandb.define_metric("train/mean_batch_outcome_returns", step_metric="num_batches_visited")
     
     # set up the training
-    training_setup = set_up_training(args)
+    training_setup, _ = set_up_training(args)
     model, train_outs, eval_outs = train_sfl(
         args=args,
         training_setup=training_setup,
         logger=wandb.log,
     )
-

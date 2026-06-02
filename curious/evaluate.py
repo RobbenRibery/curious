@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import List, Callable, Dict, Any
 import os
-from torch.cuda import temperature
 import tyro
 import wandb
 import numpy as np
@@ -148,16 +147,13 @@ def evaluate(
         questions = batch_inputs["question"]
         oracle_answers = batch_inputs["oracle_answer"]
 
-        # Get the model predictions (greedy)
+        # Get deterministic pass@1 predictions.
         seq_ids = model.generate(
             input_ids = batch_inputs["input_ids"].to(model.device),
             attention_mask = batch_inputs["attention_mask"].to(model.device),
             max_new_tokens=config.sampling_config.max_new_tokens,
-            temperature = 0.7,
-            top_p = 0.8,
-            top_k = 20,
-            do_sample = True,
-            use_cache = True
+            do_sample = False,
+            use_cache = True,
         )
 
         # Decode the generations
@@ -184,9 +180,9 @@ def evaluate(
         batch_mean_outcome_returns: float = np.array([x["outcome_reward"] for x in batch_infos]).mean()
         batch_mean_length_penalty: float = np.array([x["length_penalty"] for x in batch_infos]).mean()
 
-        rewards.extend(batch_rewards.tolist())
+        rewards.extend(batch_rewards.reshape(-1).tolist())
         infos.extend(batch_infos)
-        solved_masks.extend(batch_solved_masks.tolist())
+        solved_masks.extend(batch_solved_masks.reshape(-1).tolist())
         num_words_in_completions.extend(batch_num_words_in_completions)
         
         # --------------------- Logging Start ---------------------
@@ -212,8 +208,8 @@ def evaluate(
                     questions,
                     oracle_answers,
                     completions,
-                    batch_rewards,
-                    infos,
+                    batch_rewards.reshape(-1),
+                    batch_infos,
                 ):
                     text_to_log += LOGGING_TEMPLATE.format(
                         question=question,
@@ -286,7 +282,7 @@ if __name__ == "__main__":
     )
 
     # Evaluate the model
-    rewards, infos, solved_rates = evaluate(
+    evaluate(
         config,
         model,
         tokenizer,

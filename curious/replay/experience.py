@@ -43,6 +43,7 @@ class Experience:
     action_log_probs: Optional[torch.Tensor]  = None # (num_samples * group_size, seq_len-1)
     kl: Optional[torch.Tensor]  = None # (num_samples * group_size, seq_len-1) (boolean)
     log_probs_ref: Optional[torch.Tensor] = None # (num_samples * group_size, seq_len-1)
+    token_clip_high: Optional[torch.Tensor] = None # (num_samples * group_size, seq_len-1)
     learnability: Optional[torch.Tensor] = None # (num_samples, )
 
     completion: Optional[List[str]] = None
@@ -60,6 +61,7 @@ class Experience:
         "sequences",
         "action_log_probs",
         "log_probs_ref",
+        "token_clip_high",
         "returns",
         "solved_mask",
         "advantages",
@@ -132,10 +134,10 @@ def join_experience_batch(items: List[Experience]) -> Experience:
         if all(v is not None for v in vals):            
             data = torch.stack(vals, dim=0) #zero_pad_sequences(vals, "left")
             # for 1 dimensional data, stack the values and reshape them
-            if key in {"returns", "solved_mask"}:
+            if key in {"returns", "solved_mask", "advantages"}:
                 data = data.reshape(-1)
-            elif key == "advantages":
-                data = data.reshape(-1, 1)
+            #elif key == "advantages":
+            #    data = data.reshape(-1, 1)
         else:
             data = None
         batch_data[key] = data

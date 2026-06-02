@@ -18,7 +18,7 @@ STRICT_FORMAT_PATTERN = (
     r"<answer>(?:(?!<think>|</think>).)*?</answer>)"
 )
 
-QWEN_ANSWER_PATTERN = r"boxed\{(.*?)\}"
+QWEN_ANSWER_PATTERN = r"(?:\\?boxed|\x08oxed)\{(.*?)\}"
 
 def normalize_number(answer: str) -> str:
     """
@@ -86,6 +86,25 @@ class GSM8KRewardModel:
         self.l_cache = l_cache
         self.punish_free_length = self.l_max - self.l_cache
 
+    def _find_answer_matches(self, completion: str) -> List[Dict[str, str | int]]:
+        patterns = [self.answer_pattern]
+        if self.answer_pattern != ANSWER_PATTERN:
+            patterns.append(ANSWER_PATTERN)
+
+        answer_matches: List[Dict[str, str | int]] = []
+        for pattern in patterns:
+            for match_ in re.finditer(pattern, completion, flags=re.DOTALL):
+                answer_matches.append(
+                    {
+                        "answer": match_.group(1),
+                        "start": match_.start(),
+                        "end": match_.end(),
+                    }
+                )
+            if answer_matches:
+                break
+        return answer_matches
+
     def get_answer_from_gt(self, answer_text: str) -> Dict[str, str]:
         """
         This function is strict that it will guarantee to find a
@@ -142,15 +161,7 @@ class GSM8KRewardModel:
         )
 
         # find all the answer matches
-        answer_match: List[Dict[str, str | int]] | None = []
-        for match_ in re.finditer(self.answer_pattern, completion, flags=re.DOTALL):
-            answer_match.append(
-                {
-                    "answer": match_.group(1),
-                    "start": match_.start(),
-                    "end": match_.end(),
-                }
-            )
+        answer_match = self._find_answer_matches(completion)
 
         # return negative reward in case no answer is found
         if not answer_match:
@@ -163,17 +174,17 @@ class GSM8KRewardModel:
             return None, NEGATIVE_REWARD, {"outcome": FailureMode.NO_NUMBER_IN_ANSWER}
 
         # suffix and prefix penalty
-        lp = len(completion[:answer_item["start"]].split(" "))
-        ls = len(completion[answer_item["end"]:].split(" "))
-        ratio = ls / (lp + 1e-08)
-        penalty = min(ratio, 1)
+        #lp = len(completion[:answer_item["start"]].split(" "))
+        #ls = len(completion[answer_item["end"]:].split(" "))
+        #ratio = ls / (lp + 1e-08)
+        #penalty = min(ratio, 1)
 
         # return positive reward in case
         # the answer is exactly the same as the oracle answer
         if verify(answer_parsed, oracle_answer):
-            return answer_parsed, SOLVED_REWARD - penalty, {"outcome": None}
+            return answer_parsed, SOLVED_REWARD, {"outcome": None}
         else:
-            return answer_parsed, PARTIAL_REWARD - penalty, {"outcome": FailureMode.WRONG_ANSWER}
+            return answer_parsed, ZERO_REWARD, {"outcome": FailureMode.WRONG_ANSWER}
 
     def length_penalty(self, completion: str) -> float:
         """
@@ -332,8 +343,8 @@ class GSM8KRewardModel:
             else:
                 solved_masks.append(0)
 
-        # return the rewards, infos and the solved rate
-        return rewards, infos, solved_masks
+        solved_rate = sum(solved_masks) / len(solved_masks) if solved_masks else 0.0
+        return rewards, infos, solved_rate
 
     def hf_outcome_reward(
         self,
