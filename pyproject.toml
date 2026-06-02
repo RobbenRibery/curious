@@ -1,40 +1,40 @@
-[tool.poetry]
+[project]
 name = "curious"
 version = "0.1.0"
 description = "A curious llm"
-authors = ["RobbenRibery <runodng.liu@outlook.com>"]
-license = "Apache-2.0"
+authors = [
+    { name = "RobbenRibery", email = "runodng.liu@outlook.com" },
+]
+license = { text = "Apache-2.0" }
 readme = "README.md"
-package-mode = false
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "accelerate==1.6.0",
+    "datasets==3.5.0",
+    "deepspeed==0.16.7; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "diff-parser==1.1",
+    "liger-kernel==0.5.8; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "math-verify==0.7.0",
+    "memory-profiler==0.61.0",
+    "modal==1.4.3",
+    "mpi4py==4.0.3; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "python-dotenv==1.1.0",
+    "setuptools==76.1.0",
+    "toml==0.10.2",
+    "torch==2.6.0",
+    "transformers==4.51.3",
+    "tree-sitter==0.24.0",
+    "trl==0.16.1",
+    "tyro==0.9.18",
+    "unidiff==0.7.5",
+    "vllm==0.8.4; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "wandb==0.19.9",
+]
 
-[tool.poetry.dependencies]
-python-dotenv = "^1.0.1"
-python = ">=3.11.0,<3.13"
-torch = "^2.6.0"
-transformers = "^4.49.0"
-toml = "^0.10.2"
-wandb = "^0.19.7"
-datasets = "^3.3.2"
-unidiff = "^0.7.5"
-diff-parser = "^1.1"
-tree-sitter = "^0.24.0"
-accelerate = ">=0.26.0"
-tyro = "^0.9.17"
-setuptools = "^76.0.0"
-math-verify = "^0.7.0"
-memory-profiler = "^0.61.0"
-trl = "^0.16.1"
-liger-kernel = "^0.5.7"
-deepspeed = "^0.16.7"
-vllm = "^0.8.4"
-mpi4py = "^4.0.3"
+[dependency-groups]
+dev = [
+    "ipykernel==6.29.5",
+]
 
-[tool.poetry.group.dev.dependencies]
-ipykernel = "^6.29.5"
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
-
-[tool.poetry.build]
-generate-setup-file = true
+[tool.uv]
+package = false
