@@ -43,6 +43,7 @@ class Experience:
     action_log_probs: Optional[torch.Tensor]  = None # (num_samples * group_size, seq_len-1)
     kl: Optional[torch.Tensor]  = None # (num_samples * group_size, seq_len-1) (boolean)
     log_probs_ref: Optional[torch.Tensor] = None # (num_samples * group_size, seq_len-1)
+    token_clip_high: Optional[torch.Tensor] = None # (num_samples * group_size, seq_len-1)
     learnability: Optional[torch.Tensor] = None # (num_samples, )
 
     completion: Optional[List[str]] = None
@@ -60,6 +61,7 @@ class Experience:
         "sequences",
         "action_log_probs",
         "log_probs_ref",
+        "token_clip_high",
         "returns",
         "solved_mask",
         "advantages",

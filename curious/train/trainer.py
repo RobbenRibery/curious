@@ -6,6 +6,11 @@ from curious.replay.experience import Experience, ReplayBuffer, join_experience_
 from curious.train.training_setup import TrainingSetup, TrainState
 from curious.sampling.sampling import rollout, sequences_log_probs
 from curious.policy_gradient.loss import masked_mean, approx_kl_divergence, ActorLoss
+from curious.policy_gradient.ad_cispo import (
+    ADCispoStats,
+    ReferencePolicyFeatureRequest,
+    compute_reference_policy_features,
+)
 
 from torch.utils.data import DataLoader
 import torch
@@ -38,7 +43,7 @@ class PolicyGradientTrainer:
             print(f"Epoch {epoch_idx} of {self.num_epochs}")
             for batch_idx, batch_inputs in enumerate(self.rollout_data_loader):
                 replay_buffer = self.collect_trajectories(train_state, batch_inputs, batch_idx)
-                train_state = self.update_policy(train_state, replay_buffer)
+                train_state = self.update_policy(train_state, replay_buffer, batch_idx + 1)
         
         return train_state, replay_buffer
     
@@ -97,8 +102,27 @@ class PolicyGradientTrainer:
         mean_action_entropy = masked_mean(entropy, action_mask, dim=None)
         stats["mean_action_entropy"] = mean_action_entropy
 
-        kl, log_probs_ref = None, None
-        if self.training_setup["rl_config"].kl_weight > 0:
+        kl, log_probs_ref, token_clip_high = None, None, None
+        if self.training_setup["rl_config"].use_ad_cispo:
+            reference_features = compute_reference_policy_features(
+                ReferencePolicyFeatureRequest(
+                    model=train_state["reference_model"],
+                    sequence_ids=sequence_ids,
+                    attention_mask=attention_mask,
+                    action_mask=action_mask,
+                    clip_high=self.actor_loss.epsilon_high,
+                    logits_minibatch_size=self.training_setup["rl_config"].logits_minibatch_size,
+                    top_layers=self.training_setup["rl_config"].ad_cispo_top_layers,
+                    min_multiplier=self.training_setup["rl_config"].ad_cispo_min_multiplier,
+                    max_multiplier=self.training_setup["rl_config"].ad_cispo_max_multiplier,
+                    eps=self.training_setup["rl_config"].ad_cispo_eps,
+                )
+            )
+            token_clip_high = reference_features.token_clip_thresholds.values
+            stats["ad_cispo_stats"] = reference_features.stats
+            if self.training_setup["rl_config"].kl_weight > 0:
+                log_probs_ref = reference_features.log_probs
+        elif self.training_setup["rl_config"].kl_weight > 0:
             # compute the log probs of the reference model
             log_probs_ref, _ = sequences_log_probs(
                 model=train_state["reference_model"],
@@ -107,6 +131,8 @@ class PolicyGradientTrainer:
                 return_entropy=False,
                 logits_minibatch_size=self.training_setup["rl_config"].logits_minibatch_size,
             )
+
+        if self.training_setup["rl_config"].kl_weight > 0:
             # compute the kl divergence
             kl: torch.Tensor = approx_kl_divergence(
                 log_probs=log_probs,
@@ -124,6 +150,7 @@ class PolicyGradientTrainer:
             action_mask=action_mask,
             log_probs_ref=log_probs_ref,
             kl=kl,
+            token_clip_high=token_clip_high,
         )
         replay_buffer.append(
             experience.to(
@@ -136,6 +163,7 @@ class PolicyGradientTrainer:
             [
                 kl,
                 log_probs_ref,
+                token_clip_high,
                 log_probs,
                 attention_mask,
                 sequence_ids,
@@ -145,12 +173,13 @@ class PolicyGradientTrainer:
         )
         return replay_buffer
 
-    def update_policy(self, train_state: TrainState, replay_buffer: ReplayBuffer) -> TrainState:
+    def update_policy(self, train_state: TrainState, replay_buffer: ReplayBuffer, batch_idx: int) -> TrainState:
         
         model = train_state["model"]
         device = train_state["device"]
         optimizer = train_state["optimizer"]
         lr_scheduler = train_state["lr_scheduler"]
+        kl_controller = train_state["kl_controller"]
 
         experience_sampler = DataLoader(
             replay_buffer,
@@ -191,6 +220,25 @@ class PolicyGradientTrainer:
                 )
                 optimizer.step()
 
+                mean_loss = loss.detach().cpu().item()
+                mean_kl = mean_kl.detach().cpu().item()
+                mean_actor_loss = mean_actor_loss.detach().cpu().item()
+
+                if self.rl_config.kl_weight > 0:
+                    kl_controller.update(mean_kl, self.rl_config.mini_batch_size)
+                    self.actor_loss.kl_weight = kl_controller.value
+
+                self.logger(
+                    {
+                        "train/loss": mean_loss,
+                        "train/mean_kl": mean_kl,
+                        "train/actor_loss": mean_actor_loss,
+                        "train/kl_weight": kl_controller.value if self.rl_config.kl_weight > 0 else 0.0,
+                        "train/grad_norm": grad_norm,
+                        "num_batches_visited": batch_idx,
+                    }
+                )
+
                 release_memory(
                     [
                         log_probs,
@@ -204,10 +252,18 @@ class PolicyGradientTrainer:
         if self.rl_config.anneling_lr:
             lr_scheduler.step()
 
+        if (
+            train_state["reference_model"] is not None
+            and self.rl_config.ref_model_update_freq > 0
+            and batch_idx % self.rl_config.ref_model_update_freq == 0
+        ):
+            train_state["reference_model"].load_state_dict(model.state_dict())
+            train_state["reference_model"].eval()
 
         train_state["model"] = model
         train_state["optimizer"] = optimizer
         train_state["lr_scheduler"] = lr_scheduler
+        train_state["kl_controller"] = kl_controller
 
         return train_state
 
@@ -261,6 +317,18 @@ class PolicyGradientTrainer:
                 "num_batches_visited": batch_idx,
             }
         )
+        ad_cispo_stats: ADCispoStats | None = rollout_stats.get("ad_cispo_stats")
+        if ad_cispo_stats is not None:
+            self.logger(
+                {
+                    "ad_cispo/clip_mean": ad_cispo_stats.clip_mean,
+                    "ad_cispo/clip_min": ad_cispo_stats.clip_min,
+                    "ad_cispo/clip_max": ad_cispo_stats.clip_max,
+                    "ad_cispo/multiplier_mean": ad_cispo_stats.multiplier_mean,
+                    "ad_cispo/saliency_mean": ad_cispo_stats.saliency_mean,
+                    "num_batches_visited": batch_idx,
+                }
+            )
 
         if self.training_setup["base_config"].train_text_log_interval > 0:
             if batch_idx % self.training_setup["base_config"].train_text_log_interval == 0:

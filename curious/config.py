@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 from uuid import uuid4
 
 from curious.reward.rule.gsm8k import * 
@@ -281,6 +282,36 @@ class RLConfig:
     use_surrogate_loss: bool = True
     """
     Whether to use the surrogate loss (ppo) or policy gradient loss (pg).
+    """
+
+    use_ad_cispo: bool = False
+    """
+    Whether to use AD-CISPO token-level upper clipping thresholds.
+    """
+
+    ad_cispo_saliency_method: str = "kv_norm"
+    """
+    The saliency method to use for AD-CISPO. Currently only kv_norm is supported.
+    """
+
+    ad_cispo_top_layers: int = 4
+    """
+    The number of final decoder layers to use for AD-CISPO KV-norm saliency.
+    """
+
+    ad_cispo_min_multiplier: float = 0.0
+    """
+    The lower bound for token-level AD-CISPO clip multipliers.
+    """
+
+    ad_cispo_max_multiplier: Optional[float] = None
+    """
+    The optional upper bound for token-level AD-CISPO clip multipliers.
+    """
+
+    ad_cispo_eps: float = 1e-8
+    """
+    The numerical epsilon used by AD-CISPO saliency normalization.
     """
 
     mini_batch_size: int = 16 * 2

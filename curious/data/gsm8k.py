@@ -6,7 +6,7 @@ from transformers import PreTrainedTokenizer
 from curious.utils.utils import tokenize_questions
 from curious.prompt import *
 
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 
 class GSM8KDataset(Dataset):
@@ -16,7 +16,7 @@ class GSM8KDataset(Dataset):
 
     def __init__(
         self, 
-        tokenizer: PreTrainedTokenizer,
+        tokenizer: Optional[PreTrainedTokenizer] = None,
         dataset_name: str = "openai/gsm8k", 
         seed: int = 42, 
         mode: str = "train", 
@@ -51,6 +51,11 @@ class GSM8KDataset(Dataset):
         self.max_prompt_length = max_prompt_length
 
         self.tokenizer = tokenizer
+        if self.tokenizer is None:
+            self.train_max_length = 0
+            self.test_max_length = 0
+            return
+
         self.tokenizer.padding_side = "left"
 
         ## Train dataset ##

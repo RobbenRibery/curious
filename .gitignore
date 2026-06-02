@@ -173,3 +173,4 @@ job_scripts/
 dcgm/
 test.py 
 main.py
+.DS_Store

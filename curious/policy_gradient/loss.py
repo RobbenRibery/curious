@@ -52,11 +52,11 @@ def masked_mean(
     if mask is None:
         return tensor.mean(axis=dim)
     # when dim == None, return the mean of the whole tensor
+    denominator = mask.sum(axis=dim).clamp_min(1)
     if use_fixed_response_length:
         return (tensor * mask).sum(axis=dim) / MAX_NEW_TOKENS
     else:
-        return (tensor * mask).sum(axis=dim) / mask.sum(axis=dim)
-
+        return (tensor * mask).sum(axis=dim) / denominator
 
 class AdaptiveKLController:
     """
@@ -79,7 +79,6 @@ class AdaptiveKLController:
         proportional_error = np.clip(current_kl / self.target_kl - 1, -0.2, 0.2)
         mult = 1 + proportional_error * n_steps / self.horizon
         self.value *= mult
-
 
 class ConstantKLController:
     """
@@ -173,9 +172,18 @@ class ActorLoss(nn.Module):
         if self.use_surrogate_loss:
             # importance sampling ratio
             ratio = (log_probs - old_log_probs).exp()
+            token_clip_high = experience.token_clip_high
+            if token_clip_high is None:
+                clip_high = torch.full_like(ratio, self.epsilon_high)
+            else:
+                assert token_clip_high.shape == ratio.shape
+                clip_high = token_clip_high.to(device=ratio.device, dtype=ratio.dtype)
+            clip_low = torch.full_like(ratio, 1 - self.epsilon_low)
+            clip_high = 1 + clip_high
             # surrogate loss 
             surr1 = ratio * advantages
-            surr2 = ratio.clamp(1 - self.epsilon_low, 1 + self.epsilon_high) * advantages
+            clipped_ratio = torch.minimum(torch.maximum(ratio, clip_low), clip_high)
+            surr2 = clipped_ratio * advantages
 
             policy_loss = -torch.min(surr1, surr2)
             loss = policy_loss + kl_loss
@@ -184,11 +192,27 @@ class ActorLoss(nn.Module):
             loss = policy_loss + kl_loss
 
         # token-level loss vs group-level loss
-        loss = masked_mean(
+        mean_loss = masked_mean(
             loss, 
             action_mask, 
             dim=self.aggregation_dim, 
             use_fixed_response_length=self.use_fixed_response_length
         ).mean()
 
-        return loss, kl_loss, policy_loss
+        mean_actor_loss = masked_mean(
+            policy_loss,
+            action_mask,
+            dim=self.aggregation_dim,
+            use_fixed_response_length=self.use_fixed_response_length,
+        ).mean()
+        if isinstance(kl_loss, torch.Tensor):
+            mean_kl = masked_mean(
+                kl,
+                action_mask,
+                dim=self.aggregation_dim,
+                use_fixed_response_length=self.use_fixed_response_length,
+            ).mean()
+        else:
+            mean_kl = log_probs.new_zeros(())
+
+        return mean_loss, mean_kl, mean_actor_loss

@@ -82,6 +82,38 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
     assert config.base_config.mode == "train"
     assert config.rl_config.mini_batch_size % config.rl_config.group_size == 0
     assert config.base_config.train_batch_size * config.rl_config.group_size % config.rl_config.mini_batch_size == 0
+    if config.rl_config.use_rloo_scalar and config.rl_config.group_size <= 1:
+        raise ValueError("RLOO advantages require group_size > 1")
+    if config.rl_config.use_rloo_scalar and config.rl_config.normalize_centered_returns:
+        raise ValueError("RLOO scalar advantages should not also use GRPO std normalization")
+    if config.rl_config.use_ad_cispo:
+        if not config.rl_config.use_surrogate_loss:
+            raise ValueError("AD-CISPO requires use_surrogate_loss=True")
+        if config.rl_config.ad_cispo_saliency_method != "kv_norm":
+            raise ValueError("AD-CISPO currently supports only ad_cispo_saliency_method='kv_norm'")
+        if config.rl_config.ad_cispo_top_layers <= 0:
+            raise ValueError("AD-CISPO ad_cispo_top_layers must be positive")
+        if config.rl_config.ad_cispo_min_multiplier < 0:
+            raise ValueError("AD-CISPO ad_cispo_min_multiplier must be non-negative")
+        if config.rl_config.ad_cispo_min_multiplier > 1:
+            raise ValueError("AD-CISPO ad_cispo_min_multiplier cannot exceed 1")
+        if (
+            config.rl_config.ad_cispo_max_multiplier is not None
+            and config.rl_config.ad_cispo_max_multiplier <= 0
+        ):
+            raise ValueError("AD-CISPO ad_cispo_max_multiplier must be positive when set")
+        if (
+            config.rl_config.ad_cispo_max_multiplier is not None
+            and config.rl_config.ad_cispo_max_multiplier < 1
+        ):
+            raise ValueError("AD-CISPO ad_cispo_max_multiplier cannot be below 1")
+        if (
+            config.rl_config.ad_cispo_max_multiplier is not None
+            and config.rl_config.ad_cispo_max_multiplier < config.rl_config.ad_cispo_min_multiplier
+        ):
+            raise ValueError("AD-CISPO ad_cispo_max_multiplier must be >= ad_cispo_min_multiplier")
+        if config.rl_config.ad_cispo_eps <= 0:
+            raise ValueError("AD-CISPO ad_cispo_eps must be positive")
     
     # get the run name
     run_name = config.wandb_config.name.replace("-", "_")
@@ -146,6 +178,8 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
     )
     training_setup["rollout_data_loader"] = rollout_data_loader
 
+    needs_reference_model = config.rl_config.kl_weight > 0 or config.rl_config.use_ad_cispo
+
     if config.rl_config.kl_weight > 0:
         # kl controller
         print(f"#### Loading KL controller ####")
@@ -161,7 +195,11 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
             )
         else:
             raise ValueError(f"Invalid KL controller: {config.rl_config.kl_controller}")
-        
+    else:
+        kl_controller = None
+        training_setup["kl_controller"] = None
+
+    if needs_reference_model:
         # reference model
         print(f"#### Loading reference model ####")
         reference_model, _ = load_model_tokenizer(
@@ -176,8 +214,7 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
         training_setup["kl_controller"] = kl_controller
         training_setup["reference_model"] = reference_model
     else:
-        reference_model, kl_controller = None, None
-        training_setup["kl_controller"] = None
+        reference_model = None
         training_setup["reference_model"] = None
 
     ## Objective
@@ -226,6 +263,7 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
         base_config=config.base_config,
         sampling_config=FixedSamplingConfig(
             system_prompt=config.sampling_config.system_prompt,
+            model_prompt_length=config.sampling_config.model_prompt_length,
         ),
         reward_config=config.reward_config,
     )

@@ -56,20 +56,39 @@ def compute_rewards(
         group_idx = begin_idx // group_size
         group_oracle_answers = [oracle_answers[group_idx]] * group_size
         
-        group_rewards, group_infos, solved = reward_model(
+        group_rewards, group_infos, _ = reward_model(
             group_completions,
             group_oracle_answers,
         )
+        group_solved_masks = [
+            1 if info["outcome"] is None and info["format_"] is None else 0
+            for info in group_infos
+        ]
 
         returns.append(group_rewards)
         infos.extend(group_infos)
-        solved_masks.append(solved)
+        solved_masks.append(group_solved_masks)
     
     return {
         "returns": torch.tensor(returns, dtype=torch.bfloat16, device=model.device), # (num_questions, group_size)
         "solved_masks": torch.tensor(solved_masks, dtype=torch.bfloat16, device=model.device), # (num_questions, group_size)
         "infos": infos, # single list (len = num_questions * group_size)
     }
+
+
+def decode_action_tokens(
+    tokenizer: PreTrainedTokenizer,
+    sequence_ids: torch.Tensor,
+    action_mask: torch.Tensor,
+) -> List[str]:
+    """
+    Decode exactly the tokens whose log probabilities are selected by action_mask.
+    action_mask is aligned with sequence_ids[:, 1:], matching the training loss.
+    """
+    return [
+        tokenizer.decode(seq_ids[1:][mask.bool()], skip_special_tokens=True)
+        for seq_ids, mask in zip(sequence_ids, action_mask)
+    ]
 
 @torch.compile(dynamic=True)
 def compute_learnability(solved_masks: torch.Tensor) -> torch.Tensor:
@@ -121,10 +140,7 @@ def sample_responses_hf(
         "input_ids": batch_inputs["input_ids"],
         "sequence_ids": sequence_ids,
         "action_mask": action_mask,
-        "completions": tokenizer.batch_decode(
-            sequence_ids[:, batch_inputs["input_ids"].shape[1] :], 
-            skip_special_tokens=True
-        ),
+        "completions": decode_action_tokens(tokenizer, sequence_ids, action_mask),
     }
 
 @torch.no_grad()
@@ -220,7 +236,7 @@ def compute_group_advantages(
     centered_returns = returns - returns.mean(dim=1, keepdim=True)
 
     if normalize:
-        centered_returns = centered_returns / (centered_returns.std(dim=1, keepdim=True) + eps)
+        centered_returns = centered_returns / (centered_returns.std(dim=1, keepdim=True, unbiased=False) + eps)
 
     if use_rloo_scalar:
         # unbiased scalar G / (G-1)
