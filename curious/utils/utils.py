@@ -6,7 +6,7 @@ from transformers import (
     AutoModelForCausalLM,
 )
 import datasets
-from typing import List, Dict, Optional, Union, Any, Tuple
+from typing import Callable, List, Dict, Optional, Union, Any, Tuple
 import torch
 
 from curious.prompt import * 
@@ -35,6 +35,99 @@ Info:
 
 """
 ).strip()
+
+COMPLETION_SAMPLE_COLUMNS = [
+    "phase",
+    "batch_idx",
+    "sample_idx",
+    "question",
+    "answer",
+    "completion",
+    "reward",
+    "info",
+]
+
+
+def _to_loggable_scalar(value: Any) -> Any:
+    if hasattr(value, "detach"):
+        value = value.detach().cpu()
+    if hasattr(value, "item"):
+        return value.item()
+    return value
+
+
+def build_completion_sample_rows(
+    *,
+    phase: str,
+    batch_idx: int,
+    questions: List[Any],
+    answers: List[Any],
+    completions: List[str],
+    rewards: List[Any],
+    infos: List[Any],
+    max_samples: int,
+    sample_offset: int = 0,
+) -> List[Dict[str, Any]]:
+    if max_samples <= 0:
+        return []
+
+    rows: List[Dict[str, Any]] = []
+    for local_idx, (question, answer, completion, reward, info) in enumerate(
+        zip(questions, answers, completions, rewards, infos)
+    ):
+        if len(rows) >= max_samples:
+            break
+        rows.append(
+            {
+                "phase": phase,
+                "batch_idx": batch_idx,
+                "sample_idx": sample_offset + local_idx,
+                "question": str(question),
+                "answer": str(answer),
+                "completion": completion,
+                "reward": _to_loggable_scalar(reward),
+                "info": str(info),
+            }
+        )
+    return rows
+
+
+def format_completion_sample_rows(rows: List[Dict[str, Any]]) -> str:
+    return "\n".join(
+        LOGGING_TEMPLATE.format(
+            question=row["question"],
+            answer=row["answer"],
+            completion=row["completion"],
+            reward=row["reward"],
+            info=row["info"],
+        )
+        for row in rows
+    )
+
+
+def log_completion_sample_table(
+    *,
+    logger: Callable[[Dict[str, Any]], None],
+    key: str,
+    rows: List[Dict[str, Any]],
+) -> None:
+    if not rows:
+        return
+
+    data = [[row[column] for column in COMPLETION_SAMPLE_COLUMNS] for row in rows]
+    try:
+        import wandb
+
+        value: Any = wandb.Table(columns=COMPLETION_SAMPLE_COLUMNS, data=data)
+    except Exception:
+        value = data
+
+    logger(
+        {
+            key: value,
+            "num_batches_visited": rows[0]["batch_idx"],
+        }
+    )
 
 
 def release_memory(vars:List[Any]):
@@ -185,19 +278,29 @@ def load_model_tokenizer(
         tuple: A tuple containing the model and its tokenizer.
     """
     tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+    resolved_model_path = model_name_or_path if checkpoint_path is None else checkpoint_path
 
     if torch.cuda.is_available():
         from liger_kernel.transformers import AutoLigerKernelForCausalLM
-        model: PreTrainedModel = AutoLigerKernelForCausalLM.from_pretrained(
-            model_name_or_path if checkpoint_path is None else checkpoint_path,
-            trust_remote_code=trust_remote_code,
-            attn_implementation="flash_attention_2",
-            torch_dtype=dtype_,
-            device_map=device_map,
-        )
+        try:
+            model: PreTrainedModel = AutoLigerKernelForCausalLM.from_pretrained(
+                resolved_model_path,
+                trust_remote_code=trust_remote_code,
+                attn_implementation="flash_attention_2",
+                torch_dtype=dtype_,
+                device_map=device_map,
+            )
+        except KeyError as exc:
+            print(f"Liger does not support this model type ({exc}); falling back to AutoModelForCausalLM.")
+            model = AutoModelForCausalLM.from_pretrained(
+                resolved_model_path,
+                trust_remote_code=trust_remote_code,
+                torch_dtype=dtype_,
+                device_map=device_map,
+            )
     else:
         model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-            model_name_or_path if checkpoint_path is None else checkpoint_path,
+            resolved_model_path,
             trust_remote_code=trust_remote_code,
             torch_dtype=dtype_,
         )

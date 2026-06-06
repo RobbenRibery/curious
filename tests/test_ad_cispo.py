@@ -168,6 +168,33 @@ def test_actor_loss_returns_raw_mean_kl_not_weighted_kl_loss():
     assert torch.allclose(mean_kl, expected_kl, atol=1e-6)
 
 
+def test_actor_loss_backprops_weighted_kl_when_advantage_is_zero():
+    log_probs = torch.tensor([[-0.9, -0.4]], requires_grad=True)
+    log_probs_ref = torch.tensor([[-0.7, -0.5]])
+    experience = Experience(
+        sequences=torch.arange(3).reshape(1, 3),
+        attention_mask=torch.ones(1, 3, dtype=torch.bool),
+        action_mask=torch.ones(1, 2, dtype=torch.bool),
+        returns=torch.tensor([0.0]),
+        solved_mask=torch.tensor([0.0]),
+        advantages=torch.tensor([0.0]),
+        action_log_probs=log_probs.detach(),
+        log_probs_ref=log_probs_ref,
+    )
+    loss_fn = ActorLoss(kl_weight=0.25)
+
+    loss, mean_kl, mean_actor_loss = loss_fn(log_probs=log_probs, experience=experience)
+    expected_weighted_kl = 0.25 * mean_kl
+
+    assert torch.allclose(mean_actor_loss, torch.zeros_like(mean_actor_loss), atol=1e-6)
+    assert torch.allclose(loss, expected_weighted_kl, atol=1e-6)
+
+    loss.backward()
+
+    assert log_probs.grad is not None
+    assert torch.count_nonzero(log_probs.grad).item() > 0
+
+
 def test_group_advantages_use_population_std_for_grpo_normalization():
     returns = torch.tensor([[1.0, 2.0, 3.0]])
 

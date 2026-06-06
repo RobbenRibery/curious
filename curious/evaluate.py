@@ -9,7 +9,12 @@ from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizer, PreTrainedModel
 
 from curious.data import GSM8KDataset
-from curious.utils.utils import LOGGING_TEMPLATE, load_model_tokenizer
+from curious.utils.utils import (
+    build_completion_sample_rows,
+    format_completion_sample_rows,
+    load_model_tokenizer,
+    log_completion_sample_table,
+)
 from curious.sampling import compute_rewards
 from curious.reward.rule.gsm8k import GSM8KRewardModel
 from curious.prompt import *
@@ -141,7 +146,12 @@ def evaluate(
     infos: List[Dict[str, str]] = []
     solved_masks: List[int] = []
     num_words_in_completions: List[int] = []
-    for _, batch_inputs in enumerate(dataloader):
+    completion_sample_rows: List[Dict[str, Any]] = []
+    should_log_completion_samples = (
+        config.base_config.eval_text_log_interval > 0
+        and batch_idx % config.base_config.eval_text_log_interval == 0
+    )
+    for eval_batch_idx, batch_inputs in enumerate(dataloader):
         
         # Get the questions and answers
         questions = batch_inputs["question"]
@@ -180,6 +190,7 @@ def evaluate(
         batch_mean_outcome_returns: float = np.array([x["outcome_reward"] for x in batch_infos]).mean()
         batch_mean_length_penalty: float = np.array([x["length_penalty"] for x in batch_infos]).mean()
 
+        sample_offset = len(rewards)
         rewards.extend(batch_rewards.reshape(-1).tolist())
         infos.extend(batch_infos)
         solved_masks.extend(batch_solved_masks.reshape(-1).tolist())
@@ -196,33 +207,28 @@ def evaluate(
                 "eval/batch_mean_num_words_in_completions": np.array(batch_num_words_in_completions).mean(),
                 "eval/batch_max_num_words_in_completions": np.array(batch_num_words_in_completions).max(),
                 "eval/batch_min_num_words_in_completions": np.array(batch_num_words_in_completions).min(),
+                "eval/batch_idx": eval_batch_idx,
+                "num_batches_visited": batch_idx,
             }
         )
 
-        ## Save the text on disk if the batch index is a multiple of the eval text log interval
-        if config.base_config.eval_text_log_interval > 0:
-            if batch_idx % config.base_config.eval_text_log_interval == 0:
-                # Log the text to logger
-                text_to_log = ""
-                for question, answer, completion, reward, info in zip(
-                    questions,
-                    oracle_answers,
-                    completions,
-                    batch_rewards.reshape(-1),
-                    batch_infos,
-                ):
-                    text_to_log += LOGGING_TEMPLATE.format(
-                        question=question,
-                        answer=answer,
-                        completion=completion,
-                        reward=reward,
-                        info=info,
-                    )
-
-                file_name = f"log_{batch_idx}.txt"
-                with open(os.path.join(out_dir, file_name), "a") as f:
-                    f.write(text_to_log)
-                f.close()
+        if should_log_completion_samples:
+            remaining_samples = (
+                config.base_config.completion_log_sample_size - len(completion_sample_rows)
+            )
+            completion_sample_rows.extend(
+                build_completion_sample_rows(
+                    phase="eval",
+                    batch_idx=batch_idx,
+                    questions=questions,
+                    answers=oracle_answers,
+                    completions=completions,
+                    rewards=batch_rewards.reshape(-1).tolist(),
+                    infos=batch_infos,
+                    max_samples=remaining_samples,
+                    sample_offset=sample_offset,
+                )
+            )
         # --------------------- Logging End ---------------------
         
         # free up memory
@@ -237,6 +243,16 @@ def evaluate(
         gc.collect()
         torch.cuda.empty_cache()
 
+    if should_log_completion_samples:
+        file_name = f"log_{batch_idx}.txt"
+        with open(os.path.join(out_dir, file_name), "a") as f:
+            f.write(format_completion_sample_rows(completion_sample_rows))
+        log_completion_sample_table(
+            logger=logger,
+            key="eval/completion_samples",
+            rows=completion_sample_rows,
+        )
+
     # Log the mean rewards and the mean solved rate
     mean_pass1 = np.array(solved_masks).mean()
     mean_rewards = np.array(rewards).mean()
@@ -246,6 +262,7 @@ def evaluate(
             "eval/mean_rewards": mean_rewards,
             "eval/mean_solved_rate": mean_pass1,
             "eval/mean_num_words_in_completions": mean_num_words_in_completions,
+            "num_batches_visited": batch_idx,
         }
     )
     print(f"Batch {batch_idx} #### Mean Eval pass@1: {mean_pass1}")
@@ -268,11 +285,15 @@ if __name__ == "__main__":
 
     # Initialize the wandb
     wandb.init(
+        entity=config.wandb_config.entity,
         project=config.wandb_config.project,
         name=config.wandb_config.name,
+        group=config.wandb_config.group,
         config=config,
     )
     logger = wandb.log
+    wandb.define_metric("num_batches_visited")
+    wandb.define_metric("eval/*", step_metric="num_batches_visited")
 
     # Load the model
     model, tokenizer = load_model_tokenizer(

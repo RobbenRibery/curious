@@ -1,4 +1,4 @@
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Protocol
 import gc
 
 import torch
@@ -11,6 +11,17 @@ from accelerate.utils import set_seed
 
 from curious.reward.rule.gsm8k import GSM8KRewardModel
 from curious.utils.utils import release_memory, move_paddings_to_right
+
+
+class RolloutGenerationBackend(Protocol):
+    def sample_responses(
+        self,
+        batch_inputs: Dict[str, torch.Tensor],
+        generation_config: GenerationConfig,
+        seed: int = 42,
+    ) -> Dict[str, torch.Tensor]:
+        ...
+
 
 def linear_temperature_annealing(current_step: int, total_steps: int, start_temp: float, end_temp: float) -> float:
     """
@@ -154,6 +165,7 @@ def rollout(
     seed: int = 42,
     normalize_centered_returns: bool = False,
     use_rloo_scalar: bool = False,
+    generation_backend: RolloutGenerationBackend | None = None,
 ) -> Dict[str, torch.Tensor]:
     """
     Performs a rollout of the model.
@@ -174,14 +186,23 @@ def rollout(
     # get the batch size
     oracle_answers = batch_inputs["oracle_answer"]
     
-    # get the sequence ids from huggingface
-    sampled_responses = sample_responses_hf(
-        model,
-        tokenizer,
-        batch_inputs,
-        generation_config,
-        seed=seed,
-    )
+    if generation_backend is None:
+        sampled_responses = sample_responses_hf(
+            model,
+            tokenizer,
+            batch_inputs,
+            generation_config,
+            seed=seed,
+        )
+    else:
+        sampled_responses = generation_backend.sample_responses(
+            batch_inputs=batch_inputs,
+            generation_config=generation_config,
+            seed=seed,
+        )
+
+    sampled_responses["sequence_ids"] = sampled_responses["sequence_ids"].to(model.device)
+    sampled_responses["action_mask"] = sampled_responses["action_mask"].to(model.device)
     
     # get the rewards
     rewards_out = compute_rewards(
@@ -216,7 +237,6 @@ def rollout(
 
     return rewards_out
 
-@torch.compile(dynamic=True)
 def compute_group_advantages(
     returns: torch.Tensor, 
     eps: float = 1e-8, 
@@ -244,7 +264,6 @@ def compute_group_advantages(
 
     return centered_returns    
 
-@torch.compile(dynamic=True)
 def _sequence_log_probs_from_logits(
     logits: torch.Tensor, 
     output_ids: torch.Tensor,
@@ -278,7 +297,6 @@ def _sequence_log_probs_from_logits(
     else:
         return log_probs, None
 
-@torch.compile(dynamic=True)
 def sequences_log_probs(
     model: PreTrainedModel,
     sequence_ids: torch.Tensor,

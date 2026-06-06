@@ -1,7 +1,13 @@
 from typing import Dict, List, Any, Tuple
 
 from pathlib import Path
-from curious.utils.utils import release_memory, LOGGING_TEMPLATE
+from curious.evaluate import evaluate
+from curious.utils.utils import (
+    build_completion_sample_rows,
+    format_completion_sample_rows,
+    log_completion_sample_table,
+    release_memory,
+)
 from curious.replay.experience import Experience, ReplayBuffer, join_experience_batch
 from curious.train.training_setup import TrainingSetup, TrainState
 from curious.sampling.sampling import rollout, sequences_log_probs
@@ -39,11 +45,30 @@ class PolicyGradientTrainer:
         self.logger = lambda x: print(x)
 
     def train(self, train_state: TrainState) -> Tuple[TrainState, ReplayBuffer]:
+        evaluate(
+            config=self.training_setup["eval_config"],
+            model=train_state["model"],
+            tokenizer=self.tokenizer,
+            logger=self.logger,
+            batch_idx=0,
+        )
+
         for epoch_idx in range(self.num_epochs):
             print(f"Epoch {epoch_idx} of {self.num_epochs}")
             for batch_idx, batch_inputs in enumerate(self.rollout_data_loader):
                 replay_buffer = self.collect_trajectories(train_state, batch_inputs, batch_idx)
-                train_state = self.update_policy(train_state, replay_buffer, batch_idx + 1)
+                completed_batches = batch_idx + 1
+                train_state = self.update_policy(train_state, replay_buffer, completed_batches)
+
+                eval_interval = self.base_config.eval_interval
+                if eval_interval > 0 and completed_batches % eval_interval == 0:
+                    evaluate(
+                        config=self.training_setup["eval_config"],
+                        model=train_state["model"],
+                        tokenizer=self.tokenizer,
+                        logger=self.logger,
+                        batch_idx=completed_batches,
+                    )
         
         return train_state, replay_buffer
     
@@ -72,6 +97,7 @@ class PolicyGradientTrainer:
             seed=train_state["seed"],
             normalize_centered_returns=self.training_setup["rl_config"].normalize_centered_returns,
             use_rloo_scalar=self.training_setup["rl_config"].use_rloo_scalar,
+            generation_backend=self.training_setup.get("generation_backend"),
         )
     
         returns: torch.Tensor = rollout_out["returns"].reshape(-1)
@@ -90,17 +116,21 @@ class PolicyGradientTrainer:
         completions:List[str] = rollout_out["completions"]
         stats["completions"] = completions
         
+        entropy_interval = self.base_config.train_entropy_log_interval
+        should_log_entropy = entropy_interval > 0 and batch_indx % entropy_interval == 0
+
         # (num_samples * group_size, seq_len-1)
         log_probs, entropy = sequences_log_probs(
             model=model,
             sequence_ids=sequence_ids,
             attention_mask=attention_mask,
-            return_entropy=True,
+            return_entropy=should_log_entropy,
             logits_minibatch_size=self.training_setup["rl_config"].logits_minibatch_size,
         ) 
 
-        mean_action_entropy = masked_mean(entropy, action_mask, dim=None)
-        stats["mean_action_entropy"] = mean_action_entropy
+        if should_log_entropy and entropy is not None:
+            mean_action_entropy = masked_mean(entropy, action_mask, dim=None)
+            stats["mean_action_entropy"] = mean_action_entropy
 
         kl, log_probs_ref, token_clip_high = None, None, None
         if self.training_setup["rl_config"].use_ad_cispo:
@@ -165,6 +195,7 @@ class PolicyGradientTrainer:
                 log_probs_ref,
                 token_clip_high,
                 log_probs,
+                entropy,
                 attention_mask,
                 sequence_ids,
                 action_mask,
@@ -187,9 +218,15 @@ class PolicyGradientTrainer:
             shuffle= False,
             drop_last=False,
             collate_fn=join_experience_batch,
-            num_workers=self.base_config.num_workers,
+            num_workers=0,
         )
 
+        model.train()
+        model.gradient_checkpointing_enable()
+        if hasattr(model, "config"):
+            model.config.use_cache = False
+
+        did_update = False
         for _ in range(self.rl_config.epochs_per_step):
             for experience in experience_sampler:
                 experience: Experience
@@ -203,6 +240,7 @@ class PolicyGradientTrainer:
                     return_entropy=False,
                     logits_minibatch_size=self.rl_config.logits_minibatch_size,
                 )
+                kl_weight_used = self.actor_loss.kl_weight if self.rl_config.kl_weight > 0 else 0.0
                 loss, mean_kl, mean_actor_loss = self.actor_loss(
                     log_probs=log_probs, 
                     experience=experience
@@ -219,21 +257,28 @@ class PolicyGradientTrainer:
                     max_norm=self.rl_config.max_grad_norm,
                 )
                 optimizer.step()
+                did_update = True
 
                 mean_loss = loss.detach().cpu().item()
                 mean_kl = mean_kl.detach().cpu().item()
                 mean_actor_loss = mean_actor_loss.detach().cpu().item()
+                mean_kl_loss = mean_loss - mean_actor_loss
 
+                kl_weight_next = kl_weight_used
                 if self.rl_config.kl_weight > 0:
                     kl_controller.update(mean_kl, self.rl_config.mini_batch_size)
                     self.actor_loss.kl_weight = kl_controller.value
+                    kl_weight_next = kl_controller.value
 
                 self.logger(
                     {
                         "train/loss": mean_loss,
                         "train/mean_kl": mean_kl,
                         "train/actor_loss": mean_actor_loss,
-                        "train/kl_weight": kl_controller.value if self.rl_config.kl_weight > 0 else 0.0,
+                        "train/kl_loss": mean_kl_loss,
+                        "train/kl_weight": kl_weight_used,
+                        "train/kl_weight_used": kl_weight_used,
+                        "train/kl_weight_next": kl_weight_next,
                         "train/grad_norm": grad_norm,
                         "num_batches_visited": batch_idx,
                     }
@@ -246,6 +291,7 @@ class PolicyGradientTrainer:
                         loss,
                         mean_kl,
                         mean_actor_loss,
+                        mean_kl_loss,
                     ]
                 )
 
@@ -259,6 +305,11 @@ class PolicyGradientTrainer:
         ):
             train_state["reference_model"].load_state_dict(model.state_dict())
             train_state["reference_model"].eval()
+
+        generation_backend = self.training_setup.get("generation_backend")
+        sync_interval = self.training_setup["sampling_config"].sglang_weight_sync_interval
+        if did_update and generation_backend is not None and batch_idx % sync_interval == 0:
+            generation_backend.sync_weights_from_model(model, self.tokenizer, batch_idx)
 
         train_state["model"] = model
         train_state["optimizer"] = optimizer
@@ -287,36 +338,37 @@ class PolicyGradientTrainer:
 
         num_words_in_completions: torch.Tensor = rollout_stats["num_words_in_completions"]
 
-        self.logger(
-            {
-                "train/mean_batch_returns": returns.mean().item(),
-                "train/max_batch_returns": returns.max().item(),
-                "train/min_batch_returns": returns.min().item(),
-                
-                "train/mean_batch_solved_rate": batch_mean_solved_rate,
+        log_payload = {
+            "train/mean_batch_returns": returns.mean().item(),
+            "train/max_batch_returns": returns.max().item(),
+            "train/min_batch_returns": returns.min().item(),
 
-                "train/mean_batch_format_returns": format_returns.mean().item(),
-                "train/max_batch_format_returns": format_returns.max().item(),
-                "train/min_batch_format_returns": format_returns.min().item(),
+            "train/mean_batch_solved_rate": batch_mean_solved_rate,
 
-                "train/mean_batch_outcome_returns": outcome_returns.mean().item(),
-                "train/max_batch_outcome_returns": outcome_returns.max().item(),
-                "train/min_batch_outcome_returns": outcome_returns.min().item(),
+            "train/mean_batch_format_returns": format_returns.mean().item(),
+            "train/max_batch_format_returns": format_returns.max().item(),
+            "train/min_batch_format_returns": format_returns.min().item(),
 
-                "train/mean_batch_length_penalty": length_penalty.mean().item(),
-                "train/max_batch_length_penalty": length_penalty.max().item(),
-                "train/min_batch_length_penalty": length_penalty.min().item(),
+            "train/mean_batch_outcome_returns": outcome_returns.mean().item(),
+            "train/max_batch_outcome_returns": outcome_returns.max().item(),
+            "train/min_batch_outcome_returns": outcome_returns.min().item(),
 
-                "train/mean_num_words_in_completions": num_words_in_completions.mean().item(),
-                "train/max_num_words_in_completions": num_words_in_completions.max().item(),
-                "train/min_num_words_in_completions": num_words_in_completions.min().item(),
-                
-                "train/lr": rollout_stats["rl_scheduler"].get_lr()[0],
-                "train/mean_action_entropy": rollout_stats["mean_action_entropy"].item(),
-                
-                "num_batches_visited": batch_idx,
-            }
-        )
+            "train/mean_batch_length_penalty": length_penalty.mean().item(),
+            "train/max_batch_length_penalty": length_penalty.max().item(),
+            "train/min_batch_length_penalty": length_penalty.min().item(),
+
+            "train/mean_num_words_in_completions": num_words_in_completions.mean().item(),
+            "train/max_num_words_in_completions": num_words_in_completions.max().item(),
+            "train/min_num_words_in_completions": num_words_in_completions.min().item(),
+
+            "train/lr": rollout_stats["rl_scheduler"].get_lr()[0],
+            "num_batches_visited": batch_idx,
+        }
+        mean_action_entropy = rollout_stats.get("mean_action_entropy")
+        if mean_action_entropy is not None:
+            log_payload["train/mean_action_entropy"] = mean_action_entropy.item()
+
+        self.logger(log_payload)
         ad_cispo_stats: ADCispoStats | None = rollout_stats.get("ad_cispo_stats")
         if ad_cispo_stats is not None:
             self.logger(
@@ -330,23 +382,32 @@ class PolicyGradientTrainer:
                 }
             )
 
-        if self.training_setup["base_config"].train_text_log_interval > 0:
-            if batch_idx % self.training_setup["base_config"].train_text_log_interval == 0:
-                file_name = Path(self.training_setup["train_log_dir"]) / f"log_{batch_idx}.txt"
-                with open(file_name, "a") as f:
-                    for i, completion in enumerate(rollout_stats["completions"]):
-                        question = rollout_stats["question"][i//self.generation_config.num_return_sequences]
-                        answer = rollout_stats["answer"][i//self.generation_config.num_return_sequences]
-                        reward = rollout_stats["returns"][i]
-                        info = info_list[i]     
-
-                        text_to_log = LOGGING_TEMPLATE.format(
-                            question=question,
-                            answer=answer,
-                            completion=completion,
-                            reward=reward,
-                            info=info,
-                        )
-                        f.write(text_to_log)
-                f.close()
+        text_log_interval = self.training_setup["base_config"].train_text_log_interval
+        if text_log_interval > 0 and batch_idx % text_log_interval == 0:
+            repeated_questions = [
+                rollout_stats["question"][i // self.generation_config.num_return_sequences]
+                for i in range(len(rollout_stats["completions"]))
+            ]
+            repeated_answers = [
+                rollout_stats["answer"][i // self.generation_config.num_return_sequences]
+                for i in range(len(rollout_stats["completions"]))
+            ]
+            sample_rows = build_completion_sample_rows(
+                phase="train",
+                batch_idx=batch_idx,
+                questions=repeated_questions,
+                answers=repeated_answers,
+                completions=rollout_stats["completions"],
+                rewards=rollout_stats["returns"].reshape(-1).tolist(),
+                infos=info_list,
+                max_samples=self.training_setup["base_config"].completion_log_sample_size,
+            )
+            file_name = Path(self.training_setup["train_log_dir"]) / f"log_{batch_idx}.txt"
+            with open(file_name, "a") as f:
+                f.write(format_completion_sample_rows(sample_rows))
+            log_completion_sample_table(
+                logger=self.logger,
+                key="train/completion_samples",
+                rows=sample_rows,
+            )
     

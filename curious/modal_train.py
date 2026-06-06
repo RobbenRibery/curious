@@ -30,12 +30,8 @@ training_image = (
     .apt_install(
         "build-essential",
         "git",
-        "libopenmpi-dev",
-        "openmpi-bin",
     )
     .uv_sync(uv_version="0.6.12")
-    .add_local_python_source("curious")
-    .add_local_file("deepspeed_config.json", "/root/deepspeed_config.json")
     .workdir("/root")
     .env(
         {
@@ -47,6 +43,7 @@ training_image = (
             "WANDB_CACHE_DIR": f"{ARTIFACTS_DIR}/wandb_cache",
         }
     )
+    .add_local_python_source("curious")
 )
 
 
@@ -68,10 +65,32 @@ def _with_default_artifact_paths(args: list[str]) -> list[str]:
     return resolved_args
 
 
+def _dotenv_values(dotenv_path: str) -> dict[str, str]:
+    path = Path(dotenv_path)
+    if not path.exists():
+        return {}
+
+    values: dict[str, str] = {}
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if value and value[0] in {"'", '"'} and value[-1:] == value[0]:
+            value = value[1:-1]
+        if key:
+            values[key] = value
+    return values
+
+
 def _local_secrets(dotenv_path: str | None, include_env_secret: bool, secret_names: list[str]) -> list[modal.Secret]:
     secrets: list[modal.Secret] = []
     if dotenv_path is not None:
-        secrets.append(modal.Secret.from_dotenv(dotenv_path))
+        dotenv_secret = _dotenv_values(dotenv_path)
+        if dotenv_secret:
+            secrets.append(modal.Secret.from_dict(dotenv_secret))
 
     if include_env_secret:
         env_secret = {

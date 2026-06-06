@@ -194,15 +194,22 @@ def train(
             action_mask: torch.Tensor = rollout_out["action_mask"]
             completions:List[str] = rollout_out["completions"]
         
+            entropy_interval = args.base_config.train_entropy_log_interval
+            should_log_entropy = entropy_interval > 0 and batch_idx % entropy_interval == 0
+
             attention_mask: torch.Tensor = sequence_ids != pad_token_id # (num_samples * group_size, seq_len)
             log_probs, entropy = sequences_log_probs(
                 model=model,
                 sequence_ids=sequence_ids,
                 attention_mask=attention_mask,
-                return_entropy=True,
+                return_entropy=should_log_entropy,
                 logits_minibatch_size=args.rl_config.logits_minibatch_size,
             ) # (num_samples * group_size, seq_len-1)
-            action_entropy = masked_mean(entropy, action_mask, dim=None)
+            action_entropy = (
+                masked_mean(entropy, action_mask, dim=None)
+                if should_log_entropy and entropy is not None
+                else None
+            )
 
             kl, log_probs_ref, token_clip_high = None, None, None
             ad_cispo_stats: ADCispoStats | None = None
@@ -262,6 +269,7 @@ def train(
             log_probs_ref,
             token_clip_high,
             log_probs,
+            entropy,
             attention_mask,
             sequence_ids,
             action_mask,
@@ -273,25 +281,25 @@ def train(
 
         ### ----- Logging phase START ----- ###
         # log the stats to wandb 
-        logger(
-            {
-                "train/mean_batch_returns": batch_mean_returns,
-                "train/mean_batch_solved_rate": batch_mean_solved_rate,
+        log_payload = {
+            "train/mean_batch_returns": batch_mean_returns,
+            "train/mean_batch_solved_rate": batch_mean_solved_rate,
 
-                "train/mean_num_words_in_completions": batch_mean_num_words_in_completions,
-                "train/max_num_words_in_completions": batch_max_num_words_in_completions,
-                "train/min_num_words_in_completions": batch_min_num_words_in_completions,
+            "train/mean_num_words_in_completions": batch_mean_num_words_in_completions,
+            "train/max_num_words_in_completions": batch_max_num_words_in_completions,
+            "train/min_num_words_in_completions": batch_min_num_words_in_completions,
 
-                "train/mean_batch_format_returns": batch_mean_format_returns,
-                "train/mean_batch_outcome_returns": batch_mean_outcome_returns,
-                "train/mean_batch_length_penalty": batch_mean_length_penalty,
-                
-                "train/lr": lr_scheduler.get_lr()[0],
-                "train/mean_action_entropy": action_entropy.item(),
-                
-                "num_batches_visited": batch_idx,
-            }
-        )
+            "train/mean_batch_format_returns": batch_mean_format_returns,
+            "train/mean_batch_outcome_returns": batch_mean_outcome_returns,
+            "train/mean_batch_length_penalty": batch_mean_length_penalty,
+
+            "train/lr": lr_scheduler.get_lr()[0],
+            "num_batches_visited": batch_idx,
+        }
+        if action_entropy is not None:
+            log_payload["train/mean_action_entropy"] = action_entropy.item()
+
+        logger(log_payload)
         if ad_cispo_stats is not None:
             logger(
                 {
@@ -352,7 +360,7 @@ def train(
             shuffle=True, #if args.rl_config.use_token_level_loss else False,
             drop_last=False,
             collate_fn=join_experience_batch,
-            num_workers=args.base_config.num_workers,
+            num_workers=0,
         )
 
         model.train()
@@ -370,6 +378,7 @@ def train(
                     return_entropy=False,
                     logits_minibatch_size=args.rl_config.logits_minibatch_size,
                 )
+                kl_weight_used = objective.kl_weight if args.rl_config.kl_weight > 0 else 0.0
                 loss, mean_kl, mean_actor_loss = objective(log_probs=log_probs, experience=exp)
                 
                 del log_probs
@@ -391,18 +400,24 @@ def train(
                 mean_loss = loss.detach().cpu().item()
                 mean_kl = mean_kl.cpu().item()
                 mean_actor_loss = mean_actor_loss.cpu().item()
+                mean_kl_loss = mean_loss - mean_actor_loss
                 
+                kl_weight_next = kl_weight_used
                 if args.rl_config.kl_weight > 0:
                     kl_controller.update(mean_kl, args.rl_config.mini_batch_size)
                     objective.kl_weight = kl_controller.value
+                    kl_weight_next = kl_controller.value
                 
                 logger(
                     {
                         "train/grad_norm": grad_norm,
                         "train/loss": mean_loss,
                         "train/actor_loss": mean_actor_loss,
+                        "train/kl_loss": mean_kl_loss,
                         "train/mean_kl": mean_kl, 
-                        "train/kl_weight": kl_controller.value if args.rl_config.kl_weight > 0 else 0.0,
+                        "train/kl_weight": kl_weight_used,
+                        "train/kl_weight_used": kl_weight_used,
+                        "train/kl_weight_next": kl_weight_next,
                     }
                 )
 
@@ -412,6 +427,9 @@ def train(
                     mean_loss,
                     mean_kl,
                     mean_actor_loss,
+                    mean_kl_loss,
+                    kl_weight_used,
+                    kl_weight_next,
                 )
                 gc.collect()
                 torch.cuda.empty_cache()
@@ -526,6 +544,7 @@ if __name__ == "__main__":
         config=args,
     )
     wandb.define_metric("num_batches_visited")
+    wandb.define_metric("train/*", step_metric="num_batches_visited")
     wandb.define_metric("train/mean_batch_returns", step_metric="num_batches_visited")
     wandb.define_metric("train/mean_batch_solved_rate", step_metric="num_batches_visited")
     wandb.define_metric("train/max_input_length", step_metric="num_batches_visited")

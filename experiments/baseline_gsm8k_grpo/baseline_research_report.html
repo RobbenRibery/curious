@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Baseline GSM8K GRPO Research Report</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1f2933;
+      --muted: #5f6b7a;
+      --line: #d7dee8;
+      --panel: #f7f9fc;
+      --accent: #0f766e;
+      --warn: #9a3412;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: #ffffff;
+      line-height: 1.55;
+    }
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 42px 28px 64px;
+    }
+    h1, h2, h3 {
+      line-height: 1.2;
+      margin: 0 0 12px;
+    }
+    h1 {
+      font-size: 34px;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin-top: 34px;
+      font-size: 22px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 8px;
+    }
+    h3 {
+      margin-top: 22px;
+      font-size: 17px;
+    }
+    p {
+      margin: 8px 0 14px;
+    }
+    .meta {
+      color: var(--muted);
+      margin-top: 8px;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 12px;
+      margin: 24px 0;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .metric strong {
+      display: block;
+      font-size: 22px;
+      margin-top: 4px;
+    }
+    .metric span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 14px 0 20px;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--panel);
+    }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.95em;
+    }
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: #eefaf8;
+      padding: 12px 16px;
+      margin: 18px 0;
+    }
+    .warning {
+      border-left-color: var(--warn);
+      background: #fff7ed;
+    }
+    ul {
+      padding-left: 22px;
+    }
+    a {
+      color: #075985;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Baseline GSM8K GRPO Research Report</h1>
+  <p class="meta">Generated 2026-06-02 after Modal H100 staging run <code>baseline-gsm8k-grpo-qwen3-0p6b-sglang-fa3-h100-seed42-v6</code>.</p>
+
+  <section class="summary">
+    <div class="metric"><span>Final observed W&amp;B counter</span><strong>55</strong></div>
+    <div class="metric"><span>Current batch solved rate</span><strong>0.484375</strong></div>
+    <div class="metric"><span>Current batch return</span><strong>0.078125</strong></div>
+    <div class="metric"><span>Grad norm</span><strong>2.03125</strong></div>
+  </section>
+
+  <h2>Executive Summary</h2>
+  <p>The baseline GRPO run against <code>Qwen/Qwen3-0.6B</code> on GSM8K was launched on Modal H100 in the <code>rundong-liu-eric</code> workspace and monitored through W&amp;B and Modal logs. The reliable run was <code>v6</code>, after removing Torch Dynamo/Inductor compilation from the log-probability path. It reached W&amp;B counter 55 and Modal log batch 55 before the H100 job was stopped to avoid an unbounded 24h run.</p>
+  <p>The final observed batch had a nonzero learning signal: solved rate <code>0.484375</code>, return <code>0.078125</code>, actor loss <code>0.00040435791015625</code>, and grad norm <code>2.03125</code>. KL is expected to be zero because the baseline launch sets <code>kl_weight=0.0</code>.</p>
+
+  <div class="callout warning">
+    <strong>Scope note:</strong> this is a staged baseline report, not a completed full-epoch GSM8K report. The active trainer path does not checkpoint or evaluate, and observed throughput projects a full epoch beyond the configured 24h Modal timeout.
+  </div>
+
+  <h2>Access and Environment</h2>
+  <table>
+    <tr><th>System</th><th>Observed access</th></tr>
+    <tr><td>W&amp;B</td><td>Project access confirmed for <code>autocurriculum/curious</code> as user <code>rundong-liu-eric</code>.</td></tr>
+    <tr><td>Modal</td><td>Profile and workspace confirmed as <code>rundong-liu-eric</code>, environment <code>main</code>.</td></tr>
+    <tr><td>Modal CLI</td><td><code>/Users/ericliu/.local/bin/modal</code>, version <code>1.4.3</code>.</td></tr>
+    <tr><td>GPU</td><td><code>NVIDIA H100 80GB HBM3</code>, confirmed by W&amp;B metadata and live Modal <code>nvidia-smi</code>.</td></tr>
+  </table>
+
+  <h2>Run Configuration</h2>
+  <table>
+    <tr><th>Field</th><th>Value</th></tr>
+    <tr><td>Model</td><td><code>Qwen/Qwen3-0.6B</code></td></tr>
+    <tr><td>Dataset</td><td><code>openai/gsm8k</code>, train split</td></tr>
+    <tr><td>GPU</td><td>Modal <code>H100</code></td></tr>
+    <tr><td>Generation backend</td><td><code>sglang</code></td></tr>
+    <tr><td>SGLang attention backend</td><td><code>fa3</code></td></tr>
+    <tr><td>Train batch size</td><td><code>4</code></td></tr>
+    <tr><td>GRPO group size</td><td><code>16</code></td></tr>
+    <tr><td>Mini-batch size</td><td><code>16</code></td></tr>
+    <tr><td>Max new tokens</td><td><code>384</code></td></tr>
+    <tr><td>Learning rate</td><td><code>5e-6</code></td></tr>
+    <tr><td>KL weight</td><td><code>0.0</code></td></tr>
+    <tr><td>AD-CISPO / RLOO</td><td>Disabled</td></tr>
+  </table>
+
+  <h2>Launch Timeline</h2>
+  <table>
+    <tr><th>Run</th><th>Outcome</th></tr>
+    <tr><td><code>v3</code></td><td>Reached H100 and initialized W&amp;B, but produced no metrics after local interruption.</td></tr>
+    <tr><td><code>v4</code></td><td>Background launch created app <code>ap-WSQbKvxABlz3oX78u7VfVz</code> and call <code>fc-01KT51ZN66S7YFZ46CHQYNGB5M</code>, then stopped before a W&amp;B run appeared.</td></tr>
+    <tr><td><code>v5</code></td><td>Attached launch created app <code>ap-ecf0fEY1S30jfdG0WaNyGF</code> and W&amp;B run <code>r4dw7413</code>, but stalled before first update while Torch Dynamo/Inductor compiled the log-probability path.</td></tr>
+    <tr><td><code>v6</code></td><td>Successful staged baseline after the eager log-prob fix. App <code>ap-hoZIYGe2xQpNTWwwe0L6ET</code>, call <code>fc-01KT530MNE5K1YQM6HGWBVP9EN</code>, W&amp;B run <code>npw100co</code>.</td></tr>
+  </table>
+
+  <h2>Final Observed Metrics</h2>
+  <table>
+    <tr><th>Metric</th><th>Value at W&amp;B counter 55</th></tr>
+    <tr><td><code>train/mean_batch_returns</code></td><td><code>0.078125</code></td></tr>
+    <tr><td><code>train/mean_batch_solved_rate</code></td><td><code>0.484375</code></td></tr>
+    <tr><td><code>train/mean_batch_outcome_returns</code></td><td><code>0.078125</code></td></tr>
+    <tr><td><code>train/mean_num_words_in_completions</code></td><td><code>230</code></td></tr>
+    <tr><td><code>train/mean_action_entropy</code></td><td><code>0.49609375</code></td></tr>
+    <tr><td><code>train/loss</code></td><td><code>0.00040435791015625</code></td></tr>
+    <tr><td><code>train/actor_loss</code></td><td><code>0.00040435791015625</code></td></tr>
+    <tr><td><code>train/mean_kl</code></td><td><code>0</code></td></tr>
+    <tr><td><code>train/grad_norm</code></td><td><code>2.03125</code></td></tr>
+    <tr><td><code>train/lr</code></td><td><code>5e-6</code></td></tr>
+  </table>
+
+  <h2>Operational Findings</h2>
+  <ul>
+    <li>The project <code>uv</code> environment has working W&amp;B access. The Homebrew <code>wandb</code> CLI is broken locally because it imports an older W&amp;B package against NumPy 2.x.</li>
+    <li>The launcher should be run attached for this workflow. The current <code>--background</code> path returned before the remote training call became observable.</li>
+    <li>Removing <code>@torch.compile(dynamic=True)</code> from <code>compute_group_advantages</code>, <code>_sequence_log_probs_from_logits</code>, and <code>sequences_log_probs</code> fixed the first-batch stall.</li>
+    <li>The active <code>PolicyGradientTrainer</code> path does not use the configured checkpoint or evaluation intervals, so long runs do not automatically produce checkpoints or eval tables.</li>
+    <li>The run repeatedly reloads a safetensors checkpoint after updates during SGLang weight sync. This is functional, but it contributes visible overhead.</li>
+  </ul>
+
+  <h2>Throughput and Feasibility</h2>
+  <p>The run started W&amp;B around 2026-06-02T21:15:33Z and was stopped after W&amp;B counter 55 around 2026-06-02T22:08:26Z. The rough sustained throughput is about one completed batch per minute after startup. GSM8K train has 7,473 examples, and with train batch size 4 the full train epoch is about 1,869 batches. At this observed rate, a full epoch projects to roughly 30 hours, longer than the configured 24h Modal timeout.</p>
+
+  <h2>Conclusion</h2>
+  <p>The baseline GRPO stack is launchable on Modal H100 and produces W&amp;B metrics after the eager log-prob fix. The final staged snapshot shows nonzero reward and gradient signal, so the run is no longer blocked at infrastructure or first-batch compilation. The next engineering step is to add an explicit max-batch/checkpoint/eval contract to the trainer or switch to the older RL train path that already handles checkpoint and evaluation intervals, then rerun a bounded baseline that can finish cleanly and produce comparable final artifacts.</p>
+
+  <h2>Artifacts</h2>
+  <ul>
+    <li>Staging report: <code>experiments/baseline_gsm8k_grpo/staging_report.md</code></li>
+    <li>Metric snapshot: <code>experiments/baseline_gsm8k_grpo/wandb_metrics_npw100co.json</code></li>
+    <li>W&amp;B run: <a href="https://wandb.ai/autocurriculum/curious/runs/npw100co">https://wandb.ai/autocurriculum/curious/runs/npw100co</a></li>
+    <li>Modal app: <a href="https://modal.com/apps/rundong-liu-eric/main/ap-hoZIYGe2xQpNTWwwe0L6ET">https://modal.com/apps/rundong-liu-eric/main/ap-hoZIYGe2xQpNTWwwe0L6ET</a></li>
+  </ul>
+</main>
+</body>
+</html>

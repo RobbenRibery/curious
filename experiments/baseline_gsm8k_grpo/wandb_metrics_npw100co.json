@@ -1,0 +1,16 @@
+{
+  "summary": {
+    "num_batches_visited": 55,
+    "train/mean_batch_returns": 0.078125,
+    "train/mean_batch_solved_rate": 0.484375,
+    "train/mean_batch_outcome_returns": 0.078125,
+    "train/mean_num_words_in_completions": 230,
+    "train/mean_action_entropy": 0.49609375,
+    "train/loss": 0.00040435791015625,
+    "train/actor_loss": 0.00040435791015625,
+    "train/mean_kl": 0,
+    "train/grad_norm": 2.03125,
+    "train/lr": 5e-06
+  },
+  "rows": []
+}
