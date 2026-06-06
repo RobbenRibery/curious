@@ -53,11 +53,22 @@ class PolicyGradientTrainer:
             batch_idx=0,
         )
 
+        completed_batches = 0
+        stop_training = False
         for epoch_idx in range(self.num_epochs):
             print(f"Epoch {epoch_idx} of {self.num_epochs}")
-            for batch_idx, batch_inputs in enumerate(self.rollout_data_loader):
-                replay_buffer = self.collect_trajectories(train_state, batch_inputs, batch_idx)
-                completed_batches = batch_idx + 1
+            for _, batch_inputs in enumerate(self.rollout_data_loader):
+                next_batch_idx = completed_batches + 1
+                if (
+                    self.base_config.max_train_batches > 0
+                    and next_batch_idx > self.base_config.max_train_batches
+                ):
+                    print(f"Reached max_train_batches={self.base_config.max_train_batches}; stopping training.")
+                    stop_training = True
+                    break
+
+                replay_buffer = self.collect_trajectories(train_state, batch_inputs, next_batch_idx)
+                completed_batches = next_batch_idx
                 train_state = self.update_policy(train_state, replay_buffer, completed_batches)
 
                 eval_interval = self.base_config.eval_interval
@@ -69,6 +80,8 @@ class PolicyGradientTrainer:
                         logger=self.logger,
                         batch_idx=completed_batches,
                     )
+            if stop_training:
+                break
         
         return train_state, replay_buffer
     

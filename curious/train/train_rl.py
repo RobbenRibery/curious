@@ -127,9 +127,14 @@ def train(
 
     ## Replay buffer
     replay_buffer = ReplayBuffer()
+    last_batch_idx = global_batch_idx if global_batch_idx is not None else 0
     for local_batch_idx, batch_inputs in tqdm(enumerate(rollout_data_loader), total=len(rollout_data_loader)):
 
         batch_idx = local_batch_idx + 1 if global_batch_idx is None else global_batch_idx + local_batch_idx + 1
+        if args.base_config.max_train_batches > 0 and batch_idx > args.base_config.max_train_batches:
+            print(f"Reached max_train_batches={args.base_config.max_train_batches}; stopping training.")
+            break
+
         questions = batch_inputs["question"]
         answers = batch_inputs["answer"]
 
@@ -491,6 +496,7 @@ def train(
 
         if args.sfl_config.sfl_enabled:
             global_batch_idx += 1
+        last_batch_idx = batch_idx
     
     ### ----- Final checkpoint phase START ----- ###
     if args.base_config.checkpoint_dir is not None:
@@ -504,7 +510,7 @@ def train(
             model.state_dict(),
             os.path.join(
                 state_dict_dir,
-                f"step_{batch_idx}_final.pt"
+                f"step_{last_batch_idx}_final.pt"
             )
         )
         # evaluate the final model
@@ -514,7 +520,7 @@ def train(
             tokenizer=tokenizer,
             logger=logger,
             **{
-                "batch_idx": batch_idx,
+                "batch_idx": last_batch_idx,
             }
         )  
         eval_outs.append(eval_results)

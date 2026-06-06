@@ -65,6 +65,11 @@ class BaseConfig:
     """
     The number of epochs to use for the training.
     """
+
+    max_train_batches: int = 130
+    """
+    The maximum number of training batches to visit. Set to 0 or lower to disable the cap.
+    """
     
     num_workers: int = 8
     """

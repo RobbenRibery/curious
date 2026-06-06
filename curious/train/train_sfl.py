@@ -81,6 +81,9 @@ def train_sfl(
     ## total number of steps scheduled 
     sfl_step, global_batch_idx = 0, 0
     while sfl_step < args.sfl_config.sfl_total_steps:
+        if args.base_config.max_train_batches > 0 and global_batch_idx >= args.base_config.max_train_batches:
+            print(f"Reached max_train_batches={args.base_config.max_train_batches}; stopping SFL training.")
+            break
 
         ## shuffle the dataset
         seed = rng.integers(0, 1e03, size=1)[0].item()
@@ -176,7 +179,7 @@ def train_sfl(
         )
 
         ## increment the step
-        global_batch_idx += len(train_data_loader)
+        global_batch_idx += len(train_outs)
         sfl_step += 1
 
 

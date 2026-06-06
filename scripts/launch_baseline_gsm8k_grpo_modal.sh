@@ -17,6 +17,7 @@ MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-0.6B}"
 TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-32}"
 GROUP_SIZE="${GROUP_SIZE:-8}"
 MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-256}"
+MAX_TRAIN_BATCHES="${MAX_TRAIN_BATCHES:-130}"
 MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-32}"
 LOGITS_MINIBATCH_SIZE="${LOGITS_MINIBATCH_SIZE:-${MINI_BATCH_SIZE}}"
 TRAIN_ENTROPY_LOG_INTERVAL="${TRAIN_ENTROPY_LOG_INTERVAL:-10}"
@@ -94,6 +95,7 @@ echo "  sglang_weight_sync_interval: ${SGLANG_WEIGHT_SYNC_INTERVAL}"
 echo "  train_batch_size: ${TRAIN_BATCH_SIZE}"
 echo "  group_size: ${GROUP_SIZE}"
 echo "  rollout_batch_size: ${ROLLOUT_BATCH_SIZE}"
+echo "  max_train_batches: ${MAX_TRAIN_BATCHES}"
 echo "  mini_batch_size: ${MINI_BATCH_SIZE}"
 echo "  logits_minibatch_size: ${LOGITS_MINIBATCH_SIZE}"
 echo "  train_entropy_log_interval: ${TRAIN_ENTROPY_LOG_INTERVAL}"
@@ -115,6 +117,7 @@ command=(scripts/modal_train.sh "${modal_args[@]}" -- \
   --base-config.train-batch-size "${TRAIN_BATCH_SIZE}" \
   --base-config.eval-batch-size 512 \
   --base-config.num-epochs 1 \
+  --base-config.max-train-batches "${MAX_TRAIN_BATCHES}" \
   --base-config.num-workers 16 \
   --base-config.seed 42 \
   --base-config.checkpoint-interval 50 \
