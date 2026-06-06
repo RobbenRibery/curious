@@ -1,6 +1,5 @@
-from typing import TypedDict, Optional, Tuple
+from typing import Any, TypedDict, Optional, Tuple
 import os
-import json
 from curious.data.gsm8k import GSM8KDataset
 from curious.utils.utils import load_model_tokenizer
 from curious.config import TrainingConfig, BaseConfig, RLConfig, SamplingConfig, RewardConfig
@@ -49,7 +48,7 @@ class TrainingSetup(TypedDict):
     dataset: GSM8KDataset
     rollout_data_loader: DataLoader
 
-    use_vllm: bool
+    generation_backend: Optional[Any]
 
     optimizer: optim.Optimizer
     lr_scheduler: optim.lr_scheduler.CosineAnnealingLR
@@ -67,6 +66,11 @@ class TrainingSetup(TypedDict):
     sampling_config: SamplingConfig
     reward_config: RewardConfig
 
+
+def needs_reference_policy(rl_config: RLConfig) -> bool:
+    return rl_config.kl_weight > 0 or rl_config.use_ad_cispo
+
+
 def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]: 
     """
     Set up the training.
@@ -82,6 +86,19 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
     assert config.base_config.mode == "train"
     assert config.rl_config.mini_batch_size % config.rl_config.group_size == 0
     assert config.base_config.train_batch_size * config.rl_config.group_size % config.rl_config.mini_batch_size == 0
+    if config.base_config.deepspeed_config is not None:
+        raise ValueError("DeepSpeed is disabled for this launch path; leave base_config.deepspeed_config unset.")
+    if config.sampling_config.generation_backend not in {"hf", "sglang"}:
+        raise ValueError("sampling_config.generation_backend must be one of: hf, sglang")
+    if config.sampling_config.generation_backend == "sglang":
+        if config.sampling_config.sglang_attention_backend != "fa3":
+            raise ValueError("SGLang baseline requires sglang_attention_backend='fa3' on H100")
+        if not (0 < config.sampling_config.sglang_mem_fraction_static < 1):
+            raise ValueError("sglang_mem_fraction_static must be between 0 and 1")
+        if config.sampling_config.sglang_weight_sync != "disk":
+            raise ValueError("Only sglang_weight_sync='disk' is currently supported")
+        if config.sampling_config.sglang_weight_sync_interval < 1:
+            raise ValueError("sglang_weight_sync_interval must be >= 1")
     if config.rl_config.use_rloo_scalar and config.rl_config.group_size <= 1:
         raise ValueError("RLOO advantages require group_size > 1")
     if config.rl_config.use_rloo_scalar and config.rl_config.normalize_centered_returns:
@@ -178,7 +195,7 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
     )
     training_setup["rollout_data_loader"] = rollout_data_loader
 
-    needs_reference_model = config.rl_config.kl_weight > 0 or config.rl_config.use_ad_cispo
+    needs_reference_model = needs_reference_policy(config.rl_config)
 
     if config.rl_config.kl_weight > 0:
         # kl controller
@@ -262,6 +279,7 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
         wandb_config=config.wandb_config,
         base_config=config.base_config,
         sampling_config=FixedSamplingConfig(
+            max_new_tokens=config.sampling_config.max_new_tokens,
             system_prompt=config.sampling_config.system_prompt,
             model_prompt_length=config.sampling_config.model_prompt_length,
         ),
@@ -285,28 +303,28 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
         eta_min=config.rl_config.lr * 1e-03,
     )
 
-    # deepspeed
-    if config.base_config.deepspeed_config is not None:
-        print(f"#### Setting up deepspeed from {config.base_config.deepspeed_config} ####")
-        with open(config.base_config.deepspeed_config, "r") as f:
-            deepspeed_config = json.load(f)
-        f.close()
-
-        deepspeed_config["train_micro_batch_size_per_gpu"] = config.rl_config.mini_batch_size
-        assert deepspeed_config["bf16"]["enabled"], "Only bfloat16 is supported for now"
-
-        import deepspeed
-        engine, optimizer, _, lr_scheduler = deepspeed.initialize(
-            model = model,
-            model_parameters = model.parameters(),
-            optimizer = optimizer,
-            lr_scheduler = lr_scheduler,
-            config = deepspeed_config,
-        )
-        training_setup["target_policy"] = engine 
-
     training_setup["optimizer"] = optimizer
-    training_setup["lr_scheduler"] = lr_scheduler   
+    training_setup["lr_scheduler"] = lr_scheduler
+
+    if config.sampling_config.generation_backend == "sglang":
+        from curious.sampling.sglang_backend import SGLangGenerationBackend
+
+        training_setup["generation_backend"] = SGLangGenerationBackend(
+            model_path=config.base_config.model_name,
+            tokenizer=tokenizer,
+            host=config.sampling_config.sglang_host,
+            port=config.sampling_config.sglang_port,
+            attention_backend=config.sampling_config.sglang_attention_backend,
+            mem_fraction_static=config.sampling_config.sglang_mem_fraction_static,
+            log_level=config.sampling_config.sglang_log_level,
+            startup_timeout=config.sampling_config.sglang_startup_timeout,
+            weight_sync_dir=config.sampling_config.sglang_weight_sync_dir,
+            max_running_requests=config.sampling_config.sglang_max_running_requests,
+            chunked_prefill_size=config.sampling_config.sglang_chunked_prefill_size,
+            request_batch_size=config.sampling_config.sglang_request_batch_size,
+        )
+    else:
+        training_setup["generation_backend"] = None
 
     return training_setup, TrainState(
         run_name=run_name,

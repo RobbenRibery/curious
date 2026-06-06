@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${ROOT_DIR}"
+
+RUN_NAME="${RUN_NAME:-baseline-gsm8k-grpo-qwen3-0p6b-sglang-fa3-h100-seed42-v3}"
+WANDB_ENTITY="${WANDB_ENTITY:-autocurriculum}"
+WANDB_PROJECT="${WANDB_PROJECT:-curious}"
+WANDB_GROUP="${WANDB_GROUP:-baseline-grpo-gsm8k}"
+MODAL_GPU="${MODAL_GPU:-H100}"
+MODAL_TIMEOUT="${MODAL_TIMEOUT:-86400}"
+BACKGROUND="${BACKGROUND:-0}"
+MODAL_SECRET="${MODAL_SECRET:-}"
+DRY_RUN="${DRY_RUN:-0}"
+MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-0.6B}"
+TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-32}"
+GROUP_SIZE="${GROUP_SIZE:-8}"
+MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-256}"
+MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-32}"
+LOGITS_MINIBATCH_SIZE="${LOGITS_MINIBATCH_SIZE:-${MINI_BATCH_SIZE}}"
+TRAIN_ENTROPY_LOG_INTERVAL="${TRAIN_ENTROPY_LOG_INTERVAL:-10}"
+EVAL_INTERVAL="${EVAL_INTERVAL:-10}"
+TRAIN_TEXT_LOG_INTERVAL="${TRAIN_TEXT_LOG_INTERVAL:-10}"
+EVAL_TEXT_LOG_INTERVAL="${EVAL_TEXT_LOG_INTERVAL:-10}"
+COMPLETION_LOG_SAMPLE_SIZE="${COMPLETION_LOG_SAMPLE_SIZE:-8}"
+KL_WEIGHT="${KL_WEIGHT:-0.001}"
+REF_MODEL_UPDATE_FREQ="${REF_MODEL_UPDATE_FREQ:-0}"
+SGLANG_MEM_FRACTION_STATIC="${SGLANG_MEM_FRACTION_STATIC:-0.20}"
+SGLANG_ATTENTION_BACKEND="${SGLANG_ATTENTION_BACKEND:-fa3}"
+SGLANG_REQUEST_BATCH_SIZE="${SGLANG_REQUEST_BATCH_SIZE:-16}"
+SGLANG_PORT="${SGLANG_PORT:-30000}"
+SGLANG_WEIGHT_SYNC_DIR="${SGLANG_WEIGHT_SYNC_DIR:-/tmp/curious-sglang-weight-sync}"
+SGLANG_WEIGHT_SYNC_INTERVAL="${SGLANG_WEIGHT_SYNC_INTERVAL:-1}"
+
+while (($#)); do
+  case "$1" in
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    --background)
+      BACKGROUND=1
+      shift
+      ;;
+    --foreground|--no-background)
+      BACKGROUND=0
+      shift
+      ;;
+    *)
+      echo "Unknown launch option: $1" >&2
+      echo "Supported options: --dry-run, --background, --foreground, --no-background" >&2
+      exit 2
+      ;;
+  esac
+done
+
+ROLLOUT_BATCH_SIZE=$((TRAIN_BATCH_SIZE * GROUP_SIZE))
+if (( MINI_BATCH_SIZE % GROUP_SIZE != 0 )); then
+  echo "MINI_BATCH_SIZE must be divisible by GROUP_SIZE: ${MINI_BATCH_SIZE} % ${GROUP_SIZE} != 0" >&2
+  exit 2
+fi
+if (( ROLLOUT_BATCH_SIZE % MINI_BATCH_SIZE != 0 )); then
+  echo "TRAIN_BATCH_SIZE * GROUP_SIZE must be divisible by MINI_BATCH_SIZE: ${ROLLOUT_BATCH_SIZE} % ${MINI_BATCH_SIZE} != 0" >&2
+  exit 2
+fi
+
+if [[ "${DRY_RUN}" != "1" && -z "${WANDB_API_KEY:-}" && -z "${MODAL_SECRET}" && ! -f ".env" ]]; then
+  echo "WANDB_API_KEY is not set, MODAL_SECRET is empty, and .env was not found." >&2
+  echo "Export WANDB_API_KEY, create .env, or set MODAL_SECRET to a Modal Secret name before launching." >&2
+  exit 2
+fi
+
+modal_args=(--gpu "${MODAL_GPU}" --timeout "${MODAL_TIMEOUT}")
+if [[ "${BACKGROUND}" == "1" ]]; then
+  modal_args+=(--background)
+fi
+if [[ -n "${MODAL_SECRET}" ]]; then
+  modal_args+=(--secret "${MODAL_SECRET}")
+fi
+
+echo "Preparing Modal baseline GRPO launch:"
+echo "  run: ${RUN_NAME}"
+echo "  W&B: ${WANDB_ENTITY}/${WANDB_PROJECT}"
+echo "  gpu: ${MODAL_GPU}"
+echo "  background: ${BACKGROUND}"
+echo "  dry_run: ${DRY_RUN}"
+echo "  model: ${MODEL_NAME}"
+echo "  generation_backend: sglang"
+echo "  sglang_attention_backend: ${SGLANG_ATTENTION_BACKEND}"
+echo "  sglang_mem_fraction_static: ${SGLANG_MEM_FRACTION_STATIC}"
+echo "  sglang_request_batch_size: ${SGLANG_REQUEST_BATCH_SIZE}"
+echo "  sglang_weight_sync_interval: ${SGLANG_WEIGHT_SYNC_INTERVAL}"
+echo "  train_batch_size: ${TRAIN_BATCH_SIZE}"
+echo "  group_size: ${GROUP_SIZE}"
+echo "  rollout_batch_size: ${ROLLOUT_BATCH_SIZE}"
+echo "  mini_batch_size: ${MINI_BATCH_SIZE}"
+echo "  logits_minibatch_size: ${LOGITS_MINIBATCH_SIZE}"
+echo "  train_entropy_log_interval: ${TRAIN_ENTROPY_LOG_INTERVAL}"
+echo "  eval_interval: ${EVAL_INTERVAL}"
+echo "  train_text_log_interval: ${TRAIN_TEXT_LOG_INTERVAL}"
+echo "  eval_text_log_interval: ${EVAL_TEXT_LOG_INTERVAL}"
+echo "  completion_log_sample_size: ${COMPLETION_LOG_SAMPLE_SIZE}"
+echo "  kl_weight: ${KL_WEIGHT}"
+echo "  ref_model_update_freq: ${REF_MODEL_UPDATE_FREQ} (frozen reference)"
+
+command=(scripts/modal_train.sh "${modal_args[@]}" -- \
+  --wandb-config.entity "${WANDB_ENTITY}" \
+  --wandb-config.project "${WANDB_PROJECT}" \
+  --wandb-config.group "${WANDB_GROUP}" \
+  --wandb-config.name "${RUN_NAME}" \
+  --base-config.model-name "${MODEL_NAME}" \
+  --base-config.device-index 0 \
+  --base-config.dataset-name "openai/gsm8k" \
+  --base-config.train-batch-size "${TRAIN_BATCH_SIZE}" \
+  --base-config.eval-batch-size 512 \
+  --base-config.num-epochs 1 \
+  --base-config.num-workers 16 \
+  --base-config.seed 42 \
+  --base-config.checkpoint-interval 50 \
+  --base-config.eval-interval "${EVAL_INTERVAL}" \
+  --base-config.train-text-log-interval "${TRAIN_TEXT_LOG_INTERVAL}" \
+  --base-config.train-entropy-log-interval "${TRAIN_ENTROPY_LOG_INTERVAL}" \
+  --base-config.eval-text-log-interval "${EVAL_TEXT_LOG_INTERVAL}" \
+  --base-config.completion-log-sample-size "${COMPLETION_LOG_SAMPLE_SIZE}" \
+  --sampling-config.model-prompt-length 1024 \
+  --sampling-config.max-new-tokens "${MAX_NEW_TOKENS}" \
+  --sampling-config.temperature 0.7 \
+  --sampling-config.top-p 0.9 \
+  --sampling-config.top-k 50 \
+  --sampling-config.do-sample \
+  --sampling-config.use-cache \
+  --sampling-config.repetition-penalty 1.0 \
+  --sampling-config.system-prompt "qwen_system_prompt" \
+  --sampling-config.generation-backend sglang \
+  --sampling-config.sglang-attention-backend "${SGLANG_ATTENTION_BACKEND}" \
+  --sampling-config.sglang-mem-fraction-static "${SGLANG_MEM_FRACTION_STATIC}" \
+  --sampling-config.sglang-request-batch-size "${SGLANG_REQUEST_BATCH_SIZE}" \
+  --sampling-config.sglang-port "${SGLANG_PORT}" \
+  --sampling-config.sglang-weight-sync-dir "${SGLANG_WEIGHT_SYNC_DIR}" \
+  --sampling-config.sglang-weight-sync-interval "${SGLANG_WEIGHT_SYNC_INTERVAL}" \
+  --reward-config.no-use-format-reward \
+  --reward-config.no-use-overlong-penalty \
+  --rl-config.group-size "${GROUP_SIZE}" \
+  --rl-config.lr 3e-6 \
+  --rl-config.weight-decay 0.01 \
+  --rl-config.kl-weight "${KL_WEIGHT}" \
+  --rl-config.ref-model-update-freq "${REF_MODEL_UPDATE_FREQ}" \
+  --rl-config.clip-eps 0.2 \
+  --rl-config.no-use-clip-high \
+  --rl-config.no-use-token-level-loss \
+  --rl-config.no-use-fixed-response-length \
+  --rl-config.use-surrogate-loss \
+  --rl-config.no-use-ad-cispo \
+  --rl-config.mini-batch-size "${MINI_BATCH_SIZE}" \
+  --rl-config.epochs-per-step 1 \
+  --rl-config.max-grad-norm 0.5 \
+  --rl-config.normalize-centered-returns \
+  --rl-config.no-use-rloo-scalar \
+  --rl-config.logits-minibatch-size "${LOGITS_MINIBATCH_SIZE}")
+
+if [[ "${DRY_RUN}" == "1" ]]; then
+  printf 'Command:'
+  printf ' %q' "${command[@]}"
+  printf '\n'
+  exit 0
+fi
+
+exec "${command[@]}"

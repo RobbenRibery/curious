@@ -10,6 +10,11 @@ class WandbConfig:
     A dataclass for storing the wandb configuration.
     """
 
+    entity: str = "autocurriculum"
+    """
+    The entity to use for the wandb.
+    """
+
     project: str = "curious"
     """
     The project to use for the wandb.
@@ -31,7 +36,7 @@ class BaseConfig:
     A dataclass for storing the evaluation configuration.
     """
     # Model and dataset
-    model_name: str = "Qwen/Qwen2-0.5B-Instruct"
+    model_name: str = "Qwen/Qwen3-0.6B"
     """
     The name of the model to use for the training.
     """
@@ -95,19 +100,29 @@ class BaseConfig:
     The interval to use for the checkpoint and to evaluate the model.
     """
 
-    eval_interval: int = 50
+    eval_interval: int = 10
     """
     The interval to use for the evaluation.
     """
 
-    train_text_log_interval: int = 500
+    train_text_log_interval: int = 10
     """
     The interval to use for the train text log.
     """
 
-    eval_text_log_interval: int = 500
+    train_entropy_log_interval: int = 1
+    """
+    The interval to compute and log train action entropy. Set to 0 or lower to disable.
+    """
+
+    eval_text_log_interval: int = 10
     """
     The interval to use for the eval text log.
+    """
+
+    completion_log_sample_size: int = 8
+    """
+    The maximum number of train/eval sample completions to log at each text log interval.
     """
 
     return_entropy: bool = False
@@ -115,7 +130,7 @@ class BaseConfig:
     Whether to return the entropy of the tokens.
     """
 
-    deepspeed_config: str = None
+    deepspeed_config: Optional[str] = None
     """
     The path to the deepspeed config file.
     """
@@ -170,6 +185,71 @@ class SamplingConfig:
     system_prompt: str = "deepseek_system_prompt"
     """
     The system prompt to use for the sampling.
+    """
+
+    generation_backend: str = "hf"
+    """
+    The generation backend to use for rollouts. One of: hf, sglang.
+    """
+
+    sglang_attention_backend: str = "fa3"
+    """
+    The attention backend to use for SGLang rollout generation.
+    """
+
+    sglang_mem_fraction_static: float = 0.40
+    """
+    The static memory fraction reserved by SGLang on the H100.
+    """
+
+    sglang_host: str = "127.0.0.1"
+    """
+    The host for the local SGLang server.
+    """
+
+    sglang_port: int = 30000
+    """
+    The port for the local SGLang server.
+    """
+
+    sglang_log_level: str = "warning"
+    """
+    The SGLang server log level.
+    """
+
+    sglang_max_running_requests: Optional[int] = None
+    """
+    The optional maximum number of running requests for SGLang.
+    """
+
+    sglang_chunked_prefill_size: Optional[int] = None
+    """
+    The optional chunked prefill size for SGLang.
+    """
+
+    sglang_request_batch_size: Optional[int] = None
+    """
+    The optional number of prompt instances to send per SGLang /generate request.
+    """
+
+    sglang_startup_timeout: int = 600
+    """
+    The number of seconds to wait for SGLang startup.
+    """
+
+    sglang_weight_sync: str = "disk"
+    """
+    The SGLang policy weight synchronization method. Currently only disk is supported.
+    """
+
+    sglang_weight_sync_dir: str = "sglang_weight_sync"
+    """
+    The local directory used for disk-based SGLang weight sync.
+    """
+
+    sglang_weight_sync_interval: int = 1
+    """
+    The number of completed training batches between SGLang policy weight syncs.
     """
 
 @dataclass

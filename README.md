@@ -55,16 +55,15 @@ uv tool run modal setup
 
 Launch training from your local checkout onto Modal:
 ```bash
-scripts/modal_train.sh \
-  --wandb-config.project curious \
-  --wandb-config.name modal-grpo-smoke \
-  --base-config.model-name Qwen/Qwen2.5-0.5B-Instruct \
-  --base-config.train-batch-size 8 \
-  --rl-config.group-size 16 \
-  --rl-config.kl-weight 0
+scripts/launch_baseline_gsm8k_grpo_modal.sh
 ```
 
-The Modal launcher defaults to `gpu=H100` and persists train logs, eval logs, checkpoints, Hugging Face cache, and W&B cache in the `curious-training-artifacts` Modal Volume. The wrapper forwards unknown flags to `curious.training`; use `--` only when you want to separate launcher options from training options:
+The prepared baseline uses `Qwen/Qwen3-0.6B` with SGLang rollout generation
+and FlashAttention-3 on one H100. The Modal launcher persists train logs, eval
+logs, checkpoints, Hugging Face cache, and W&B cache in the
+`curious-training-artifacts` Modal Volume. The wrapper forwards unknown flags to
+`curious.training`; use `--` only when you want to separate launcher options
+from training options:
 ```bash
 scripts/modal_train.sh --gpu A100-80GB --timeout 86400 -- \
   --base-config.checkpoint-interval 20

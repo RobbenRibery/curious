@@ -11,24 +11,22 @@ requires-python = ">=3.11,<3.13"
 dependencies = [
     "accelerate==1.6.0",
     "datasets==3.5.0",
-    "deepspeed==0.16.7; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "diff-parser==1.1",
     "liger-kernel==0.5.8; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "math-verify==0.7.0",
     "memory-profiler==0.61.0",
     "modal==1.4.3",
-    "mpi4py==4.0.3; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "python-dotenv==1.1.0",
     "setuptools==76.1.0",
+    "sglang[srt]==0.4.6.post5; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "toml==0.10.2",
     "torch==2.6.0",
-    "transformers==4.51.3",
+    "transformers==4.51.1",
     "tree-sitter==0.24.0",
     "trl==0.16.1",
     "tyro==0.9.18",
     "unidiff==0.7.5",
-    "vllm==0.8.4; sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "wandb==0.19.9",
+    "wandb==0.27.0",
 ]
 
 [dependency-groups]
