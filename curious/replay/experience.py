@@ -1,5 +1,5 @@
 from dataclasses import dataclass, fields
-from typing import Optional, Self, List, Tuple, Any
+from typing import Iterator, Optional, Self, List, Tuple, Any
 
 import torch
 import torch.nn.functional as F
@@ -145,6 +145,54 @@ def join_experience_batch(items: List[Experience]) -> Experience:
     return Experience(**batch_data)
 
 
+@dataclass(frozen=True)
+class CpuExperienceBatch:
+    experience: Experience
+
+    def __len__(self) -> int:
+        return self.experience.sequences.size(0)
+
+
+@dataclass(frozen=True)
+class TrainingMinibatch:
+    experience: Experience
+    start: int
+    end: int
+
+
+def slice_experience_batch(experience: Experience, start: int, end: int) -> Experience:
+    batch_size = experience.sequences.size(0)
+    if start < 0 or end < start or end > batch_size:
+        raise ValueError(f"Invalid experience slice [{start}, {end}) for batch size {batch_size}")
+
+    members = {}
+    for field in fields(experience):
+        value = getattr(experience, field.name)
+        if isinstance(value, torch.Tensor):
+            members[field.name] = value[start:end]
+        elif isinstance(value, list):
+            members[field.name] = value[start:end]
+        else:
+            members[field.name] = value
+    return Experience(**members)
+
+
+def iter_experience_minibatches(
+    experience: Experience,
+    mini_batch_size: int,
+) -> Iterator[TrainingMinibatch]:
+    if mini_batch_size <= 0:
+        raise ValueError("mini_batch_size must be positive")
+    batch_size = experience.sequences.size(0)
+    for start in range(0, batch_size, mini_batch_size):
+        end = min(batch_size, start + mini_batch_size)
+        yield TrainingMinibatch(
+            experience=slice_experience_batch(experience, start, end),
+            start=start,
+            end=end,
+        )
+
+
 class ReplayBuffer:
     """
     A buffer that stores experiences.
@@ -159,6 +207,7 @@ class ReplayBuffer:
         """
         self.limit = limit
         self.items: list[Experience] = [item.to("cpu") for item in items] if items else []
+        self.batches: list[CpuExperienceBatch] = []
 
     def append(self, experience: Experience) -> None:
         """
@@ -178,6 +227,38 @@ class ReplayBuffer:
                 # remove the oldest experiences
                 self.items = self.items[samples_to_remove:]
 
+    def append_batch(self, experience: Experience) -> None:
+        """
+        Append one batched CPU experience without splitting into per-sample objects.
+        """
+        cpu_experience = experience.to(torch.device("cpu"))
+        self.batches.append(CpuExperienceBatch(experience=cpu_experience))
+        if self.limit > 0:
+            samples_to_remove = sum(len(batch) for batch in self.batches) - self.limit
+            while samples_to_remove > 0 and self.batches:
+                first_batch = self.batches[0]
+                if len(first_batch) <= samples_to_remove:
+                    samples_to_remove -= len(first_batch)
+                    self.batches.pop(0)
+                else:
+                    trimmed = slice_experience_batch(first_batch.experience, samples_to_remove, len(first_batch))
+                    self.batches[0] = CpuExperienceBatch(experience=trimmed)
+                    samples_to_remove = 0
+
+    def iter_minibatches(self, mini_batch_size: int) -> Iterator[TrainingMinibatch]:
+        if self.batches:
+            for batch in self.batches:
+                yield from iter_experience_minibatches(batch.experience, mini_batch_size)
+            return
+
+        for start in range(0, len(self.items), mini_batch_size):
+            end = min(len(self.items), start + mini_batch_size)
+            yield TrainingMinibatch(
+                experience=join_experience_batch(self.items[start:end]),
+                start=start,
+                end=end,
+            )
+
     def clear(self) -> None:
         """
         Clear the buffer.
@@ -186,6 +267,7 @@ class ReplayBuffer:
             None
         """
         self.items.clear()
+        self.batches.clear()
 
     def __len__(self) -> int:
         """
@@ -194,6 +276,8 @@ class ReplayBuffer:
         Returns:
             int: The number of experiences in the buffer.
         """
+        if self.batches:
+            return sum(len(batch) for batch in self.batches)
         return len(self.items)
 
     def __getitem__(self, idx: int) -> Experience:

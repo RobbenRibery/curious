@@ -10,7 +10,10 @@ from transformers import (
 from accelerate.utils import set_seed
 
 from curious.reward.rule.gsm8k import GSM8KRewardModel
-from curious.utils.utils import release_memory, move_paddings_to_right
+from curious.utils.utils import move_paddings_to_right
+
+
+FLOAT_TENSOR_DTYPE = torch.bfloat16
 
 
 class RolloutGenerationBackend(Protocol):
@@ -96,9 +99,15 @@ def decode_action_tokens(
     Decode exactly the tokens whose log probabilities are selected by action_mask.
     action_mask is aligned with sequence_ids[:, 1:], matching the training loss.
     """
-    return [
-        tokenizer.decode(seq_ids[1:][mask.bool()], skip_special_tokens=True)
+    token_batches = [
+        seq_ids[1:][mask.bool()].tolist()
         for seq_ids, mask in zip(sequence_ids, action_mask)
+    ]
+    if hasattr(tokenizer, "batch_decode"):
+        return tokenizer.batch_decode(token_batches, skip_special_tokens=True)
+    return [
+        tokenizer.decode(torch.tensor(token_ids), skip_special_tokens=True)
+        for token_ids in token_batches
     ]
 
 @torch.compile(dynamic=True)
@@ -280,6 +289,8 @@ def _sequence_log_probs_from_logits(
         torch.Tensor: The log probabilities of the output ids. (num_samples * num_rollouts, seq_len)
     """
     
+    logits = logits.to(dtype=FLOAT_TENSOR_DTYPE)
+
     # Gather the logits corresponding to the output_ids
     gathered_logits = logits.gather(
         dim=-1, 
@@ -293,9 +304,9 @@ def _sequence_log_probs_from_logits(
     if return_entropy:
         pd = torch.nn.functional.softmax(logits, dim=-1)
         entropy = log_sum_exp - torch.sum(pd * logits, dim=-1)
-        return log_probs, entropy
+        return log_probs.to(dtype=FLOAT_TENSOR_DTYPE), entropy.to(dtype=FLOAT_TENSOR_DTYPE)
     else:
-        return log_probs, None
+        return log_probs.to(dtype=FLOAT_TENSOR_DTYPE), None
 
 def sequences_log_probs(
     model: PreTrainedModel,
@@ -340,5 +351,7 @@ def sequences_log_probs(
         if return_entropy:
             token_entropy.append(entropy)
 
-    release_memory([mini_logits, mini_ids]) 
-    return torch.cat(token_logprobs, dim=0), torch.cat(token_entropy, dim=0) if return_entropy else None
+    del mini_logits, mini_ids
+    logprobs = torch.cat(token_logprobs, dim=0).to(dtype=FLOAT_TENSOR_DTYPE)
+    entropy = torch.cat(token_entropy, dim=0).to(dtype=FLOAT_TENSOR_DTYPE) if return_entropy else None
+    return logprobs, entropy

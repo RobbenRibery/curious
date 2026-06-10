@@ -6,6 +6,11 @@ import numpy as np
 from curious.replay.experience import Experience
 
 MAX_NEW_TOKENS = 512
+FLOAT_TENSOR_DTYPE = torch.bfloat16
+
+
+def to_training_float_dtype(tensor: torch.Tensor) -> torch.Tensor:
+    return tensor.to(dtype=FLOAT_TENSOR_DTYPE) if tensor.is_floating_point() else tensor
 
 @torch.compile(dynamic=True)
 def approx_kl_divergence(
@@ -23,9 +28,9 @@ def approx_kl_divergence(
     Returns:
         torch.Tensor: The KL divergence.
     """
-    log_ratio = log_probs_ref.float() - log_probs.float()
+    log_ratio = to_training_float_dtype(log_probs_ref) - to_training_float_dtype(log_probs)
     if action_mask is not None:
-        log_ratio = log_ratio * action_mask
+        log_ratio = log_ratio * action_mask.to(dtype=log_ratio.dtype)
 
     return log_ratio.exp() - log_ratio - 1
 
@@ -49,12 +54,14 @@ def masked_mean(
     Returns:
         torch.Tensor: The mean of the tensor.
     """
+    tensor = to_training_float_dtype(tensor)
     if mask is None:
         return tensor.mean(axis=dim)
     # when dim == None, return the mean of the whole tensor
-    denominator = mask.sum(axis=dim).clamp_min(1)
+    denominator = mask.sum(axis=dim).clamp_min(1).to(dtype=tensor.dtype)
+    mask = mask.to(dtype=tensor.dtype)
     if use_fixed_response_length:
-        return (tensor * mask).sum(axis=dim) / MAX_NEW_TOKENS
+        return (tensor * mask).sum(axis=dim) / tensor.new_tensor(MAX_NEW_TOKENS)
     else:
         return (tensor * mask).sum(axis=dim) / denominator
 
@@ -101,6 +108,7 @@ class ActorLoss(nn.Module):
         use_token_level_loss:bool = False,
         use_fixed_response_length:bool = False,
         use_surrogate_loss:bool = True,
+        use_cispo_loss:bool = False,
     ) -> None:
         """
         Args:
@@ -110,8 +118,13 @@ class ActorLoss(nn.Module):
             use_clip_high: bool, default to False
             use_token_level_loss: bool, default to False
             use_fixed_response_length: bool, default to False
+            use_cispo_loss: bool, default to False
         """
         super().__init__()
+
+        if use_cispo_loss:
+            kl_weight = 0.0
+            use_token_level_loss = True
 
         # kl weight
         self.kl_weight = kl_weight
@@ -130,6 +143,7 @@ class ActorLoss(nn.Module):
         self.aggregation_dim = None if use_token_level_loss else -1
         self.use_fixed_response_length = False if use_token_level_loss else use_fixed_response_length
         self.use_surrogate_loss = use_surrogate_loss
+        self.use_cispo_loss = use_cispo_loss
 
     @torch.compile(dynamic=True)
     def forward(
@@ -147,7 +161,8 @@ class ActorLoss(nn.Module):
         Returns:
             Tuple[torch.Tensor, torch.Tensor]: The actor loss and the KL divergence.
         """
-        old_log_probs = experience.action_log_probs
+        log_probs = to_training_float_dtype(log_probs)
+        old_log_probs = to_training_float_dtype(experience.action_log_probs)
         assert old_log_probs.shape == log_probs.shape
 
         action_mask = experience.action_mask
@@ -156,6 +171,7 @@ class ActorLoss(nn.Module):
         advantages = experience.advantages
         if advantages.ndim == 1:
             advantages = advantages.unsqueeze(1)
+        advantages = to_training_float_dtype(advantages)
         assert advantages.shape[0] == log_probs.shape[0]
         assert advantages.shape[1] == 1
 
@@ -169,7 +185,21 @@ class ActorLoss(nn.Module):
         else:
             kl_loss, kl = 0, 0
 
-        if self.use_surrogate_loss:
+        if self.use_cispo_loss:
+            ratio = (log_probs - old_log_probs).exp()
+            token_clip_high = experience.token_clip_high
+            if token_clip_high is None:
+                clip_high = torch.full_like(ratio, self.epsilon_high)
+            else:
+                assert token_clip_high.shape == ratio.shape
+                clip_high = token_clip_high.to(device=ratio.device, dtype=ratio.dtype)
+            clip_low = torch.zeros_like(ratio)
+            clip_high = 1 + clip_high
+
+            clipped_importance_weight = torch.minimum(torch.maximum(ratio, clip_low), clip_high).detach()
+            policy_loss = -clipped_importance_weight * log_probs * advantages
+            loss = policy_loss + kl_loss
+        elif self.use_surrogate_loss:
             # importance sampling ratio
             ratio = (log_probs - old_log_probs).exp()
             token_clip_high = experience.token_clip_high

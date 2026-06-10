@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from datasets.utils.tf_utils import minimal_tf_collate_fn_with_renaming
 from transformers import (
     PreTrainedTokenizer,
@@ -12,6 +14,7 @@ import torch
 from curious.prompt import * 
 
 import gc 
+import os
 
 
 LOGGING_TEMPLATE = dedent(
@@ -46,6 +49,150 @@ COMPLETION_SAMPLE_COLUMNS = [
     "reward",
     "info",
 ]
+
+
+def configure_bf16_precision() -> None:
+    os.environ.setdefault("NVIDIA_TF32_OVERRIDE", "0")
+    if torch.cuda.is_available():
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+    if hasattr(torch, "set_float32_matmul_precision"):
+        torch.set_float32_matmul_precision("highest")
+
+
+@dataclass(frozen=True)
+class CudaMemorySnapshot:
+    allocated_bytes: int
+    reserved_bytes: int
+    max_reserved_bytes: int
+    total_bytes: int
+
+    @property
+    def reserved_ratio(self) -> float:
+        if self.total_bytes <= 0:
+            return 0.0
+        return self.reserved_bytes / self.total_bytes
+
+    @property
+    def fragmentation_ratio(self) -> float:
+        if self.allocated_bytes <= 0:
+            return 0.0 if self.reserved_bytes <= 0 else float("inf")
+        return self.reserved_bytes / self.allocated_bytes
+
+
+@dataclass(frozen=True)
+class CleanupPolicy:
+    batch_interval: int = 1
+    minibatch_empty_cache_interval: int = 0
+    reserved_ratio_threshold: float = 0.90
+    fragmentation_ratio: float = 1.35
+    force_after_eval: bool = True
+    force_after_checkpoint: bool = True
+
+
+@dataclass(frozen=True)
+class CleanupDecision:
+    drop_refs: bool
+    run_gc: bool
+    empty_cache: bool
+    reason: str
+
+
+@dataclass(frozen=True)
+class PerfTrace:
+    phase: str
+    elapsed_seconds: float
+    memory_before: CudaMemorySnapshot
+    memory_after: CudaMemorySnapshot
+
+
+def cuda_memory_snapshot(device: Optional[Union[torch.device, int, str]] = None) -> CudaMemorySnapshot:
+    if not torch.cuda.is_available():
+        return CudaMemorySnapshot(
+            allocated_bytes=0,
+            reserved_bytes=0,
+            max_reserved_bytes=0,
+            total_bytes=0,
+        )
+    if device is None:
+        device_index = torch.cuda.current_device()
+    elif isinstance(device, int):
+        device_index = device
+    else:
+        resolved_device = torch.device(device)
+        device_index = resolved_device.index
+        if device_index is None:
+            device_index = torch.cuda.current_device()
+    properties = torch.cuda.get_device_properties(device_index)
+    return CudaMemorySnapshot(
+        allocated_bytes=torch.cuda.memory_allocated(device_index),
+        reserved_bytes=torch.cuda.memory_reserved(device_index),
+        max_reserved_bytes=torch.cuda.max_memory_reserved(device_index),
+        total_bytes=properties.total_memory,
+    )
+
+
+def should_empty_cuda_cache(snapshot: CudaMemorySnapshot, policy: CleanupPolicy) -> bool:
+    return (
+        snapshot.reserved_ratio >= policy.reserved_ratio_threshold
+        or snapshot.fragmentation_ratio >= policy.fragmentation_ratio
+    )
+
+
+def decide_cleanup(
+    snapshot: CudaMemorySnapshot,
+    policy: CleanupPolicy,
+    *,
+    phase: str,
+    batch_idx: int = 0,
+    minibatch_idx: int = 0,
+    force: bool = False,
+) -> CleanupDecision:
+    run_gc = False
+    empty_cache = False
+    reason = phase
+
+    if force or phase == "oom":
+        return CleanupDecision(drop_refs=True, run_gc=True, empty_cache=True, reason=f"{phase}:forced")
+
+    if phase == "minibatch":
+        interval = policy.minibatch_empty_cache_interval
+        empty_cache = interval > 0 and minibatch_idx > 0 and minibatch_idx % interval == 0
+        return CleanupDecision(
+            drop_refs=True,
+            run_gc=False,
+            empty_cache=empty_cache and should_empty_cuda_cache(snapshot, policy),
+            reason=reason,
+        )
+
+    if phase == "after_eval" and policy.force_after_eval:
+        return CleanupDecision(drop_refs=True, run_gc=True, empty_cache=True, reason=reason)
+    if phase == "after_checkpoint" and policy.force_after_checkpoint:
+        return CleanupDecision(drop_refs=True, run_gc=True, empty_cache=True, reason=reason)
+
+    interval = policy.batch_interval
+    run_gc = interval > 0 and batch_idx > 0 and batch_idx % interval == 0
+    empty_cache = should_empty_cuda_cache(snapshot, policy)
+    return CleanupDecision(drop_refs=True, run_gc=run_gc, empty_cache=empty_cache, reason=reason)
+
+
+def drop_refs(*objects: Any) -> None:
+    del objects
+
+
+def clear_python_memory() -> None:
+    gc.collect()
+
+
+def clear_cuda_cache_if_needed(decision: CleanupDecision) -> None:
+    if decision.empty_cache and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def execute_cleanup(decision: CleanupDecision) -> None:
+    if decision.run_gc:
+        clear_python_memory()
+    clear_cuda_cache_if_needed(decision)
 
 
 def _to_loggable_scalar(value: Any) -> Any:
@@ -131,10 +278,8 @@ def log_completion_sample_table(
 
 
 def release_memory(vars:List[Any]):
-    for var in vars:
-        del var
-    gc.collect()
-    torch.cuda.empty_cache()
+    vars.clear()
+    execute_cleanup(CleanupDecision(drop_refs=True, run_gc=True, empty_cache=True, reason="legacy_release_memory"))
 
 
 def move_paddings_to_right(
@@ -166,52 +311,26 @@ def move_paddings_to_right(
         >>> pad_token_id = 128
         >>> result = move_paddings_to_right(attention_mask, sequence_ids, pad_token_id)
     """
-    # get the least left padded amount 
-    right_padded_seq_ids = []
     left_padded_prompt_length = input_ids.shape[1]
-    new_action_mask = torch.zeros_like(
-        sequence_ids, 
-        dtype=torch.bool, 
-        device=sequence_ids.device,
-    )
-    minimum_right_padding_tokens = sequence_ids.shape[1]
 
     # expand the attention mask 
     group_size = sequence_ids.shape[0] // attention_mask.shape[0]
     attention_mask = attention_mask.repeat_interleave(
         repeats = group_size, 
         dim = 0 
-    )
+    ).to(device=sequence_ids.device)
+    left_padding_amounts = (attention_mask == 0).sum(dim=1)
+    seq_len = sequence_ids.shape[1]
+    positions = torch.arange(seq_len, device=sequence_ids.device).unsqueeze(0)
+    gather_indices = (positions + left_padding_amounts.unsqueeze(1)).remainder(seq_len)
+    right_padded_seq_ids = sequence_ids.gather(dim=1, index=gather_indices)
 
-    for new_act_mask, attn_mask, seq_id in zip(new_action_mask, attention_mask, sequence_ids):
-        
-        left_padding_amount = (attn_mask == 0).sum()
-        new_act_mask[left_padded_prompt_length - left_padding_amount:] = True
-
-        right_padding_tensor = torch.full(
-            (left_padding_amount,), 
-            pad_token_id, 
-            dtype=torch.long, 
-            device=seq_id.device
-        )
-        new_seq_id = torch.cat(
-            [
-                seq_id[left_padding_amount:],
-                right_padding_tensor,
-            ],
-            dim=0,
-        )
-        minimum_right_padding_tokens = min(
-            (new_seq_id == pad_token_id).sum().item(),
-            minimum_right_padding_tokens,
-        )
-        right_padded_seq_ids.append(new_seq_id)
-    
-    right_padded_seq_ids = torch.stack(right_padded_seq_ids)
+    new_action_mask = positions >= (left_padded_prompt_length - left_padding_amounts).unsqueeze(1)
+    new_action_mask = new_action_mask.to(device=sequence_ids.device, dtype=torch.bool)
+    new_action_mask[right_padded_seq_ids == pad_token_id] = False
+    minimum_right_padding_tokens = (right_padded_seq_ids == pad_token_id).sum(dim=1).min().item()
     new_seq_length = right_padded_seq_ids.shape[1] - minimum_right_padding_tokens
-    
-    new_action_mask[right_padded_seq_ids == pad_token_id] = False 
-    
+
     new_seq_ids = right_padded_seq_ids[:,:new_seq_length]
     new_action_mask = new_action_mask[:, :new_seq_length]
 
@@ -264,6 +383,8 @@ def load_model_tokenizer(
     device_map: Optional[str] = "auto",
     freeze_model: bool = False,
     checkpoint_path: Optional[str] = None,
+    compile_model: bool = True,
+    use_liger: bool = True,
 ) -> tuple[PreTrainedModel, PreTrainedTokenizer]:
     """
     Loads a pre-trained model and its tokenizer.
@@ -271,7 +392,7 @@ def load_model_tokenizer(
     Args:
         model_name_or_path (str): The name or path of the pre-trained model.
         trust_remote_code (bool): Whether to trust remote code.
-        bf16 (bool): Whether to use bfloat16 precision.
+        dtype_ (torch.dtype): The floating dtype to use for model weights.
         device_map (str): The device map to use for the model.
 
     Returns:
@@ -281,17 +402,25 @@ def load_model_tokenizer(
     resolved_model_path = model_name_or_path if checkpoint_path is None else checkpoint_path
 
     if torch.cuda.is_available():
-        from liger_kernel.transformers import AutoLigerKernelForCausalLM
-        try:
-            model: PreTrainedModel = AutoLigerKernelForCausalLM.from_pretrained(
-                resolved_model_path,
-                trust_remote_code=trust_remote_code,
-                attn_implementation="flash_attention_2",
-                torch_dtype=dtype_,
-                device_map=device_map,
-            )
-        except KeyError as exc:
-            print(f"Liger does not support this model type ({exc}); falling back to AutoModelForCausalLM.")
+        if use_liger:
+            from liger_kernel.transformers import AutoLigerKernelForCausalLM
+            try:
+                model: PreTrainedModel = AutoLigerKernelForCausalLM.from_pretrained(
+                    resolved_model_path,
+                    trust_remote_code=trust_remote_code,
+                    attn_implementation="flash_attention_2",
+                    torch_dtype=dtype_,
+                    device_map=device_map,
+                )
+            except KeyError as exc:
+                print(f"Liger does not support this model type ({exc}); falling back to AutoModelForCausalLM.")
+                model = AutoModelForCausalLM.from_pretrained(
+                    resolved_model_path,
+                    trust_remote_code=trust_remote_code,
+                    torch_dtype=dtype_,
+                    device_map=device_map,
+                )
+        else:
             model = AutoModelForCausalLM.from_pretrained(
                 resolved_model_path,
                 trust_remote_code=trust_remote_code,
@@ -304,7 +433,9 @@ def load_model_tokenizer(
             trust_remote_code=trust_remote_code,
             torch_dtype=dtype_,
         )
-    model.forward = torch.compile(model.forward, dynamic=True)
+    model.to(dtype=dtype_)
+    if compile_model:
+        model.forward = torch.compile(model.forward, dynamic=True)
     model.generation_config.cache_implementation = "static"
     if freeze_model:
         for param in model.parameters():

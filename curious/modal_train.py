@@ -36,6 +36,7 @@ training_image = (
     .env(
         {
             "TOKENIZERS_PARALLELISM": "true",
+            "NVIDIA_TF32_OVERRIDE": "0",
             "TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS": "1",
             "PYTORCH_CUDA_ALLOC_CONF": "max_split_size_mb:128,expandable_segments:True",
             "HF_HOME": f"{ARTIFACTS_DIR}/hf",

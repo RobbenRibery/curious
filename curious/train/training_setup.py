@@ -1,7 +1,7 @@
 from typing import Any, TypedDict, Optional, Tuple
 import os
 from curious.data.gsm8k import GSM8KDataset
-from curious.utils.utils import load_model_tokenizer
+from curious.utils.utils import configure_bf16_precision, load_model_tokenizer
 from curious.config import TrainingConfig, BaseConfig, RLConfig, SamplingConfig, RewardConfig
 from curious.policy_gradient.loss import AdaptiveKLController, ConstantKLController
 from curious.policy_gradient.loss import ActorLoss
@@ -71,16 +71,32 @@ def needs_reference_policy(rl_config: RLConfig) -> bool:
     return rl_config.kl_weight > 0 or rl_config.use_ad_cispo
 
 
+def normalize_rl_config_for_objective(rl_config: RLConfig) -> None:
+    if rl_config.use_cispo_loss:
+        if rl_config.kl_weight != 0:
+            print("CISPO uses no KL penalty; forcing rl_config.kl_weight=0.0.")
+            rl_config.kl_weight = 0.0
+        if not rl_config.use_token_level_loss:
+            print("CISPO uses token-level loss; forcing rl_config.use_token_level_loss=True.")
+            rl_config.use_token_level_loss = True
+
+    if rl_config.use_ad_cispo and not rl_config.use_cispo_loss:
+        raise ValueError("AD-CISPO requires use_cispo_loss=True; adaptive GRPO must be configured explicitly.")
+
+
 def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]: 
     """
     Set up the training.
     """
+    configure_bf16_precision()
+
     # out 
     training_setup:TrainingSetup = {}
     training_setup["base_config"] = config.base_config
     training_setup["rl_config"] = config.rl_config
     training_setup["sampling_config"] = config.sampling_config
     training_setup["reward_config"] = config.reward_config
+    normalize_rl_config_for_objective(config.rl_config)
 
     # check that the data mode is train
     assert config.base_config.mode == "train"
@@ -93,6 +109,8 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
     if config.sampling_config.generation_backend == "sglang":
         if config.sampling_config.sglang_attention_backend != "fa3":
             raise ValueError("SGLang baseline requires sglang_attention_backend='fa3' on H100")
+        if config.sampling_config.sglang_dtype != "bfloat16":
+            raise ValueError("SGLang baseline requires sglang_dtype='bfloat16'")
         if not (0 < config.sampling_config.sglang_mem_fraction_static < 1):
             raise ValueError("sglang_mem_fraction_static must be between 0 and 1")
         if config.sampling_config.sglang_weight_sync != "disk":
@@ -104,12 +122,14 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
     if config.rl_config.use_rloo_scalar and config.rl_config.normalize_centered_returns:
         raise ValueError("RLOO scalar advantages should not also use GRPO std normalization")
     if config.rl_config.use_ad_cispo:
-        if not config.rl_config.use_surrogate_loss:
-            raise ValueError("AD-CISPO requires use_surrogate_loss=True")
-        if config.rl_config.ad_cispo_saliency_method != "kv_norm":
-            raise ValueError("AD-CISPO currently supports only ad_cispo_saliency_method='kv_norm'")
+        if config.rl_config.ad_cispo_saliency_method not in {"future_attention_in_degree", "kv_norm"}:
+            raise ValueError(
+                "AD-CISPO currently supports ad_cispo_saliency_method='future_attention_in_degree' or 'kv_norm'"
+            )
         if config.rl_config.ad_cispo_top_layers <= 0:
             raise ValueError("AD-CISPO ad_cispo_top_layers must be positive")
+        if config.rl_config.ad_cispo_attention_block_size <= 0:
+            raise ValueError("AD-CISPO ad_cispo_attention_block_size must be positive")
         if config.rl_config.ad_cispo_min_multiplier < 0:
             raise ValueError("AD-CISPO ad_cispo_min_multiplier must be non-negative")
         if config.rl_config.ad_cispo_min_multiplier > 1:
@@ -219,6 +239,11 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
     if needs_reference_model:
         # reference model
         print(f"#### Loading reference model ####")
+        compile_reference_model = not (
+            config.rl_config.use_ad_cispo
+            and config.rl_config.ad_cispo_saliency_method == "future_attention_in_degree"
+        )
+        use_liger_reference_model = compile_reference_model
         reference_model, _ = load_model_tokenizer(
             model_name_or_path=config.base_config.model_name, 
             trust_remote_code=True,
@@ -226,6 +251,8 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
             device_map=device, 
             freeze_model=True,
             checkpoint_path=None,
+            compile_model=compile_reference_model,
+            use_liger=use_liger_reference_model,
         )
         reference_model.eval()
         training_setup["kl_controller"] = kl_controller
@@ -244,6 +271,7 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
         use_token_level_loss=config.rl_config.use_token_level_loss,
         use_fixed_response_length=config.rl_config.use_fixed_response_length,
         use_surrogate_loss=config.rl_config.use_surrogate_loss,
+        use_cispo_loss=config.rl_config.use_cispo_loss,
     )
     training_setup["actor_loss"] = objective
 
@@ -289,11 +317,20 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
     
     # optimizer 
     print(f"#### Defining optimizer ####")
-    optimizer = optim.AdamW(
-        model.parameters(), 
-        lr=config.rl_config.lr,
-        weight_decay=config.rl_config.weight_decay,
-    )
+    adamw_kwargs = {
+        "lr": config.rl_config.lr,
+        "weight_decay": config.rl_config.weight_decay,
+    }
+    if device.type == "cuda":
+        adamw_kwargs["fused"] = True
+    try:
+        optimizer = optim.AdamW(model.parameters(), **adamw_kwargs)
+    except (RuntimeError, TypeError) as exc:
+        if "fused" not in adamw_kwargs:
+            raise
+        print(f"Fused AdamW unavailable, falling back to standard AdamW: {exc}")
+        adamw_kwargs.pop("fused", None)
+        optimizer = optim.AdamW(model.parameters(), **adamw_kwargs)
     
     # lr scheduler
     print(f"#### Defining lr scheduler ####")
@@ -315,6 +352,7 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
             host=config.sampling_config.sglang_host,
             port=config.sampling_config.sglang_port,
             attention_backend=config.sampling_config.sglang_attention_backend,
+            dtype=config.sampling_config.sglang_dtype,
             mem_fraction_static=config.sampling_config.sglang_mem_fraction_static,
             log_level=config.sampling_config.sglang_log_level,
             startup_timeout=config.sampling_config.sglang_startup_timeout,

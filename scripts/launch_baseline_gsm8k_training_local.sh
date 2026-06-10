@@ -10,11 +10,8 @@ WANDB_PROJECT="${WANDB_PROJECT:-curious}"
 WANDB_GROUP="${WANDB_GROUP:-baseline-grpo-gsm8k}"
 OBJECTIVE_NAME="${OBJECTIVE_NAME:-GRPO}"
 USE_CISPO_LOSS="${USE_CISPO_LOSS:-0}"
-MODAL_GPU="${MODAL_GPU:-H100}"
-MODAL_TIMEOUT="${MODAL_TIMEOUT:-86400}"
-BACKGROUND="${BACKGROUND:-0}"
-MODAL_SECRET="${MODAL_SECRET:-}"
 DRY_RUN="${DRY_RUN:-0}"
+PYTHON_BIN="${PYTHON_BIN:-python}"
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-0.6B}"
 TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-32}"
 GROUP_SIZE="${GROUP_SIZE:-8}"
@@ -46,17 +43,9 @@ while (($#)); do
       DRY_RUN=1
       shift
       ;;
-    --background)
-      BACKGROUND=1
-      shift
-      ;;
-    --foreground|--no-background)
-      BACKGROUND=0
-      shift
-      ;;
     *)
       echo "Unknown launch option: $1" >&2
-      echo "Supported options: --dry-run, --background, --foreground, --no-background" >&2
+      echo "Supported options: --dry-run" >&2
       exit 2
       ;;
   esac
@@ -72,26 +61,31 @@ if (( ROLLOUT_BATCH_SIZE % MINI_BATCH_SIZE != 0 )); then
   exit 2
 fi
 
-if [[ "${DRY_RUN}" != "1" && -z "${WANDB_API_KEY:-}" && -z "${MODAL_SECRET}" && ! -f ".env" ]]; then
-  echo "WANDB_API_KEY is not set, MODAL_SECRET is empty, and .env was not found." >&2
-  echo "Export WANDB_API_KEY, create .env, or set MODAL_SECRET to a Modal Secret name before launching." >&2
+if [[ -z "${WANDB_API_KEY:-}" && -f ".env" ]]; then
+  WANDB_API_KEY="$(
+    awk -F= '
+      function trim(s) { gsub(/^[ \t"]+|[ \t"]+$/, "", s); return s }
+      $0 ~ /^[ \t]*(export[ \t]+)?WANDB_API_KEY[ \t]*=/ {
+        sub(/^[ \t]*(export[ \t]+)?WANDB_API_KEY[ \t]*=/, "", $0)
+        print trim($0)
+        exit
+      }
+    ' ".env"
+  )"
+  export WANDB_API_KEY
+fi
+
+if [[ "${DRY_RUN}" != "1" && -z "${WANDB_API_KEY:-}" ]]; then
+  echo "WANDB_API_KEY is not set and was not found in .env." >&2
+  echo "Export WANDB_API_KEY or add WANDB_API_KEY=... to .env before launching." >&2
   exit 2
 fi
 
-modal_args=(--gpu "${MODAL_GPU}" --timeout "${MODAL_TIMEOUT}")
-if [[ "${BACKGROUND}" == "1" ]]; then
-  modal_args+=(--background)
-fi
-if [[ -n "${MODAL_SECRET}" ]]; then
-  modal_args+=(--secret "${MODAL_SECRET}")
-fi
-
-echo "Preparing Modal baseline ${OBJECTIVE_NAME} launch:"
+echo "Preparing local baseline ${OBJECTIVE_NAME} launch:"
 echo "  run: ${RUN_NAME}"
 echo "  W&B: ${WANDB_ENTITY}/${WANDB_PROJECT}"
-echo "  gpu: ${MODAL_GPU}"
-echo "  background: ${BACKGROUND}"
 echo "  dry_run: ${DRY_RUN}"
+echo "  python: ${PYTHON_BIN}"
 echo "  model: ${MODEL_NAME}"
 echo "  generation_backend: sglang"
 echo "  sglang_attention_backend: ${SGLANG_ATTENTION_BACKEND}"
@@ -114,7 +108,7 @@ echo "  kl_weight: ${KL_WEIGHT}"
 echo "  ref_model_update_freq: ${REF_MODEL_UPDATE_FREQ} (frozen reference)"
 echo "  use_cispo_loss: ${USE_CISPO_LOSS}"
 
-command=(scripts/modal_train.sh "${modal_args[@]}" -- \
+command=("${PYTHON_BIN}" -m curious.training \
   --wandb-config.entity "${WANDB_ENTITY}" \
   --wandb-config.project "${WANDB_PROJECT}" \
   --wandb-config.group "${WANDB_GROUP}" \

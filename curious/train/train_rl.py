@@ -25,6 +25,7 @@ from curious.policy_gradient.loss import (
 from curious.policy_gradient.ad_cispo import (
     ADCispoStats,
     ReferencePolicyFeatureRequest,
+    collect_special_token_ids,
     compute_reference_policy_features,
 )
 from curious.train.training_setup import (
@@ -231,11 +232,16 @@ def train(
                         min_multiplier=args.rl_config.ad_cispo_min_multiplier,
                         max_multiplier=args.rl_config.ad_cispo_max_multiplier,
                         eps=args.rl_config.ad_cispo_eps,
+                        return_log_probs=args.rl_config.kl_weight > 0,
+                        saliency_method=args.rl_config.ad_cispo_saliency_method,
+                        attention_block_size=args.rl_config.ad_cispo_attention_block_size,
+                        sink_token_ids=collect_special_token_ids(tokenizer),
                     )
                 )
                 token_clip_high = reference_features.token_clip_thresholds.values
                 ad_cispo_stats = reference_features.stats
                 if args.rl_config.kl_weight > 0:
+                    assert reference_features.log_probs is not None
                     log_probs_ref = reference_features.log_probs
             elif args.rl_config.kl_weight > 0:
                 # compute the log probs of the reference model

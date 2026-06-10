@@ -1,5 +1,7 @@
 import atexit
+from dataclasses import dataclass
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -12,7 +14,12 @@ from typing import Any
 import torch
 from transformers import GenerationConfig, PreTrainedModel, PreTrainedTokenizer
 
-from curious.utils.utils import release_memory
+
+@dataclass(frozen=True)
+class WeightSyncPlan:
+    target_path: Path
+    tmp_path: Path
+    static_path: Path
 
 
 class SGLangGenerationBackend:
@@ -23,6 +30,7 @@ class SGLangGenerationBackend:
         host: str,
         port: int,
         attention_backend: str,
+        dtype: str,
         mem_fraction_static: float,
         log_level: str,
         startup_timeout: int,
@@ -39,6 +47,7 @@ class SGLangGenerationBackend:
         self.weight_sync_dir = Path(weight_sync_dir)
         self.weight_sync_dir.mkdir(parents=True, exist_ok=True)
         self._last_synced_path: Path | None = None
+        self._static_sync_path = self.weight_sync_dir / "_static"
         self.request_batch_size = request_batch_size
 
         command = [
@@ -53,6 +62,8 @@ class SGLangGenerationBackend:
             str(port),
             "--attention-backend",
             attention_backend,
+            "--dtype",
+            dtype,
             "--mem-fraction-static",
             str(mem_fraction_static),
             "--log-level",
@@ -67,6 +78,39 @@ class SGLangGenerationBackend:
         self.process = subprocess.Popen(command)
         atexit.register(self.close)
         self._wait_until_ready(startup_timeout)
+
+    def plan_weight_sync(self, step: int) -> WeightSyncPlan:
+        static_path = getattr(self, "_static_sync_path", self.weight_sync_dir / "_static")
+        return WeightSyncPlan(
+            target_path=self.weight_sync_dir / f"step_{step:08d}",
+            tmp_path=self.weight_sync_dir / f".step_{step:08d}.tmp",
+            static_path=static_path,
+        )
+
+    def _ensure_static_sync_artifacts(self, tokenizer: PreTrainedTokenizer, static_path: Path) -> None:
+        if static_path.exists() and any(static_path.iterdir()):
+            return
+        tmp_static_path = static_path.with_name(f".{static_path.name}.tmp")
+        if tmp_static_path.exists():
+            shutil.rmtree(tmp_static_path)
+        tmp_static_path.mkdir(parents=True)
+        tokenizer.save_pretrained(tmp_static_path)
+        if static_path.exists():
+            shutil.rmtree(static_path)
+        tmp_static_path.rename(static_path)
+
+    def _link_static_sync_artifacts(self, static_path: Path, target_path: Path) -> None:
+        for source in static_path.iterdir():
+            destination = target_path / source.name
+            if destination.exists():
+                continue
+            if source.is_dir():
+                shutil.copytree(source, destination)
+                continue
+            try:
+                os.link(source, destination)
+            except OSError:
+                shutil.copy2(source, destination)
 
     def _wait_until_ready(self, timeout_seconds: int) -> None:
         deadline = time.time() + timeout_seconds
@@ -181,14 +225,16 @@ class SGLangGenerationBackend:
         step: int,
     ) -> None:
         model_to_save = model.module if hasattr(model, "module") else model
-        target_path = self.weight_sync_dir / f"step_{step:08d}"
-        tmp_path = self.weight_sync_dir / f".step_{step:08d}.tmp"
+        sync_plan = self.plan_weight_sync(step)
+        target_path = sync_plan.target_path
+        tmp_path = sync_plan.tmp_path
         if tmp_path.exists():
             shutil.rmtree(tmp_path)
         tmp_path.mkdir(parents=True)
 
+        self._ensure_static_sync_artifacts(tokenizer, sync_plan.static_path)
         model_to_save.save_pretrained(tmp_path, safe_serialization=True)
-        tokenizer.save_pretrained(tmp_path)
+        self._link_static_sync_artifacts(sync_plan.static_path, tmp_path)
         if target_path.exists():
             shutil.rmtree(target_path)
         tmp_path.rename(target_path)
@@ -205,8 +251,6 @@ class SGLangGenerationBackend:
         self._last_synced_path = target_path
         if previous_path is not None and previous_path != target_path and previous_path.exists():
             shutil.rmtree(previous_path)
-
-        release_memory([])
 
     def close(self) -> None:
         process = getattr(self, "process", None)

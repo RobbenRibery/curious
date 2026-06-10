@@ -1,24 +1,30 @@
-from typing import Dict, List, Any, Tuple
+from contextlib import contextmanager
+import time
+from typing import Dict, List, Any, Tuple, Iterator
 
 from pathlib import Path
 from curious.evaluate import evaluate
 from curious.utils.utils import (
+    CleanupPolicy,
+    PerfTrace,
     build_completion_sample_rows,
+    cuda_memory_snapshot,
+    decide_cleanup,
+    execute_cleanup,
     format_completion_sample_rows,
     log_completion_sample_table,
-    release_memory,
 )
-from curious.replay.experience import Experience, ReplayBuffer, join_experience_batch
+from curious.replay.experience import Experience, ReplayBuffer
 from curious.train.training_setup import TrainingSetup, TrainState
 from curious.sampling.sampling import rollout, sequences_log_probs
 from curious.policy_gradient.loss import masked_mean, approx_kl_divergence, ActorLoss
 from curious.policy_gradient.ad_cispo import (
     ADCispoStats,
     ReferencePolicyFeatureRequest,
+    collect_special_token_ids,
     compute_reference_policy_features,
 )
 
-from torch.utils.data import DataLoader
 import torch
 
 import numpy as np
@@ -44,6 +50,116 @@ class PolicyGradientTrainer:
         self.actor_loss: ActorLoss= self.training_setup["actor_loss"]
         self.logger = lambda x: print(x)
 
+    def _cleanup_policy(self) -> CleanupPolicy:
+        return CleanupPolicy(
+            batch_interval=getattr(self.base_config, "memory_cleanup_batch_interval", 1),
+            minibatch_empty_cache_interval=getattr(
+                self.base_config,
+                "memory_cleanup_minibatch_empty_cache_interval",
+                0,
+            ),
+            reserved_ratio_threshold=getattr(
+                self.base_config,
+                "memory_cleanup_reserved_ratio_threshold",
+                0.90,
+            ),
+            fragmentation_ratio=getattr(
+                self.base_config,
+                "memory_cleanup_fragmentation_ratio",
+                1.35,
+            ),
+            force_after_eval=getattr(self.base_config, "memory_cleanup_force_after_eval", True),
+            force_after_checkpoint=getattr(self.base_config, "memory_cleanup_force_after_checkpoint", True),
+        )
+
+    def _should_log_perf(self, batch_idx: int) -> bool:
+        interval = getattr(self.base_config, "perf_log_interval", 0)
+        return interval > 0 and batch_idx % interval == 0
+
+    @staticmethod
+    def _bytes_to_gb(value: int) -> float:
+        return value / (1024 ** 3)
+
+    def _log_perf_trace(self, trace: PerfTrace, batch_idx: int) -> None:
+        self.logger(
+            {
+                f"perf/{trace.phase}_seconds": trace.elapsed_seconds,
+                f"perf/{trace.phase}_allocated_gb_before": self._bytes_to_gb(trace.memory_before.allocated_bytes),
+                f"perf/{trace.phase}_allocated_gb_after": self._bytes_to_gb(trace.memory_after.allocated_bytes),
+                f"perf/{trace.phase}_reserved_gb_before": self._bytes_to_gb(trace.memory_before.reserved_bytes),
+                f"perf/{trace.phase}_reserved_gb_after": self._bytes_to_gb(trace.memory_after.reserved_bytes),
+                "num_batches_visited": batch_idx,
+            }
+        )
+
+    @contextmanager
+    def _trace_phase(
+        self,
+        phase: str,
+        batch_idx: int,
+        device: torch.device | None,
+    ) -> Iterator[None]:
+        if not self._should_log_perf(batch_idx):
+            yield
+            return
+
+        should_sync_cuda = torch.cuda.is_available() and (
+            device is None or torch.device(device).type == "cuda"
+        )
+        if should_sync_cuda:
+            torch.cuda.synchronize(device)
+        before = cuda_memory_snapshot(device)
+        start = time.perf_counter()
+        try:
+            yield
+        finally:
+            if should_sync_cuda:
+                torch.cuda.synchronize(device)
+            after = cuda_memory_snapshot(device)
+            self._log_perf_trace(
+                PerfTrace(
+                    phase=phase,
+                    elapsed_seconds=time.perf_counter() - start,
+                    memory_before=before,
+                    memory_after=after,
+                ),
+                batch_idx=batch_idx,
+            )
+
+    def _cleanup(
+        self,
+        phase: str,
+        batch_idx: int,
+        device: torch.device | None,
+        minibatch_idx: int = 0,
+        force: bool = False,
+    ) -> None:
+        before = cuda_memory_snapshot(device)
+        decision = decide_cleanup(
+            before,
+            self._cleanup_policy(),
+            phase=phase,
+            batch_idx=batch_idx,
+            minibatch_idx=minibatch_idx,
+            force=force,
+        )
+        start = time.perf_counter()
+        execute_cleanup(decision)
+        elapsed = time.perf_counter() - start
+        if self._should_log_perf(batch_idx):
+            after = cuda_memory_snapshot(device)
+            self.logger(
+                {
+                    f"perf/cleanup_{phase}_seconds": elapsed,
+                    f"memory/{phase}_run_gc": float(decision.run_gc),
+                    f"memory/{phase}_empty_cache": float(decision.empty_cache),
+                    f"memory/{phase}_reserved_gb_before": self._bytes_to_gb(before.reserved_bytes),
+                    f"memory/{phase}_reserved_gb_after": self._bytes_to_gb(after.reserved_bytes),
+                    f"memory/{phase}_allocated_gb_after": self._bytes_to_gb(after.allocated_bytes),
+                    "num_batches_visited": batch_idx,
+                }
+            )
+
     def train(self, train_state: TrainState) -> Tuple[TrainState, ReplayBuffer]:
         evaluate(
             config=self.training_setup["eval_config"],
@@ -52,9 +168,11 @@ class PolicyGradientTrainer:
             logger=self.logger,
             batch_idx=0,
         )
+        self._cleanup("after_eval", batch_idx=0, device=train_state["device"])
 
         completed_batches = 0
         stop_training = False
+        replay_buffer = ReplayBuffer()
         for epoch_idx in range(self.num_epochs):
             print(f"Epoch {epoch_idx} of {self.num_epochs}")
             for _, batch_inputs in enumerate(self.rollout_data_loader):
@@ -80,6 +198,7 @@ class PolicyGradientTrainer:
                         logger=self.logger,
                         batch_idx=completed_batches,
                     )
+                    self._cleanup("after_eval", batch_idx=completed_batches, device=train_state["device"])
             if stop_training:
                 break
         
@@ -100,18 +219,19 @@ class PolicyGradientTrainer:
         model.eval()
         model.gradient_checkpointing_disable()
 
-        rollout_out = rollout(
-            model=model,
-            tokenizer=self.tokenizer,
-            batch_inputs=batch_inputs,
-            reward_model=self.reward_model,
-            generation_config=self.generation_config,
-            group_size=self.generation_config.num_return_sequences,
-            seed=train_state["seed"],
-            normalize_centered_returns=self.training_setup["rl_config"].normalize_centered_returns,
-            use_rloo_scalar=self.training_setup["rl_config"].use_rloo_scalar,
-            generation_backend=self.training_setup.get("generation_backend"),
-        )
+        with self._trace_phase("rollout_generation", batch_indx, train_state["device"]):
+            rollout_out = rollout(
+                model=model,
+                tokenizer=self.tokenizer,
+                batch_inputs=batch_inputs,
+                reward_model=self.reward_model,
+                generation_config=self.generation_config,
+                group_size=self.generation_config.num_return_sequences,
+                seed=train_state["seed"],
+                normalize_centered_returns=self.training_setup["rl_config"].normalize_centered_returns,
+                use_rloo_scalar=self.training_setup["rl_config"].use_rloo_scalar,
+                generation_backend=self.training_setup.get("generation_backend"),
+            )
     
         returns: torch.Tensor = rollout_out["returns"].reshape(-1)
         advantages: torch.Tensor = rollout_out["advantages"].reshape(-1)
@@ -133,55 +253,63 @@ class PolicyGradientTrainer:
         should_log_entropy = entropy_interval > 0 and batch_indx % entropy_interval == 0
 
         # (num_samples * group_size, seq_len-1)
-        log_probs, entropy = sequences_log_probs(
-            model=model,
-            sequence_ids=sequence_ids,
-            attention_mask=attention_mask,
-            return_entropy=should_log_entropy,
-            logits_minibatch_size=self.training_setup["rl_config"].logits_minibatch_size,
-        ) 
+        with self._trace_phase("collect_policy_logprobs", batch_indx, train_state["device"]):
+            log_probs, entropy = sequences_log_probs(
+                model=model,
+                sequence_ids=sequence_ids,
+                attention_mask=attention_mask,
+                return_entropy=should_log_entropy,
+                logits_minibatch_size=self.training_setup["rl_config"].logits_minibatch_size,
+            )
 
         if should_log_entropy and entropy is not None:
             mean_action_entropy = masked_mean(entropy, action_mask, dim=None)
             stats["mean_action_entropy"] = mean_action_entropy
 
         kl, log_probs_ref, token_clip_high = None, None, None
-        if self.training_setup["rl_config"].use_ad_cispo:
-            reference_features = compute_reference_policy_features(
-                ReferencePolicyFeatureRequest(
+        reference_features = None
+        with self._trace_phase("reference_features", batch_indx, train_state["device"]):
+            if self.training_setup["rl_config"].use_ad_cispo:
+                reference_features = compute_reference_policy_features(
+                    ReferencePolicyFeatureRequest(
+                        model=train_state["reference_model"],
+                        sequence_ids=sequence_ids,
+                        attention_mask=attention_mask,
+                        action_mask=action_mask,
+                        clip_high=self.actor_loss.epsilon_high,
+                        logits_minibatch_size=self.training_setup["rl_config"].logits_minibatch_size,
+                        top_layers=self.training_setup["rl_config"].ad_cispo_top_layers,
+                        min_multiplier=self.training_setup["rl_config"].ad_cispo_min_multiplier,
+                        max_multiplier=self.training_setup["rl_config"].ad_cispo_max_multiplier,
+                        eps=self.training_setup["rl_config"].ad_cispo_eps,
+                        return_log_probs=self.training_setup["rl_config"].kl_weight > 0,
+                        saliency_method=self.training_setup["rl_config"].ad_cispo_saliency_method,
+                        attention_block_size=self.training_setup["rl_config"].ad_cispo_attention_block_size,
+                        sink_token_ids=collect_special_token_ids(self.tokenizer),
+                    )
+                )
+                token_clip_high = reference_features.token_clip_thresholds.values
+                stats["ad_cispo_stats"] = reference_features.stats
+                if self.training_setup["rl_config"].kl_weight > 0:
+                    assert reference_features.log_probs is not None
+                    log_probs_ref = reference_features.log_probs
+            elif self.training_setup["rl_config"].kl_weight > 0:
+                # compute the log probs of the reference model
+                log_probs_ref, _ = sequences_log_probs(
                     model=train_state["reference_model"],
                     sequence_ids=sequence_ids,
                     attention_mask=attention_mask,
-                    action_mask=action_mask,
-                    clip_high=self.actor_loss.epsilon_high,
+                    return_entropy=False,
                     logits_minibatch_size=self.training_setup["rl_config"].logits_minibatch_size,
-                    top_layers=self.training_setup["rl_config"].ad_cispo_top_layers,
-                    min_multiplier=self.training_setup["rl_config"].ad_cispo_min_multiplier,
-                    max_multiplier=self.training_setup["rl_config"].ad_cispo_max_multiplier,
-                    eps=self.training_setup["rl_config"].ad_cispo_eps,
                 )
-            )
-            token_clip_high = reference_features.token_clip_thresholds.values
-            stats["ad_cispo_stats"] = reference_features.stats
-            if self.training_setup["rl_config"].kl_weight > 0:
-                log_probs_ref = reference_features.log_probs
-        elif self.training_setup["rl_config"].kl_weight > 0:
-            # compute the log probs of the reference model
-            log_probs_ref, _ = sequences_log_probs(
-                model=train_state["reference_model"],
-                sequence_ids=sequence_ids,
-                attention_mask=attention_mask,
-                return_entropy=False,
-                logits_minibatch_size=self.training_setup["rl_config"].logits_minibatch_size,
-            )
 
-        if self.training_setup["rl_config"].kl_weight > 0:
-            # compute the kl divergence
-            kl: torch.Tensor = approx_kl_divergence(
-                log_probs=log_probs,
-                log_probs_ref=log_probs_ref,
-                action_mask=action_mask,
-            )
+            if self.training_setup["rl_config"].kl_weight > 0:
+                # compute the kl divergence
+                kl = approx_kl_divergence(
+                    log_probs=log_probs,
+                    log_probs_ref=log_probs_ref,
+                    action_mask=action_mask,
+                )
 
         experience: Experience = Experience(
             sequences=sequence_ids,
@@ -195,26 +323,24 @@ class PolicyGradientTrainer:
             kl=kl,
             token_clip_high=token_clip_high,
         )
-        replay_buffer.append(
-            experience.to(
-                self.training_setup["cpu_device"]
-            )
-        )
+        replay_buffer.append_batch(experience)
 
         self.log_rollout_stats(stats)
-        release_memory(
-            [
-                kl,
-                log_probs_ref,
-                token_clip_high,
-                log_probs,
-                entropy,
-                attention_mask,
-                sequence_ids,
-                action_mask,
-                rollout_out,
-            ]
+        del (
+            kl,
+            log_probs_ref,
+            token_clip_high,
+            log_probs,
+            entropy,
+            attention_mask,
+            sequence_ids,
+            action_mask,
+            rollout_out,
+            reference_features,
+            experience,
+            stats,
         )
+        self._cleanup("after_rollout_batch", batch_idx=batch_indx, device=train_state["device"])
         return replay_buffer
 
     def update_policy(self, train_state: TrainState, replay_buffer: ReplayBuffer, batch_idx: int) -> TrainState:
@@ -225,15 +351,6 @@ class PolicyGradientTrainer:
         lr_scheduler = train_state["lr_scheduler"]
         kl_controller = train_state["kl_controller"]
 
-        experience_sampler = DataLoader(
-            replay_buffer,
-            batch_size=self.rl_config.mini_batch_size,
-            shuffle= False,
-            drop_last=False,
-            collate_fn=join_experience_batch,
-            num_workers=0,
-        )
-
         model.train()
         model.gradient_checkpointing_enable()
         if hasattr(model, "config"):
@@ -241,41 +358,55 @@ class PolicyGradientTrainer:
 
         did_update = False
         for _ in range(self.rl_config.epochs_per_step):
-            for experience in experience_sampler:
-                experience: Experience
+            for minibatch_idx, training_minibatch in enumerate(
+                replay_buffer.iter_minibatches(self.rl_config.mini_batch_size),
+                start=1,
+            ):
+                experience: Experience = training_minibatch.experience
 
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)
                 experience = experience.to(device)
-                log_probs, _ = sequences_log_probs(
-                    model, 
-                    sequence_ids=experience.sequences, 
-                    attention_mask=experience.attention_mask,
-                    return_entropy=False,
-                    logits_minibatch_size=self.rl_config.logits_minibatch_size,
-                )
-                kl_weight_used = self.actor_loss.kl_weight if self.rl_config.kl_weight > 0 else 0.0
-                loss, mean_kl, mean_actor_loss = self.actor_loss(
-                    log_probs=log_probs, 
-                    experience=experience
-                )
+                with self._trace_phase("update_forward_loss", batch_idx, device):
+                    log_probs, _ = sequences_log_probs(
+                        model,
+                        sequence_ids=experience.sequences,
+                        attention_mask=experience.attention_mask,
+                        return_entropy=False,
+                        logits_minibatch_size=self.rl_config.logits_minibatch_size,
+                    )
+                    kl_weight_used = self.actor_loss.kl_weight if self.rl_config.kl_weight > 0 else 0.0
+                    loss, mean_kl, mean_actor_loss = self.actor_loss(
+                        log_probs=log_probs,
+                        experience=experience
+                    )
 
                 if not loss.isfinite():
                     print(f"Loss not finite, skipping backward, loss={loss}")
                     print(f"experience.advantages={experience.advantages}")
+                    del log_probs, experience, loss, mean_kl, mean_actor_loss
+                    self._cleanup(
+                        "minibatch",
+                        batch_idx=batch_idx,
+                        device=device,
+                        minibatch_idx=minibatch_idx,
+                    )
                     continue
 
-                loss.backward()
-                grad_norm = torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), 
-                    max_norm=self.rl_config.max_grad_norm,
-                )
-                optimizer.step()
+                with self._trace_phase("backward", batch_idx, device):
+                    loss.backward()
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        model.parameters(),
+                        max_norm=self.rl_config.max_grad_norm,
+                    )
+                with self._trace_phase("optimizer_step", batch_idx, device):
+                    optimizer.step()
                 did_update = True
 
                 mean_loss = loss.detach().cpu().item()
                 mean_kl = mean_kl.detach().cpu().item()
                 mean_actor_loss = mean_actor_loss.detach().cpu().item()
                 mean_kl_loss = mean_loss - mean_actor_loss
+                grad_norm_value = grad_norm.detach().cpu().item() if hasattr(grad_norm, "detach") else float(grad_norm)
 
                 kl_weight_next = kl_weight_used
                 if self.rl_config.kl_weight > 0:
@@ -292,20 +423,17 @@ class PolicyGradientTrainer:
                         "train/kl_weight": kl_weight_used,
                         "train/kl_weight_used": kl_weight_used,
                         "train/kl_weight_next": kl_weight_next,
-                        "train/grad_norm": grad_norm,
+                        "train/grad_norm": grad_norm_value,
                         "num_batches_visited": batch_idx,
                     }
                 )
 
-                release_memory(
-                    [
-                        log_probs,
-                        experience,
-                        loss,
-                        mean_kl,
-                        mean_actor_loss,
-                        mean_kl_loss,
-                    ]
+                del log_probs, experience, loss, mean_kl, mean_actor_loss, grad_norm
+                self._cleanup(
+                    "minibatch",
+                    batch_idx=batch_idx,
+                    device=device,
+                    minibatch_idx=minibatch_idx,
                 )
 
         if self.rl_config.anneling_lr:
@@ -322,7 +450,11 @@ class PolicyGradientTrainer:
         generation_backend = self.training_setup.get("generation_backend")
         sync_interval = self.training_setup["sampling_config"].sglang_weight_sync_interval
         if did_update and generation_backend is not None and batch_idx % sync_interval == 0:
-            generation_backend.sync_weights_from_model(model, self.tokenizer, batch_idx)
+            with self._trace_phase("sglang_weight_sync", batch_idx, device):
+                generation_backend.sync_weights_from_model(model, self.tokenizer, batch_idx)
+            self._cleanup("after_sglang_sync", batch_idx=batch_idx, device=device)
+
+        self._cleanup("after_update_batch", batch_idx=batch_idx, device=device)
 
         train_state["model"] = model
         train_state["optimizer"] = optimizer
@@ -336,9 +468,11 @@ class PolicyGradientTrainer:
         batch_idx = rollout_stats["batch_idx"]
 
         print(f"Batch indx {batch_idx}")
-        print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/(1024**3)))
-        print("torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/(1024**3)))
-        print("torch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/(1024**3)))
+        if torch.cuda.is_available() and self._should_log_perf(batch_idx):
+            snapshot = cuda_memory_snapshot()
+            print(f"torch.cuda.memory_allocated: {self._bytes_to_gb(snapshot.allocated_bytes):f}GB")
+            print(f"torch.cuda.memory_reserved: {self._bytes_to_gb(snapshot.reserved_bytes):f}GB")
+            print(f"torch.cuda.max_memory_reserved: {self._bytes_to_gb(snapshot.max_reserved_bytes):f}GB")
 
         returns: torch.Tensor = rollout_stats["returns"]
 

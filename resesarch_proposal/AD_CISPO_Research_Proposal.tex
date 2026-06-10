@@ -1,0 +1,232 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{microtype}
+
+\title{AD-CISPO: Token-Adaptive Clipped IS-Weight Policy Optimization}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Thesis}
+
+MiniMax-M1 introduces CISPO, a policy-gradient objective that clips the
+importance-sampling (IS) weight rather than clipping away token updates as in
+PPO/GRPO-style surrogate objectives.\footnote{\url{https://arxiv.org/html/2506.13585v1}}
+This proposal studies an adaptive extension, AD-CISPO, where the upper IS
+weight clipping radius is varied per token using frozen reference-model
+saliency. The goal is to keep CISPO's dense token-gradient property while
+allocating a wider update corridor to tokens that appear structurally important
+for reasoning.
+
+\section{Notation}
+
+\begin{center}
+\small
+\begin{tabular}{p{0.22\linewidth}p{0.45\linewidth}p{0.23\linewidth}}
+\toprule
+Symbol & Meaning & Shape or domain \\
+\midrule
+$q$ & prompt/question & text \\
+$o_i$ & response $i$ in a sampled group & token sequence \\
+$o_{i,t}$ & token $t$ of response $i$ & token id \\
+$G$ & number of responses sampled per prompt & positive integer \\
+$\pi_\theta$ & current policy being optimized & language model \\
+$\pi_{\theta_{\mathrm{old}}}$ & rollout policy that produced the batch & language model \\
+$\pi_{\mathrm{ref}}$ & frozen reference model for saliency and optional KL & language model \\
+$r_{i,t}(\theta)$ & IS weight
+  $\frac{\pi_\theta(o_{i,t}|q,o_{i,<t})}
+  {\pi_{\theta_{\mathrm{old}}}(o_{i,t}|q,o_{i,<t})}$ & positive scalar \\
+$\hat{A}_i$ & group-relative sequence advantage for response $i$ & scalar \\
+$S_{i,t}$ & raw frozen-reference saliency for token $o_{i,t}$ & nonnegative scalar \\
+$m_{i,t}$ & normalized token multiplier & nonnegative scalar, mean $1$ over valid tokens \\
+$\epsilon^{IS}_{\mathrm{low}}$ & lower IS clipping radius & nonnegative scalar \\
+$\epsilon^{IS}_{\mathrm{high}}$ & base upper IS clipping radius & positive scalar \\
+$\epsilon^{IS}_{i,t,\mathrm{high}}$ & token-adaptive upper IS clipping radius & positive scalar \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{MiniMax CISPO Baseline}
+
+The CISPO baseline starts from the off-policy REINFORCE objective with the IS
+weight treated as a stop-gradient coefficient:
+\begin{equation}
+  J_{\mathrm{ISPG}}(\theta)
+  =
+  \mathbb{E}
+  \left[
+    \frac{1}{\sum_{i=1}^G |o_i|}
+    \sum_{i=1}^G \sum_{t=1}^{|o_i|}
+    \operatorname{sg}\!\left(r_{i,t}(\theta)\right)
+    \hat{A}_i
+    \log \pi_\theta(o_{i,t}\mid q,o_{i,<t})
+  \right].
+\end{equation}
+
+CISPO clips the IS weight itself:
+\begin{equation}
+  \hat{r}_{i,t}(\theta)
+  =
+  \operatorname{clip}
+  \left(
+    r_{i,t}(\theta),
+    1-\epsilon^{IS}_{\mathrm{low}},
+    1+\epsilon^{IS}_{\mathrm{high}}
+  \right),
+\end{equation}
+and optimizes
+\begin{equation}
+  J_{\mathrm{CISPO}}(\theta)
+  =
+  \mathbb{E}
+  \left[
+    \frac{1}{\sum_{i=1}^G |o_i|}
+    \sum_{i=1}^G \sum_{t=1}^{|o_i|}
+    \operatorname{sg}\!\left(\hat{r}_{i,t}(\theta)\right)
+    \hat{A}_i
+    \log \pi_\theta(o_{i,t}\mid q,o_{i,<t})
+  \right].
+\end{equation}
+
+The MiniMax-M1 paper reports that their CISPO experiments did not impose a
+lower IS-weight bound: they made $\epsilon^{IS}_{\mathrm{low}}$ large and tuned
+only $\epsilon^{IS}_{\mathrm{high}}$. The paper also states that CISPO uses no
+KL penalty term. A faithful MiniMax-style baseline should therefore set the KL
+coefficient to zero and either disable the lower bound or set it so low that it
+does not bind.
+
+\section{AD-CISPO Extension}
+
+AD-CISPO replaces the scalar upper clipping radius with a token-adaptive upper
+radius:
+\begin{equation}
+  \epsilon^{IS}_{i,t,\mathrm{high}}
+  =
+  \epsilon^{IS}_{\mathrm{high}} m_{i,t}.
+\end{equation}
+The clipped weight becomes
+\begin{equation}
+  \hat{r}^{\mathrm{AD}}_{i,t}(\theta)
+  =
+  \operatorname{clip}
+  \left(
+    r_{i,t}(\theta),
+    1-\epsilon^{IS}_{\mathrm{low}},
+    1+\epsilon^{IS}_{i,t,\mathrm{high}}
+  \right),
+\end{equation}
+and the objective is
+\begin{equation}
+  J_{\mathrm{AD\mbox{-}CISPO}}(\theta)
+  =
+  \mathbb{E}
+  \left[
+    \frac{1}{\sum_{i=1}^G |o_i|}
+    \sum_{i=1}^G \sum_{t=1}^{|o_i|}
+    \operatorname{sg}\!\left(\hat{r}^{\mathrm{AD}}_{i,t}(\theta)\right)
+    \hat{A}_i
+    \log \pi_\theta(o_{i,t}\mid q,o_{i,<t})
+  \right].
+\end{equation}
+
+The adaptive multiplier is computed from frozen-reference saliency:
+\begin{equation}
+  \tilde{m}_{i,t}
+  =
+  \frac{S_{i,t}}
+  {\frac{1}{|M_i|}\sum_{u \in M_i} S_{i,u}},
+\end{equation}
+where $M_i$ is the valid generated-token mask. If all valid saliency values are
+zero or non-finite, $\tilde{m}_{i,t}$ falls back to $1$ for valid tokens.
+
+If lower or upper multiplier bounds are used, they must be followed by a
+renormalization or projection step so that the mean multiplier over valid tokens
+remains $1$. A plain clamp such as $m_{i,t}=\max(\tilde{m}_{i,t},\delta)$ is not
+sufficient because it changes the mean clipping budget.
+
+\section{Saliency Estimation}
+
+The main AD-CISPO implementation uses exact frozen-reference future-attention
+in-degree. For a selected reference layer $\ell$ and head $h$, let
+$a^{(\ell,h)}_{i,j,t}$ denote the causal attention probability from the query at
+token position $j$ to the key/value position $t$. The saliency assigned to token
+$o_{i,t}$ is
+\begin{equation}
+  S_{i,t}
+  =
+  \frac{1}{|L_{\mathrm{top}}|}
+  \sum_{\ell \in L_{\mathrm{top}}}
+  \frac{1}{H_\ell}
+  \sum_{h=1}^{H_\ell}
+  \sum_{\substack{j \in M_i \\ j > t}}
+  a^{(\ell,h)}_{i,j,t}.
+\end{equation}
+Thus a token is salient when later valid generated tokens attend to it under the
+frozen reference model. The strict condition $j>t$ prevents self-attention from
+inflating saliency, and $M_i$ excludes prompt positions and special-token sinks
+from both the source queries and target keys used for adaptive clipping.
+
+The implementation computes this quantity blockwise from reference-model
+post-RoPE query and key states. This avoids materializing a full batch of
+$T \times T$ attention matrices while preserving the exact softmax attention
+weights for the selected layers, including the model's causal, padding, and
+sliding-window masks.
+
+A frozen-reference key-vector norm remains a cheaper ablation:
+\begin{equation}
+  S^{\mathrm{KV}}_{i,t}
+  =
+  \frac{1}{|L_{\mathrm{top}}|}
+  \sum_{\ell \in L_{\mathrm{top}}}
+  \left\|k^{(\ell)}_{i,t}\right\|_2.
+\end{equation}
+It should be reported as a proxy baseline, not as the primary AD-CISPO saliency
+definition.
+
+\section{Implementation Contract}
+
+A mathematically aligned AD-CISPO implementation should satisfy the following
+conditions:
+\begin{enumerate}[leftmargin=*]
+  \item CISPO loss must use a detached clipped IS weight multiplying
+  $\log\pi_\theta$, not a PPO/GRPO surrogate minimum.
+  \item AD-CISPO must be enabled only with the CISPO loss, unless explicitly
+  naming and evaluating an adaptive-GRPO ablation.
+  \item A MiniMax-faithful CISPO baseline should set KL weight to zero and avoid
+  an active lower IS-weight bound.
+  \item Token-adaptive clipping should change only the upper IS clipping radius
+  unless a lower-bound ablation is deliberately introduced.
+  \item The default AD-CISPO saliency should be exact frozen-reference
+  future-attention in-degree. KV-norm saliency is only a lower-cost ablation.
+  \item Saliency tensors should be assigned to the generated token
+  $o_{i,t}$ whose IS weight is being clipped. In an implementation where
+  logits at position $t-1$ predict token $t$, this corresponds to aligning
+  generated-token saliency with the next-token log-probability terms rather
+  than using the preceding hidden-state position.
+  \item Claims about compute and memory must distinguish active-policy overhead
+  from frozen-reference overhead.
+\end{enumerate}
+
+\section{Evaluation Plan}
+
+The minimum evaluation should compare:
+\begin{enumerate}[leftmargin=*]
+  \item GRPO/PPO-style surrogate baseline.
+  \item MiniMax-faithful CISPO: no KL, no active lower IS bound, scalar upper
+  IS radius.
+  \item AD-CISPO with exact future-attention in-degree saliency and
+  token-adaptive upper radius.
+  \item AD-CISPO with KV-norm proxy saliency as a lower-cost ablation.
+  \item Ablation with shuffled or uniform multipliers to test whether saliency,
+  rather than extra variance, causes any gain.
+  \item Optional adaptive-GRPO ablation, clearly separated from AD-CISPO.
+\end{enumerate}
+
+\end{document}

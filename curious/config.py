@@ -120,6 +120,41 @@ class BaseConfig:
     The interval to compute and log train action entropy. Set to 0 or lower to disable.
     """
 
+    perf_log_interval: int = 10
+    """
+    The interval to log phase timing and CUDA memory diagnostics. Set to 0 or lower to disable.
+    """
+
+    memory_cleanup_batch_interval: int = 1
+    """
+    The interval for Python GC and conditional CUDA cleanup at training batch boundaries.
+    """
+
+    memory_cleanup_minibatch_empty_cache_interval: int = 0
+    """
+    The minibatch interval for conditional CUDA cache cleanup. Set to 0 to avoid hot-loop cache flushes.
+    """
+
+    memory_cleanup_reserved_ratio_threshold: float = 0.90
+    """
+    Force CUDA cache cleanup when reserved memory approaches this fraction of device memory.
+    """
+
+    memory_cleanup_fragmentation_ratio: float = 1.35
+    """
+    Run CUDA cache cleanup when reserved memory is this much larger than allocated memory.
+    """
+
+    memory_cleanup_force_after_eval: bool = True
+    """
+    Whether to force Python and CUDA cleanup after evaluation.
+    """
+
+    memory_cleanup_force_after_checkpoint: bool = True
+    """
+    Whether to force Python and CUDA cleanup after checkpoint saves.
+    """
+
     eval_text_log_interval: int = 10
     """
     The interval to use for the eval text log.
@@ -200,6 +235,11 @@ class SamplingConfig:
     sglang_attention_backend: str = "fa3"
     """
     The attention backend to use for SGLang rollout generation.
+    """
+
+    sglang_dtype: str = "bfloat16"
+    """
+    The floating dtype to use for SGLang rollout generation.
     """
 
     sglang_mem_fraction_static: float = 0.40
@@ -369,19 +409,24 @@ class RLConfig:
     Whether to use the surrogate loss (ppo) or policy gradient loss (pg).
     """
 
+    use_cispo_loss: bool = False
+    """
+    Whether to use CISPO's clipped importance-sampling-weight policy gradient loss.
+    """
+
     use_ad_cispo: bool = False
     """
     Whether to use AD-CISPO token-level upper clipping thresholds.
     """
 
-    ad_cispo_saliency_method: str = "kv_norm"
+    ad_cispo_saliency_method: str = "future_attention_in_degree"
     """
-    The saliency method to use for AD-CISPO. Currently only kv_norm is supported.
+    The saliency method to use for AD-CISPO. Supported values are future_attention_in_degree and kv_norm.
     """
 
     ad_cispo_top_layers: int = 4
     """
-    The number of final decoder layers to use for AD-CISPO KV-norm saliency.
+    The number of final decoder layers to use for AD-CISPO saliency.
     """
 
     ad_cispo_min_multiplier: float = 0.0
@@ -397,6 +442,11 @@ class RLConfig:
     ad_cispo_eps: float = 1e-8
     """
     The numerical epsilon used by AD-CISPO saliency normalization.
+    """
+
+    ad_cispo_attention_block_size: int = 256
+    """
+    The query block size used by exact future-attention in-degree saliency.
     """
 
     mini_batch_size: int = 16 * 2
