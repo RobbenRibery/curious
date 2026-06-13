@@ -441,7 +441,7 @@ requires-dist = [
     { name = "accelerate", specifier = "==1.6.0" },
     { name = "datasets", specifier = "==3.5.0" },
     { name = "diff-parser", specifier = "==1.1" },
-    { name = "liger-kernel", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = "==0.5.8" },
+    { name = "liger-kernel", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = "==0.5.9" },
     { name = "math-verify", specifier = "==0.7.0" },
     { name = "memory-profiler", specifier = "==0.61.0" },
     { name = "modal", specifier = "==1.4.3" },
@@ -963,15 +963,15 @@ wheels = [
 
 [[package]]
 name = "liger-kernel"
-version = "0.5.8"
+version = "0.5.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "torch", marker = "sys_platform == 'linux'" },
     { name = "triton", marker = "sys_platform == 'linux'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a2/55/3a703f337110e2a121a04e503abfeec2c191529cbee18bb1fb630d65642a/liger_kernel-0.5.8.tar.gz", hash = "sha256:3246d7dced89e0f982a52de259d4f78fd10eb9171246b28ae52b63ad09fc0732", size = 3593097 }
+sdist = { url = "https://files.pythonhosted.org/packages/4d/6d/35f1bee61dc230fa5d2c5c3f77deac651f18d27a963cbac422082df1a2c4/liger_kernel-0.5.9.tar.gz", hash = "sha256:ada9e8bc34af310b5fa66818b2da494ecbcfb2973a3755c375877d44ccd49a99", size = 3596285 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3d/40/75d82d90062b60e2aedd0b1741fe5b3dfbfd250aedd25933ef0b177b640e/liger_kernel-0.5.8-py3-none-any.whl", hash = "sha256:3102f99f89e9b9da249c83ea3f12b68680a8e8df0e477d4513e232da9af7d1a0", size = 150758 },
+    { url = "https://files.pythonhosted.org/packages/4f/4e/fb13804a4b7a557571083ea43a236505640bb3021f5e8e525376f1b881a3/liger_kernel-0.5.9-py3-none-any.whl", hash = "sha256:329eecdaf0b5ac8b84fc8fc17b75bf1e0ff9b62b266cfc9e5200bdb63c72c4e4", size = 155941 },
 ]
 
 [[package]]

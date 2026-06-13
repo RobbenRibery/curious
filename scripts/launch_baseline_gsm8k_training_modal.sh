@@ -4,18 +4,22 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
-RUN_NAME="${RUN_NAME:-baseline-gsm8k-grpo-qwen3-0p6b-sglang-fa3-h100-seed42-v3}"
+RUN_NAME="${RUN_NAME:-baseline-gsm8k-grpo-qwen3-1p7b-sglang-fa3-h100-seed42-v1}"
 WANDB_ENTITY="${WANDB_ENTITY:-autocurriculum}"
 WANDB_PROJECT="${WANDB_PROJECT:-curious}"
 WANDB_GROUP="${WANDB_GROUP:-baseline-grpo-gsm8k}"
 OBJECTIVE_NAME="${OBJECTIVE_NAME:-GRPO}"
 USE_CISPO_LOSS="${USE_CISPO_LOSS:-0}"
+USE_AD_CISPO="${USE_AD_CISPO:-0}"
+if [[ "${USE_AD_CISPO}" == "1" ]]; then
+  USE_CISPO_LOSS=1
+fi
 MODAL_GPU="${MODAL_GPU:-H100}"
 MODAL_TIMEOUT="${MODAL_TIMEOUT:-86400}"
 BACKGROUND="${BACKGROUND:-0}"
 MODAL_SECRET="${MODAL_SECRET:-}"
 DRY_RUN="${DRY_RUN:-0}"
-MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-0.6B}"
+MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-1.7B}"
 TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-32}"
 GROUP_SIZE="${GROUP_SIZE:-8}"
 MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-256}"
@@ -39,6 +43,12 @@ SGLANG_REQUEST_BATCH_SIZE="${SGLANG_REQUEST_BATCH_SIZE:-16}"
 SGLANG_PORT="${SGLANG_PORT:-30000}"
 SGLANG_WEIGHT_SYNC_DIR="${SGLANG_WEIGHT_SYNC_DIR:-/tmp/curious-sglang-weight-sync}"
 SGLANG_WEIGHT_SYNC_INTERVAL="${SGLANG_WEIGHT_SYNC_INTERVAL:-1}"
+AD_CISPO_SALIENCY_METHOD="${AD_CISPO_SALIENCY_METHOD:-future_attention_in_degree}"
+AD_CISPO_TOP_LAYERS="${AD_CISPO_TOP_LAYERS:-4}"
+AD_CISPO_MIN_MULTIPLIER="${AD_CISPO_MIN_MULTIPLIER:-0.0}"
+AD_CISPO_MAX_MULTIPLIER="${AD_CISPO_MAX_MULTIPLIER:-}"
+AD_CISPO_EPS="${AD_CISPO_EPS:-1e-8}"
+AD_CISPO_ATTENTION_BLOCK_SIZE="${AD_CISPO_ATTENTION_BLOCK_SIZE:-256}"
 
 while (($#)); do
   case "$1" in
@@ -113,6 +123,15 @@ echo "  completion_log_sample_size: ${COMPLETION_LOG_SAMPLE_SIZE}"
 echo "  kl_weight: ${KL_WEIGHT}"
 echo "  ref_model_update_freq: ${REF_MODEL_UPDATE_FREQ} (frozen reference)"
 echo "  use_cispo_loss: ${USE_CISPO_LOSS}"
+echo "  use_ad_cispo: ${USE_AD_CISPO}"
+if [[ "${USE_AD_CISPO}" == "1" ]]; then
+  echo "  ad_cispo_saliency_method: ${AD_CISPO_SALIENCY_METHOD}"
+  echo "  ad_cispo_top_layers: ${AD_CISPO_TOP_LAYERS}"
+  echo "  ad_cispo_min_multiplier: ${AD_CISPO_MIN_MULTIPLIER}"
+  echo "  ad_cispo_max_multiplier: ${AD_CISPO_MAX_MULTIPLIER:-None}"
+  echo "  ad_cispo_eps: ${AD_CISPO_EPS}"
+  echo "  ad_cispo_attention_block_size: ${AD_CISPO_ATTENTION_BLOCK_SIZE}"
+fi
 
 command=(scripts/modal_train.sh "${modal_args[@]}" -- \
   --wandb-config.entity "${WANDB_ENTITY}" \
@@ -162,7 +181,6 @@ command=(scripts/modal_train.sh "${modal_args[@]}" -- \
   --rl-config.no-use-clip-high \
   --rl-config.no-use-fixed-response-length \
   --rl-config.use-surrogate-loss \
-  --rl-config.no-use-ad-cispo \
   --rl-config.mini-batch-size "${MINI_BATCH_SIZE}" \
   --rl-config.epochs-per-step 1 \
   --rl-config.max-grad-norm 0.5 \
@@ -175,6 +193,20 @@ if [[ "${USE_CISPO_LOSS}" == "1" ]]; then
   command+=(--rl-config.use-token-level-loss)
 else
   command+=(--rl-config.no-use-token-level-loss)
+fi
+
+if [[ "${USE_AD_CISPO}" == "1" ]]; then
+  command+=(--rl-config.use-ad-cispo)
+  command+=(--rl-config.ad-cispo-saliency-method "${AD_CISPO_SALIENCY_METHOD}")
+  command+=(--rl-config.ad-cispo-top-layers "${AD_CISPO_TOP_LAYERS}")
+  command+=(--rl-config.ad-cispo-min-multiplier "${AD_CISPO_MIN_MULTIPLIER}")
+  if [[ -n "${AD_CISPO_MAX_MULTIPLIER}" ]]; then
+    command+=(--rl-config.ad-cispo-max-multiplier "${AD_CISPO_MAX_MULTIPLIER}")
+  fi
+  command+=(--rl-config.ad-cispo-eps "${AD_CISPO_EPS}")
+  command+=(--rl-config.ad-cispo-attention-block-size "${AD_CISPO_ATTENTION_BLOCK_SIZE}")
+else
+  command+=(--rl-config.no-use-ad-cispo)
 fi
 
 if [[ "${DRY_RUN}" == "1" ]]; then

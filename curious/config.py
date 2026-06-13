@@ -36,7 +36,7 @@ class BaseConfig:
     A dataclass for storing the evaluation configuration.
     """
     # Model and dataset
-    model_name: str = "Qwen/Qwen3-0.6B"
+    model_name: str = "Qwen/Qwen3-1.7B"
     """
     The name of the model to use for the training.
     """

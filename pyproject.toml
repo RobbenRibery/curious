@@ -12,7 +12,7 @@ dependencies = [
     "accelerate==1.6.0",
     "datasets==3.5.0",
     "diff-parser==1.1",
-    "liger-kernel==0.5.8; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "liger-kernel==0.5.9; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "math-verify==0.7.0",
     "memory-profiler==0.61.0",
     "modal==1.4.3",

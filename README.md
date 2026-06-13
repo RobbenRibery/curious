@@ -58,7 +58,7 @@ Launch training from your local checkout onto Modal:
 scripts/launch_baseline_gsm8k_grpo_modal.sh
 ```
 
-The prepared baseline uses `Qwen/Qwen3-0.6B` with SGLang rollout generation
+The prepared baseline uses `Qwen/Qwen3-1.7B` with SGLang rollout generation
 and FlashAttention-3 on one H100. The Modal launcher persists train logs, eval
 logs, checkpoints, Hugging Face cache, and W&B cache in the
 `curious-training-artifacts` Modal Volume. The wrapper forwards unknown flags to
