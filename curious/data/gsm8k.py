@@ -1,9 +1,10 @@
 import datasets
 from datasets import load_dataset
+import torch
 from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizer
 
-from curious.utils.utils import tokenize_questions
+from curious.utils.utils import tensorize_model_inputs, tokenize_questions
 from curious.prompt import *
 
 from typing import List, Dict, Optional
@@ -77,11 +78,7 @@ class GSM8KDataset(Dataset):
             ),
             batched=True,
         )
-        self.train.set_format(
-            type="pt",
-            columns=["input_ids", "attention_mask"],
-            output_all_columns=True,
-        )
+        self.train.set_transform(tensorize_model_inputs)
 
         ## Test dataset ##
         test_max_length = max(
@@ -102,12 +99,7 @@ class GSM8KDataset(Dataset):
             ),
             batched=True,
         )
-
-        self.test.set_format(
-            type="pt",
-            columns=["input_ids", "attention_mask"],
-            output_all_columns=True,
-        )
+        self.test.set_transform(tensorize_model_inputs)
 
     def get_answer_from_gt(self, answer_text: str) -> Dict[str, str]:
         """
@@ -145,6 +137,9 @@ class GSM8KDataset(Dataset):
 
         return {"oracle_answer": answer_str_digit}
 
+    def _format_item(self, item: Dict[str, str | List]) -> Dict[str, str | torch.Tensor | List]:
+        return tensorize_model_inputs(item)
+
     def __len__(self):
         """
         Get the length of the dataset.
@@ -173,8 +168,8 @@ class GSM8KDataset(Dataset):
         Dict[str, str|List]: The item at the given index.
         """
         if self.mode == "train":
-            return self.train[idx]
+            return self._format_item(self.train[idx])
         elif self.mode == "test":
-            return self.test[idx]
+            return self._format_item(self.test[idx])
         else:
             raise ValueError(f"Invalid mode: {self.mode}")

@@ -405,13 +405,32 @@ def form_hf_dataset(
             system_prompt=system_prompt),
         batched=True,
     )
-    df_dataset.set_format(
-        type="pt",
-        columns=["input_ids", "attention_mask"],
-        output_all_columns=True,
-    )
+    df_dataset.set_transform(tensorize_model_inputs)
     df_dataset = df_dataset.shuffle(seed=seed)
     return df_dataset
+
+
+def tensorize_model_inputs(batch: Dict[str, Any]) -> Dict[str, Any]:
+    formatted_batch = dict(batch)
+    for key in ("input_ids", "attention_mask"):
+        if key not in formatted_batch:
+            continue
+
+        values = formatted_batch[key]
+        if isinstance(values, torch.Tensor):
+            formatted_batch[key] = values.to(dtype=torch.long)
+        elif (
+            isinstance(values, (list, tuple))
+            and len(values) > 0
+            and isinstance(values[0], (list, tuple, torch.Tensor))
+        ):
+            formatted_batch[key] = [
+                torch.as_tensor(value, dtype=torch.long)
+                for value in values
+            ]
+        else:
+            formatted_batch[key] = torch.as_tensor(values, dtype=torch.long)
+    return formatted_batch
 
 def load_model_tokenizer(
     model_name_or_path: str,
