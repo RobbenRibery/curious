@@ -91,6 +91,14 @@ if [[ "${DRY_RUN}" != "1" && -z "${WANDB_API_KEY:-}" ]]; then
   exit 2
 fi
 
+if [[ "${DRY_RUN}" != "1" ]]; then
+  if ! "${PYTHON_BIN}" -c "import flash_attn_3, flash_attn_interface; assert hasattr(flash_attn_interface, 'flash_attn_func')" >/dev/null 2>&1; then
+    echo "FlashAttention-3 is not installed in this Python environment." >&2
+    echo "On the H100 VM, run: MAX_JOBS=8 uv sync --group h100-vm" >&2
+    exit 2
+  fi
+fi
+
 echo "Preparing local baseline ${OBJECTIVE_NAME} launch:"
 echo "  run: ${RUN_NAME}"
 echo "  W&B: ${WANDB_ENTITY}/${WANDB_PROJECT}"

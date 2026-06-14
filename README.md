@@ -38,6 +38,17 @@ This project uses [uv](https://docs.astral.sh/uv/) to manage dependencies.
    uv sync --group dev
    ```
 
+### H100 VM setup
+On a CUDA devel H100 VM with `nvcc` available, install the training runtime and
+build the Hopper FlashAttention-3 package into the project environment:
+```bash
+MAX_JOBS=8 uv sync --group h100-vm
+```
+
+The local H100 training launchers check for `flash_attn_3` and
+`flash_attn_interface` before starting. Run the sync command again after
+changing Python, PyTorch, CUDA, or the virtual environment.
+
 ## Usage
 Curious provides separate scripts for training and evaluation. Both use command line options (via tyro) for easy configuration.
 
@@ -67,6 +78,12 @@ from training options:
 ```bash
 scripts/modal_train.sh --gpu A100-80GB --timeout 86400 -- \
   --base-config.checkpoint-interval 20
+```
+
+Before a training run, you can smoke-test the Liger PyTorch model path with
+Transformers FlashAttention-3 on the same Modal H100 image:
+```bash
+scripts/modal_train.sh --gpu H100 --smoke-fa3
 ```
 
 You can call Modal directly as well; Modal's own CLI needs the first `--` before app arguments:

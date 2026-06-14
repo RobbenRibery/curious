@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import importlib
 
 from datasets.utils.tf_utils import minimal_tf_collate_fn_with_renaming
 from transformers import (
@@ -15,6 +16,42 @@ from curious.prompt import *
 
 import gc 
 import os
+
+
+DEFAULT_LIGER_ATTN_IMPLEMENTATION = "flash_attention_3"
+
+
+def validate_flash_attention_3_runtime() -> None:
+    """
+    Fail fast when the runtime cannot execute Transformers FlashAttention-3.
+    """
+    if not torch.cuda.is_available():
+        raise RuntimeError("FlashAttention-3 requires CUDA, but torch.cuda is not available.")
+
+    capability = torch.cuda.get_device_capability()
+    if capability[0] < 9:
+        raise RuntimeError(
+            "FlashAttention-3 requires a Hopper-or-newer GPU with compute capability >= 9.0; "
+            f"found compute capability {capability[0]}.{capability[1]}."
+        )
+
+    try:
+        importlib.import_module("flash_attn_3")
+    except ImportError as exc:
+        raise RuntimeError(
+            "FlashAttention-3 was requested, but the flash_attn_3 package is not installed. "
+            "On the Modal H100 image this should be built from Dao-AILab/flash-attention/hopper."
+        ) from exc
+
+    try:
+        flash_attn_interface = importlib.import_module("flash_attn_interface")
+    except ImportError as exc:
+        raise RuntimeError(
+            "FlashAttention-3 was requested, but flash_attn_interface is not importable. "
+            "The Hopper FlashAttention-3 install is incomplete."
+        ) from exc
+    if not hasattr(flash_attn_interface, "flash_attn_func"):
+        raise RuntimeError("The Hopper FlashAttention-3 install does not expose flash_attn_func.")
 
 
 LOGGING_TEMPLATE = dedent(
@@ -385,6 +422,7 @@ def load_model_tokenizer(
     checkpoint_path: Optional[str] = None,
     compile_model: bool = True,
     use_liger: bool = True,
+    liger_attn_implementation: str = DEFAULT_LIGER_ATTN_IMPLEMENTATION,
 ) -> tuple[PreTrainedModel, PreTrainedTokenizer]:
     """
     Loads a pre-trained model and its tokenizer.
@@ -404,11 +442,13 @@ def load_model_tokenizer(
     if torch.cuda.is_available():
         if use_liger:
             from liger_kernel.transformers import AutoLigerKernelForCausalLM
+            if liger_attn_implementation == "flash_attention_3":
+                validate_flash_attention_3_runtime()
             try:
                 model: PreTrainedModel = AutoLigerKernelForCausalLM.from_pretrained(
                     resolved_model_path,
                     trust_remote_code=trust_remote_code,
-                    attn_implementation="flash_attention_2",
+                    attn_implementation=liger_attn_implementation,
                     torch_dtype=dtype_,
                     device_map=device_map,
                 )

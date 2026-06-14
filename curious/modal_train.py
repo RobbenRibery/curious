@@ -30,8 +30,14 @@ training_image = (
     .apt_install(
         "build-essential",
         "git",
+        "ninja-build",
     )
     .uv_sync(uv_version="0.6.12")
+    .run_commands(
+        "git clone --depth 1 https://github.com/Dao-AILab/flash-attention.git /tmp/flash-attention",
+        "cd /tmp/flash-attention/hopper && MAX_JOBS=8 python setup.py install",
+        "python -c \"import importlib.util; assert importlib.util.find_spec('flash_attn_3'); import flash_attn_interface\"",
+    )
     .workdir("/root")
     .env(
         {
@@ -130,6 +136,54 @@ def run_training(training_args: list[str]) -> int:
         artifacts_volume.commit()
 
 
+@app.function(
+    image=training_image,
+    gpu=DEFAULT_GPU,
+    volumes={ARTIFACTS_DIR: artifacts_volume},
+    cpu=16,
+    memory=96 * 1024,
+    timeout=60 * 60,
+)
+def run_liger_fa3_smoke(model_name: str, prompt: str) -> dict[str, str]:
+    import torch
+
+    from curious.utils.utils import (
+        DEFAULT_LIGER_ATTN_IMPLEMENTATION,
+        load_model_tokenizer,
+        validate_flash_attention_3_runtime,
+    )
+
+    validate_flash_attention_3_runtime()
+    model, tokenizer = load_model_tokenizer(
+        model_name_or_path=model_name,
+        dtype_=torch.bfloat16,
+        device_map="auto",
+        compile_model=False,
+        use_liger=True,
+    )
+    attn_implementation = getattr(model.config, "_attn_implementation", None) or getattr(
+        model.config, "attn_implementation", None
+    )
+    if attn_implementation != DEFAULT_LIGER_ATTN_IMPLEMENTATION:
+        raise RuntimeError(
+            f"Expected {DEFAULT_LIGER_ATTN_IMPLEMENTATION}, but model config reports {attn_implementation!r}."
+        )
+
+    inputs = tokenizer(prompt, return_tensors="pt")
+    inputs = {key: value.to(model.device) for key, value in inputs.items()}
+    with torch.no_grad():
+        outputs = model(**inputs, use_cache=False)
+    if not torch.isfinite(outputs.logits).all():
+        raise RuntimeError("Liger FlashAttention-3 smoke forward produced non-finite logits.")
+
+    return {
+        "model": model_name,
+        "device": str(model.device),
+        "attention": str(attn_implementation),
+        "dtype": str(next(model.parameters()).dtype),
+    }
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Launch curious training on Modal and forward trailing args to curious.training.",
@@ -151,6 +205,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Spawn the remote function and return immediately after Modal accepts the call.",
     )
+    parser.add_argument(
+        "--smoke-fa3",
+        action="store_true",
+        help="Run a remote H100 smoke test for Liger + Transformers FlashAttention-3 instead of training.",
+    )
+    parser.add_argument("--smoke-model", default="Qwen/Qwen3-1.7B", help="Model used by --smoke-fa3.")
+    parser.add_argument("--smoke-prompt", default="What is 1 + 1?", help="Prompt used by --smoke-fa3.")
     return parser
 
 
@@ -184,6 +245,20 @@ def main(*arglist: str) -> None:
             secret_names=launcher_args.secret,
         ),
     )
+    if launcher_args.smoke_fa3:
+        result = run_liger_fa3_smoke.with_options(
+            gpu=launcher_args.gpu,
+            cloud=launcher_args.cloud,
+            region=launcher_args.region,
+            timeout=launcher_args.timeout,
+            secrets=_local_secrets(
+                dotenv_path=dotenv_path,
+                include_env_secret=not launcher_args.no_local_env_secret,
+                secret_names=launcher_args.secret,
+            ),
+        ).remote(model_name=launcher_args.smoke_model, prompt=launcher_args.smoke_prompt)
+        print(f"Liger FlashAttention-3 smoke test passed: {result}")
+        return
 
     call = function.spawn(training_args)
     print(f"Started Modal training call {call.object_id}")
