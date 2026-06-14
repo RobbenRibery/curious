@@ -39,17 +39,16 @@ This project uses [uv](https://docs.astral.sh/uv/) to manage dependencies.
    ```
 
 ### H100 VM setup
-On a CUDA devel H100 VM with CUDA 12.6 available at `/usr/local/cuda-12.6`,
-install the training runtime and build the Hopper FlashAttention-3 package into
-uv's default project environment, `.venv`:
+On an H100 VM, install the prebuilt CUDA 13 PyTorch/SGLang/FlashAttention stack
+into uv's default project environment, `.venv`:
 ```bash
-MAX_JOBS=8 uv sync --group h100-vm
+uv -vv sync --group h100-vm
 ```
 
 The local H100 training launchers check for `flash_attn_3` and
 `flash_attn_interface` before starting. Run the sync command again after
-changing Python, PyTorch, or CUDA. Do not remove or recreate `.venv` unless you
-intentionally want a clean environment.
+changing Python or the virtual environment. Do not remove or recreate `.venv`
+unless you intentionally want a clean environment.
 
 ## Usage
 Curious provides separate scripts for training and evaluation. Both use command line options (via tyro) for easy configuration.

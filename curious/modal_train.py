@@ -33,11 +33,6 @@ training_image = (
         "ninja-build",
     )
     .uv_sync(uv_version="0.9.18")
-    .run_commands(
-        "git clone --depth 1 https://github.com/Dao-AILab/flash-attention.git /tmp/flash-attention",
-        "cd /tmp/flash-attention/hopper && MAX_JOBS=8 python setup.py install",
-        "python -c \"import importlib.util; assert importlib.util.find_spec('flash_attn_3'); import flash_attn_interface\"",
-    )
     .workdir("/root")
     .env(
         {

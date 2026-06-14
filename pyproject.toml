@@ -12,17 +12,18 @@ dependencies = [
     "accelerate==1.6.0",
     "datasets==3.5.0",
     "diff-parser==1.1",
-    "flashinfer-python==0.2.9rc2; sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "liger-kernel==0.5.9; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "flash-attn-3==3.0.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "flash-attn-4>=4.0.0b9; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "liger-kernel==0.8.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "math-verify==0.7.0",
     "memory-profiler==0.61.0",
     "modal==1.4.3",
     "python-dotenv==1.1.0",
     "setuptools==76.1.0",
-    "sglang[srt]==0.4.10.post2; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sglang==0.5.13; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "toml==0.10.2",
-    "torch==2.7.1",
-    "transformers==4.54.1",
+    "torch==2.11.0",
+    "transformers==5.8.1",
     "tree-sitter==0.24.0",
     "trl==0.16.1",
     "tyro==0.9.18",
@@ -35,14 +36,17 @@ dev = [
     "ipykernel==6.29.5",
 ]
 h100-vm = [
-    "flash-attn-3 @ git+https://github.com/Dao-AILab/flash-attention.git#subdirectory=hopper",
 ]
 
 [tool.uv]
 required-version = ">=0.9.0"
-dependency-metadata = [
-    { name = "flash-attn-3", version = "3.0.0", requires-dist = ["torch", "packaging"], requires-python = ">=3.10" },
-]
-extra-build-variables = { flash-attn-3 = { CUDA_HOME = "/usr/local/cuda-12.6", PYTORCH_NVCC = "/usr/local/cuda-12.6/bin/nvcc" } }
-no-build-isolation-package = ["flash-attn-3"]
+prerelease = "allow"
 package = false
+
+[tool.uv.sources]
+flash-attn-3 = { index = "pytorch-cu130" }
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true

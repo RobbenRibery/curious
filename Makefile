@@ -7,10 +7,6 @@ check_shell:
 # You can override all of these variables on the command line like so:
 ENV_NAME = .venv
 PYTHON_VERSION = 3.11
-CUDA_HOME ?= /usr/local/cuda-12.6
-PYTORCH_NVCC ?= $(CUDA_HOME)/bin/nvcc
-TORCH_CUDA_ARCH_LIST ?= 9.0
-MAX_JOBS ?= 16
 
 # use uv's default project .venv
 .PHONY: install
@@ -20,11 +16,6 @@ install:
 .PHONY: install-h100-vm
 install-h100-vm:
 	unset UV_PROJECT_ENVIRONMENT; \
-	CUDA_HOME="$(CUDA_HOME)" \
-	PYTORCH_NVCC="$(PYTORCH_NVCC)" \
-	TORCH_CUDA_ARCH_LIST="$(TORCH_CUDA_ARCH_LIST)" \
-	FLASH_ATTENTION_FORCE_BUILD=TRUE \
-	MAX_JOBS="$(MAX_JOBS)" \
 	uv -vv sync --group h100-vm
 
 .PHONY: clean
