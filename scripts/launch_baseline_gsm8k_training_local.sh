@@ -95,6 +95,7 @@ if [[ "${DRY_RUN}" != "1" ]]; then
   if ! "${PYTHON_BIN}" -c "import flash_attn_3, flash_attn_interface; assert hasattr(flash_attn_interface, 'flash_attn_func')" >/dev/null 2>&1; then
     echo "FlashAttention-3 is not installed in this Python environment." >&2
     echo "On the H100 VM, run: MAX_JOBS=8 uv sync --group h100-vm" >&2
+    echo "That sync expects uv >= 0.9 and CUDA 12.6 at /usr/local/cuda-12.6." >&2
     exit 2
   fi
 fi

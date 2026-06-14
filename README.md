@@ -39,8 +39,9 @@ This project uses [uv](https://docs.astral.sh/uv/) to manage dependencies.
    ```
 
 ### H100 VM setup
-On a CUDA devel H100 VM with `nvcc` available, install the training runtime and
-build the Hopper FlashAttention-3 package into the project environment:
+On a CUDA devel H100 VM with CUDA 12.6 available at `/usr/local/cuda-12.6`,
+install the training runtime and build the Hopper FlashAttention-3 package into
+the project environment:
 ```bash
 MAX_JOBS=8 uv sync --group h100-vm
 ```

@@ -32,7 +32,7 @@ training_image = (
         "git",
         "ninja-build",
     )
-    .uv_sync(uv_version="0.6.12")
+    .uv_sync(uv_version="0.9.18")
     .run_commands(
         "git clone --depth 1 https://github.com/Dao-AILab/flash-attention.git /tmp/flash-attention",
         "cd /tmp/flash-attention/hopper && MAX_JOBS=8 python setup.py install",
