@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import torch
@@ -5,6 +6,7 @@ from transformers import GenerationConfig
 
 from curious.sampling.sglang_backend import (
     SGLangGenerationBackend,
+    _build_sglang_subprocess_env,
     _extract_output_token_ids,
     build_sampled_response_tensors,
 )
@@ -21,6 +23,27 @@ class FakeTokenizer:
     def save_pretrained(self, path: Path) -> None:
         path.mkdir(parents=True, exist_ok=True)
         (path / "tokenizer.json").write_text("{}")
+
+
+def test_sglang_subprocess_env_exposes_nvidia_cuda_wheel_paths(tmp_path, monkeypatch):
+    package_dir = tmp_path / "site-packages"
+    curand_include = package_dir / "nvidia" / "curand" / "include"
+    curand_lib = package_dir / "nvidia" / "curand" / "lib"
+    nvcc_bin = package_dir / "nvidia" / "cuda_nvcc" / "bin"
+    curand_include.mkdir(parents=True)
+    curand_lib.mkdir(parents=True)
+    nvcc_bin.mkdir(parents=True)
+
+    monkeypatch.setenv("CPATH", "/already/include")
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/already/lib")
+    env = _build_sglang_subprocess_env([package_dir])
+
+    assert env["CPATH"].split(os.pathsep)[:2] == [str(curand_include), "/already/include"]
+    assert env["C_INCLUDE_PATH"].split(os.pathsep)[0] == str(curand_include)
+    assert env["CPLUS_INCLUDE_PATH"].split(os.pathsep)[0] == str(curand_include)
+    assert env["LIBRARY_PATH"].split(os.pathsep)[0] == str(curand_lib)
+    assert env["LD_LIBRARY_PATH"].split(os.pathsep)[:2] == [str(curand_lib), "/already/lib"]
+    assert env["PATH"].split(os.pathsep)[0] == str(nvcc_bin)
 
 
 def test_build_sampled_response_tensors_aligns_actions_to_generated_tokens():

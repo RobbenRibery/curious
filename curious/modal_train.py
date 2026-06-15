@@ -24,7 +24,7 @@ artifacts_volume = modal.Volume.from_name(ARTIFACTS_VOLUME_NAME, create_if_missi
 
 training_image = (
     modal.Image.from_registry(
-        "nvidia/cuda:12.4.1-devel-ubuntu22.04",
+        "nvidia/cuda:13.0.2-devel-ubuntu22.04",
         add_python="3.11",
     )
     .apt_install(

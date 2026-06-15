@@ -3,8 +3,10 @@ from dataclasses import dataclass
 import json
 import os
 import shutil
+import site
 import subprocess
 import sys
+import sysconfig
 import time
 import urllib.error
 import urllib.request
@@ -20,6 +22,85 @@ class WeightSyncPlan:
     target_path: Path
     tmp_path: Path
     static_path: Path
+
+
+_NVIDIA_CUDA_WHEEL_PACKAGES = (
+    "cublas",
+    "cuda_cupti",
+    "cuda_nvcc",
+    "cuda_nvrtc",
+    "cuda_runtime",
+    "cufft",
+    "curand",
+    "cusolver",
+    "cusparse",
+    "nvjitlink",
+    "nvtx",
+)
+
+
+def _candidate_python_package_dirs() -> list[Path]:
+    raw_paths = [
+        *sys.path,
+        sysconfig.get_paths().get("purelib"),
+        sysconfig.get_paths().get("platlib"),
+    ]
+    if hasattr(site, "getsitepackages"):
+        raw_paths.extend(site.getsitepackages())
+    try:
+        raw_paths.append(site.getusersitepackages())
+    except RuntimeError:
+        pass
+
+    paths: list[Path] = []
+    seen: set[Path] = set()
+    for raw_path in raw_paths:
+        if not raw_path:
+            continue
+        path = Path(raw_path)
+        if path in seen or not path.exists():
+            continue
+        seen.add(path)
+        paths.append(path)
+    return paths
+
+
+def _prepend_env_paths(env: dict[str, str], key: str, paths: list[Path]) -> None:
+    existing_paths = [value for value in env.get(key, "").split(os.pathsep) if value]
+    prepend_paths = [str(path) for path in paths if path.exists()]
+    deduped_paths: list[str] = []
+    seen: set[str] = set()
+    for path in [*prepend_paths, *existing_paths]:
+        if path in seen:
+            continue
+        seen.add(path)
+        deduped_paths.append(path)
+    if deduped_paths:
+        env[key] = os.pathsep.join(deduped_paths)
+
+
+def _build_sglang_subprocess_env(package_dirs: list[Path] | None = None) -> dict[str, str]:
+    env = os.environ.copy()
+    package_dirs = package_dirs if package_dirs is not None else _candidate_python_package_dirs()
+
+    include_dirs: list[Path] = []
+    library_dirs: list[Path] = []
+    binary_dirs: list[Path] = []
+    for package_dir in package_dirs:
+        nvidia_dir = package_dir / "nvidia"
+        for package_name in _NVIDIA_CUDA_WHEEL_PACKAGES:
+            cuda_package_dir = nvidia_dir / package_name
+            include_dirs.append(cuda_package_dir / "include")
+            library_dirs.extend([cuda_package_dir / "lib", cuda_package_dir / "lib64"])
+            binary_dirs.append(cuda_package_dir / "bin")
+
+    _prepend_env_paths(env, "CPATH", include_dirs)
+    _prepend_env_paths(env, "C_INCLUDE_PATH", include_dirs)
+    _prepend_env_paths(env, "CPLUS_INCLUDE_PATH", include_dirs)
+    _prepend_env_paths(env, "LIBRARY_PATH", library_dirs)
+    _prepend_env_paths(env, "LD_LIBRARY_PATH", library_dirs)
+    _prepend_env_paths(env, "PATH", binary_dirs)
+    return env
 
 
 class SGLangGenerationBackend:
@@ -75,7 +156,7 @@ class SGLangGenerationBackend:
             command.extend(["--chunked-prefill-size", str(chunked_prefill_size)])
 
         print("Starting SGLang rollout server:", " ".join(command), flush=True)
-        self.process = subprocess.Popen(command)
+        self.process = subprocess.Popen(command, env=_build_sglang_subprocess_env())
         atexit.register(self.close)
         self._wait_until_ready(startup_timeout)
 
