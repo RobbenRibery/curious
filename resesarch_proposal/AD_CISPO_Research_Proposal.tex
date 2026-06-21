@@ -7,29 +7,153 @@
 \usepackage{hyperref}
 \usepackage{microtype}
 
-\title{AD-CISPO: Token-Adaptive Clipped IS-Weight Policy Optimization}
+\title{AD-CISPO: Saliency-Budgeted Clipped Importance Sampling for Reasoning RL}
 \author{}
 \date{}
 
 \begin{document}
 \maketitle
 
-\section{Thesis}
+\begin{abstract}
+Long-chain reasoning reinforcement learning depends on stable policy-gradient
+updates over token sequences, but current clipped objectives usually apply the
+same clipping radius to every generated token. This proposal studies
+AD-CISPO, a token-adaptive extension of MiniMax's clipped importance-sampling
+policy optimization (CISPO). The central hypothesis is that CISPO's dense
+token-gradient property can be preserved while improving sample efficiency by
+allocating a wider upper importance-sampling corridor to tokens that a frozen
+reference model treats as structurally important for subsequent generated
+tokens. The proposed novelty is a mean-preserving, saliency-budgeted upper
+clipping rule: the average clipping budget remains equal to the scalar CISPO
+baseline, but the budget is redistributed across generated tokens using exact
+future-attention in-degree from selected reference-model layers.
+\end{abstract}
 
-MiniMax-M1 introduces CISPO, a policy-gradient objective that clips the
-importance-sampling (IS) weight rather than clipping away token updates as in
-PPO/GRPO-style surrogate objectives.\footnote{\url{https://arxiv.org/html/2506.13585v1}}
-This proposal studies an adaptive extension, AD-CISPO, where the upper IS
-weight clipping radius is varied per token using frozen reference-model
-saliency. The goal is to keep CISPO's dense token-gradient property while
-allocating a wider update corridor to tokens that appear structurally important
-for reasoning.
+\section{Problem and Motivation}
+
+Reinforcement learning has become a practical way to elicit mathematical and
+long-form reasoning from language models, especially when correctness can be
+checked by rule-based or programmatic rewards. PPO-style RLHF established
+clipped policy-gradient training as a scalable alignment method
+\cite{schulman2017ppo,ouyang2022instructgpt}, while GRPO removed the critic by
+using group-relative advantages and has been widely used for mathematical
+reasoning \cite{shao2024deepseekmath,deepseek2025r1}. More recent systems such
+as DAPO and MiniMax-M1 focus on stabilizing long-chain reasoning RL at scale
+\cite{yu2025dapo,minimax2025m1}.
+
+The unresolved problem is that scalar clipping treats every generated token as
+equally deserving of update freedom. In chain-of-thought-style reasoning, this
+is unlikely to be true. A token that introduces an intermediate quantity,
+selects an operation, or anchors a later conclusion may matter more than a
+formatting token or locally redundant phrase. A single global clipping radius
+therefore creates an undesirable tradeoff:
+\begin{itemize}[leftmargin=*]
+  \item if the radius is tight, important reasoning tokens may be prevented
+  from moving enough when the reward signal identifies a better trajectory;
+  \item if the radius is loose, low-value or unstable tokens receive the same
+  update corridor, increasing variance and drift;
+  \item if PPO/GRPO surrogate clipping suppresses token updates, the model can
+  lose useful gradient signal exactly when the sampled policy has moved outside
+  the trust corridor.
+\end{itemize}
+
+CISPO directly targets the third issue by clipping the importance-sampling
+(IS) weight itself and using the detached clipped weight to scale
+$\log \pi_\theta$, so clipped tokens still contribute gradients
+\cite{minimax2025m1}. AD-CISPO asks whether the remaining scalar-budget issue
+can be addressed without abandoning CISPO's dense-gradient design.
+
+\section{Existing Solutions and Limitations}
+
+\paragraph{PPO and GRPO.}
+PPO clips the policy-ratio surrogate to control policy updates while allowing
+multiple optimization epochs per batch \cite{schulman2017ppo}. GRPO adapts
+this family of methods to reasoning models by computing advantages from a
+group of sampled responses rather than a learned critic
+\cite{shao2024deepseekmath}. These methods are simple and effective, but their
+token-level clipping rules still use fixed trust-region hyperparameters.
+
+\paragraph{DAPO and asymmetric clipping.}
+DAPO improves long-chain reasoning RL with techniques such as a higher upper
+clip, dynamic sampling, token-level policy-gradient loss, and overlong reward
+shaping \cite{yu2025dapo}. This is an important baseline because it shows that
+the upper clipping corridor matters for reasoning RL. However, DAPO still
+treats the upper corridor as a sequence-wide or globally configured scalar,
+not as a budget to be distributed across tokens.
+
+\paragraph{CISPO.}
+MiniMax-M1 proposes CISPO, which clips IS weights rather than clipping away
+token updates and reports improved RL efficiency in large-scale reasoning
+training \cite{minimax2025m1}. CISPO is the strongest starting point for this
+proposal because it preserves per-token gradient density. Its limitation for
+this project is that the upper IS clipping radius remains scalar.
+
+\paragraph{Attention-based saliency.}
+Transformers route information through attention mechanisms
+\cite{vaswani2017attention}, and attention patterns can provide useful
+structural signals. However, attention weights should not be treated as direct
+causal explanations of model behavior \cite{jain2019attention}. Attention
+sinks are a concrete example: initial or special tokens may receive high
+attention for non-semantic reasons \cite{xiao2024streamingllm}. AD-CISPO
+therefore uses frozen-reference attention only as an update-budget heuristic,
+not as a claim about human-interpretable explanation, and explicitly masks
+prompt and sink tokens.
+
+\section{Research Gap}
+
+Existing reasoning-RL objectives answer two separate questions only partially:
+\begin{enumerate}[leftmargin=*]
+  \item How can policy-gradient updates remain stable under off-policy drift?
+  PPO, GRPO, DAPO, and CISPO address this through clipped ratios or clipped
+  IS weights.
+  \item Which generated tokens deserve a larger or smaller update corridor?
+  Existing methods largely do not answer this; they apply scalar clipping
+  budgets across all tokens.
+\end{enumerate}
+
+The gap is a token-budgeted trust-region objective for language-model RL: one
+that keeps the same average clipping budget as a scalar baseline, but reallocates
+that budget according to a frozen, reproducible structural signal. AD-CISPO is
+designed to fill this gap for CISPO-style clipped IS-weight policy gradients.
+
+\section{Proposed Solution}
+
+AD-CISPO replaces the scalar upper IS clipping radius in CISPO with a
+token-adaptive upper radius. The lower bound remains inactive by default to
+match the MiniMax-style CISPO baseline. Each generated token receives a
+multiplier computed from frozen-reference saliency, and the multipliers are
+normalized so their mean over valid generated tokens is $1$. This preserves the
+same average clipping budget as scalar CISPO while changing where the budget is
+spent.
+
+\paragraph{Core hypothesis.}
+For reasoning tasks with sparse sequence-level rewards, reallocating CISPO's
+upper clipping budget toward structurally reused generated tokens will improve
+learning efficiency or stability relative to scalar CISPO, while shuffled or
+uniform multipliers should remove the gain if the saliency signal is doing real
+work.
+
+\paragraph{What is novel.}
+The proposal's novelty is not the use of attention as a saliency heuristic by
+itself. The novel contribution is the combination of:
+\begin{enumerate}[leftmargin=*]
+  \item CISPO-compatible token-adaptive upper IS clipping that preserves dense
+  token gradients;
+  \item mean-preserving multiplier normalization, so AD-CISPO changes budget
+  allocation rather than increasing the total average clipping budget;
+  \item exact frozen-reference future-attention in-degree, computed only over
+  valid generated tokens and excluding prompt/sink tokens;
+  \item blockwise implementation that avoids materializing full attention
+  tensors while preserving exact selected-layer attention weights;
+  \item falsifiable ablations that separate saliency from extra variance,
+  asymmetric clipping, and reference-model overhead.
+\end{enumerate}
 
 \section{Notation}
 
 \begin{center}
 \small
-\begin{tabular}{p{0.22\linewidth}p{0.45\linewidth}p{0.23\linewidth}}
+\begin{tabular}{p{0.20\linewidth}p{0.48\linewidth}p{0.22\linewidth}}
 \toprule
 Symbol & Meaning & Shape or domain \\
 \midrule
@@ -44,16 +168,17 @@ $r_{i,t}(\theta)$ & IS weight
   $\frac{\pi_\theta(o_{i,t}|q,o_{i,<t})}
   {\pi_{\theta_{\mathrm{old}}}(o_{i,t}|q,o_{i,<t})}$ & positive scalar \\
 $\hat{A}_i$ & group-relative sequence advantage for response $i$ & scalar \\
+$M_i$ & valid generated-token mask for response $i$ & token-position set \\
 $S_{i,t}$ & raw frozen-reference saliency for token $o_{i,t}$ & nonnegative scalar \\
-$m_{i,t}$ & normalized token multiplier & nonnegative scalar, mean $1$ over valid tokens \\
+$m_{i,t}$ & normalized token multiplier & nonnegative scalar, mean $1$ over $M_i$ \\
 $\epsilon^{IS}_{\mathrm{low}}$ & lower IS clipping radius & nonnegative scalar \\
-$\epsilon^{IS}_{\mathrm{high}}$ & base upper IS clipping radius & positive scalar \\
+$\epsilon^{IS}_{\mathrm{high}}$ & scalar upper IS clipping radius & positive scalar \\
 $\epsilon^{IS}_{i,t,\mathrm{high}}$ & token-adaptive upper IS clipping radius & positive scalar \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\section{MiniMax CISPO Baseline}
+\section{Baseline: MiniMax-Style CISPO}
 
 The CISPO baseline starts from the off-policy REINFORCE objective with the IS
 weight treated as a stop-gradient coefficient:
@@ -95,14 +220,12 @@ and optimizes
   \right].
 \end{equation}
 
-The MiniMax-M1 paper reports that their CISPO experiments did not impose a
-lower IS-weight bound: they made $\epsilon^{IS}_{\mathrm{low}}$ large and tuned
-only $\epsilon^{IS}_{\mathrm{high}}$. The paper also states that CISPO uses no
-KL penalty term. A faithful MiniMax-style baseline should therefore set the KL
-coefficient to zero and either disable the lower bound or set it so low that it
-does not bind.
+A faithful baseline for this proposal sets the KL coefficient to zero and
+avoids an active lower IS-weight bound, following the MiniMax-M1 description of
+CISPO \cite{minimax2025m1}. This isolates the effect of the upper clipping
+budget.
 
-\section{AD-CISPO Extension}
+\section{AD-CISPO Objective}
 
 AD-CISPO replaces the scalar upper clipping radius with a token-adaptive upper
 radius:
@@ -141,23 +264,23 @@ The adaptive multiplier is computed from frozen-reference saliency:
   \tilde{m}_{i,t}
   =
   \frac{S_{i,t}}
-  {\frac{1}{|M_i|}\sum_{u \in M_i} S_{i,u}},
+  {\frac{1}{|M_i|}\sum_{u \in M_i} S_{i,u}}.
 \end{equation}
-where $M_i$ is the valid generated-token mask. If all valid saliency values are
-zero or non-finite, $\tilde{m}_{i,t}$ falls back to $1$ for valid tokens.
-
-If lower or upper multiplier bounds are used, they must be followed by a
-renormalization or projection step so that the mean multiplier over valid tokens
-remains $1$. A plain clamp such as $m_{i,t}=\max(\tilde{m}_{i,t},\delta)$ is not
-sufficient because it changes the mean clipping budget.
+If all valid saliency values are zero or non-finite, $\tilde{m}_{i,t}$ falls
+back to $1$ for valid tokens. If lower or upper multiplier bounds are used,
+they must be followed by renormalization or projection so that
+\begin{equation}
+  \frac{1}{|M_i|}\sum_{t \in M_i} m_{i,t} = 1.
+\end{equation}
+A plain clamp is insufficient because it changes the total clipping budget.
 
 \section{Saliency Estimation}
 
 The main AD-CISPO implementation uses exact frozen-reference future-attention
 in-degree. For a selected reference layer $\ell$ and head $h$, let
 $a^{(\ell,h)}_{i,j,t}$ denote the causal attention probability from the query at
-token position $j$ to the key/value position $t$. The saliency assigned to token
-$o_{i,t}$ is
+token position $j$ to the key/value position $t$. The saliency assigned to
+token $o_{i,t}$ is
 \begin{equation}
   S_{i,t}
   =
@@ -168,18 +291,18 @@ $o_{i,t}$ is
   \sum_{\substack{j \in M_i \\ j > t}}
   a^{(\ell,h)}_{i,j,t}.
 \end{equation}
-Thus a token is salient when later valid generated tokens attend to it under the
-frozen reference model. The strict condition $j>t$ prevents self-attention from
-inflating saliency, and $M_i$ excludes prompt positions and special-token sinks
-from both the source queries and target keys used for adaptive clipping.
+Thus a token is salient when later valid generated tokens attend to it under
+the frozen reference model. The strict condition $j>t$ prevents self-attention
+from inflating saliency. $M_i$ excludes prompt positions and special-token
+sinks from both source queries and target keys.
 
 The implementation computes this quantity blockwise from reference-model
 post-RoPE query and key states. This avoids materializing a full batch of
-$T \times T$ attention matrices while preserving the exact softmax attention
-weights for the selected layers, including the model's causal, padding, and
-sliding-window masks.
+$T \times T$ attention matrices while preserving exact softmax attention
+weights for the selected layers, including causal, padding, and sliding-window
+masks.
 
-A frozen-reference key-vector norm remains a cheaper ablation:
+A cheaper ablation is frozen-reference key-vector norm:
 \begin{equation}
   S^{\mathrm{KV}}_{i,t}
   =
@@ -187,46 +310,207 @@ A frozen-reference key-vector norm remains a cheaper ablation:
   \sum_{\ell \in L_{\mathrm{top}}}
   \left\|k^{(\ell)}_{i,t}\right\|_2.
 \end{equation}
-It should be reported as a proxy baseline, not as the primary AD-CISPO saliency
+It should be reported as a proxy baseline, not as the primary saliency
 definition.
 
-\section{Implementation Contract}
+\section{Implementation Plan}
 
-A mathematically aligned AD-CISPO implementation should satisfy the following
-conditions:
+The minimum implementation should use the existing Curious training path and
+GSM8K reward setup \cite{cobbe2021gsm8k}. The intended experimental model is a
+small reasoning-capable open model, such as the repository's Qwen3-1.7B
+configuration, so that full ablations are affordable on a single H100.
+
+\begin{center}
+\fbox{\begin{minipage}{0.88\linewidth}
+\small
+\textbf{Implementation flow:}
+$\pi_{\theta_{\mathrm{old}}}$ samples grouped responses
+$\rightarrow$ rule-based verifier computes rewards and group advantages
+$\rightarrow$ frozen $\pi_{\mathrm{ref}}$ computes log-probs and saliency
+$\rightarrow$ saliency is normalized into $m_{i,t}$
+$\rightarrow$ token thresholds
+$\epsilon^{IS}_{i,t,\mathrm{high}}=\epsilon^{IS}_{\mathrm{high}}m_{i,t}$
+$\rightarrow$ CISPO loss uses detached clipped IS weights
+$\rightarrow$ metrics log reward, exact match, clipping, saliency, and
+runtime overhead.
+\end{minipage}}
+\end{center}
+
+\paragraph{Implementation contract.}
+A mathematically aligned AD-CISPO implementation should satisfy the following:
 \begin{enumerate}[leftmargin=*]
   \item CISPO loss must use a detached clipped IS weight multiplying
   $\log\pi_\theta$, not a PPO/GRPO surrogate minimum.
   \item AD-CISPO must be enabled only with the CISPO loss, unless explicitly
   naming and evaluating an adaptive-GRPO ablation.
-  \item A MiniMax-faithful CISPO baseline should set KL weight to zero and avoid
-  an active lower IS-weight bound.
+  \item MiniMax-style CISPO should set KL weight to zero and avoid an active
+  lower IS-weight bound.
   \item Token-adaptive clipping should change only the upper IS clipping radius
   unless a lower-bound ablation is deliberately introduced.
-  \item The default AD-CISPO saliency should be exact frozen-reference
-  future-attention in-degree. KV-norm saliency is only a lower-cost ablation.
-  \item Saliency tensors should be assigned to the generated token
-  $o_{i,t}$ whose IS weight is being clipped. In an implementation where
-  logits at position $t-1$ predict token $t$, this corresponds to aligning
-  generated-token saliency with the next-token log-probability terms rather
-  than using the preceding hidden-state position.
+  \item Saliency tensors should align with the generated token whose IS weight
+  is being clipped. In next-token prediction implementations, generated-token
+  saliency must align with next-token log-probability terms, not the preceding
+  hidden-state position.
   \item Claims about compute and memory must distinguish active-policy overhead
   from frozen-reference overhead.
 \end{enumerate}
 
 \section{Evaluation Plan}
 
-The minimum evaluation should compare:
+\paragraph{Datasets and tasks.}
+The first target is GSM8K, because it has a clear exact-answer reward and is
+already supported in Curious \cite{cobbe2021gsm8k}. If the GSM8K signal is
+positive, the next tasks should be MATH or AIME-style problems to test whether
+the method transfers to longer and harder reasoning chains.
+
+\paragraph{Baselines.}
+The minimum comparison set is:
 \begin{enumerate}[leftmargin=*]
   \item GRPO/PPO-style surrogate baseline.
-  \item MiniMax-faithful CISPO: no KL, no active lower IS bound, scalar upper
+  \item DAPO-style asymmetric clipping or clip-high baseline.
+  \item MiniMax-style CISPO: no KL, no active lower IS bound, scalar upper
   IS radius.
-  \item AD-CISPO with exact future-attention in-degree saliency and
-  token-adaptive upper radius.
-  \item AD-CISPO with KV-norm proxy saliency as a lower-cost ablation.
-  \item Ablation with shuffled or uniform multipliers to test whether saliency,
-  rather than extra variance, causes any gain.
+  \item AD-CISPO with exact future-attention in-degree saliency.
+  \item AD-CISPO with KV-norm proxy saliency.
+  \item Shuffled-saliency and uniform-multiplier controls.
   \item Optional adaptive-GRPO ablation, clearly separated from AD-CISPO.
 \end{enumerate}
+
+\paragraph{Metrics.}
+Report both task performance and optimizer behavior:
+\begin{itemize}[leftmargin=*]
+  \item GSM8K exact-match accuracy, verifier reward, and pass@k where useful;
+  \item reward-per-token and reward-per-GPU-hour;
+  \item upper-clip saturation rate and token update coverage;
+  \item entropy, approximate KL to the reference model when logged, and
+  response length;
+  \item AD-CISPO multiplier mean, min, max, saliency mean, and saliency
+  concentration;
+  \item frozen-reference overhead in wall-clock time and peak memory.
+\end{itemize}
+
+\paragraph{Decision rule.}
+AD-CISPO should be considered successful only if it improves exact-match or
+reward efficiency over scalar CISPO at comparable compute, or if it provides a
+clear stability advantage such as lower collapse rate or smoother reward
+improvement. A gain that also appears for shuffled saliency should be treated
+as evidence for variance injection or changed clipping distribution, not for
+the proposed saliency mechanism.
+
+\section{Milestones}
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{Week 1:} verify MiniMax-style CISPO against GRPO on GSM8K with
+  matched model, batch size, rollout count, and reward function.
+  \item \textbf{Week 2:} profile exact future-attention saliency and KV-norm
+  saliency on short runs; confirm mean-preserving multiplier statistics.
+  \item \textbf{Week 3:} run AD-CISPO, scalar CISPO, KV-norm, shuffled, and
+  uniform ablations with matched seeds.
+  \item \textbf{Week 4:} analyze reward curves, clipping dynamics, saliency
+  concentration, runtime overhead, and representative trajectory changes.
+\end{enumerate}
+
+\section{Risks, Ablations, and Fallbacks}
+
+\paragraph{Risk: attention saliency is not causal.}
+Attention weights may not explain model behavior \cite{jain2019attention}.
+This is why AD-CISPO is framed as a budget-allocation heuristic. The shuffled
+saliency ablation is required; gradient-based or leave-one-token-out saliency
+can be explored if attention in-degree fails.
+
+\paragraph{Risk: attention sinks distort saliency.}
+Initial and special tokens can attract attention for non-semantic reasons
+\cite{xiao2024streamingllm}. The implementation must mask prompt and sink
+tokens, use generated-token-only normalization, and report saliency
+concentration diagnostics.
+
+\paragraph{Risk: frozen-reference overhead dominates.}
+Exact future-attention in-degree requires additional reference-model work. The
+fallback is KV-norm saliency, fewer top layers, larger attention blocks, or
+saliency recomputation at a lower cadence.
+
+\paragraph{Risk: budget concentration increases variance.}
+Large multipliers may overemphasize a small set of tokens. The fallback is a
+bounded multiplier projection with post-clamp renormalization, plus reporting
+clip-min, clip-max, and saturation metrics.
+
+\section{Expected Impact}
+
+If successful, AD-CISPO would provide evidence that reasoning-RL trust regions
+should be token-budgeted rather than uniformly scalar. The contribution would
+be useful even if the exact attention heuristic is later replaced: the broader
+idea is to preserve the average IS clipping budget while assigning update
+freedom where a frozen model predicts later tokens will reuse earlier generated
+content. A negative result would still be informative because it would test
+whether CISPO's scalar clipping is already sufficient, and whether
+attention-derived structural signals are too weak or too noisy for optimizer
+control.
+
+\begin{thebibliography}{9}
+
+\bibitem{schulman2017ppo}
+John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov.
+\newblock Proximal Policy Optimization Algorithms.
+\newblock \emph{arXiv:1707.06347}, 2017.
+\newblock \url{https://arxiv.org/abs/1707.06347}.
+
+\bibitem{ouyang2022instructgpt}
+Long Ouyang et al.
+\newblock Training language models to follow instructions with human feedback.
+\newblock \emph{arXiv:2203.02155}, 2022.
+\newblock \url{https://arxiv.org/abs/2203.02155}.
+
+\bibitem{shao2024deepseekmath}
+Zhihong Shao et al.
+\newblock DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open
+Language Models.
+\newblock \emph{arXiv:2402.03300}, 2024.
+\newblock \url{https://arxiv.org/abs/2402.03300}.
+
+\bibitem{deepseek2025r1}
+DeepSeek-AI.
+\newblock DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via
+Reinforcement Learning.
+\newblock \emph{arXiv:2501.12948}, 2025.
+\newblock \url{https://arxiv.org/abs/2501.12948}.
+
+\bibitem{yu2025dapo}
+Qiying Yu et al.
+\newblock DAPO: An Open-Source LLM Reinforcement Learning System at Scale.
+\newblock \emph{arXiv:2503.14476}, 2025.
+\newblock \url{https://arxiv.org/abs/2503.14476}.
+
+\bibitem{minimax2025m1}
+MiniMax et al.
+\newblock MiniMax-M1: Scaling Test-Time Compute Efficiently with Lightning
+Attention.
+\newblock \emph{arXiv:2506.13585}, 2025.
+\newblock \url{https://arxiv.org/abs/2506.13585}.
+
+\bibitem{vaswani2017attention}
+Ashish Vaswani et al.
+\newblock Attention Is All You Need.
+\newblock \emph{arXiv:1706.03762}, 2017.
+\newblock \url{https://arxiv.org/abs/1706.03762}.
+
+\bibitem{jain2019attention}
+Sarthak Jain and Byron C. Wallace.
+\newblock Attention is not Explanation.
+\newblock \emph{arXiv:1902.10186}, 2019.
+\newblock \url{https://arxiv.org/abs/1902.10186}.
+
+\bibitem{xiao2024streamingllm}
+Guangxuan Xiao et al.
+\newblock Efficient Streaming Language Models with Attention Sinks.
+\newblock \emph{arXiv:2309.17453}, 2024.
+\newblock \url{https://arxiv.org/abs/2309.17453}.
+
+\bibitem{cobbe2021gsm8k}
+Karl Cobbe et al.
+\newblock Training Verifiers to Solve Math Word Problems.
+\newblock \emph{arXiv:2110.14168}, 2021.
+\newblock \url{https://arxiv.org/abs/2110.14168}.
+
+\end{thebibliography}
 
 \end{document}
