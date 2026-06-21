@@ -358,10 +358,32 @@ A mathematically aligned AD-CISPO implementation should satisfy the following:
 \section{Evaluation Plan}
 
 \paragraph{Datasets and tasks.}
-The first target is GSM8K, because it has a clear exact-answer reward and is
-already supported in Curious \cite{cobbe2021gsm8k}. If the GSM8K signal is
-positive, the next tasks should be MATH or AIME-style problems to test whether
-the method transfers to longer and harder reasoning chains.
+The evaluation should use a staged math-reasoning suite rather than a single
+benchmark:
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{GSM8K} should remain the first target, because it has a clear
+  exact-answer reward and is already supported in Curious
+  \cite{cobbe2021gsm8k}. It is the right dataset for fast debugging, seed
+  sweeps, and early reward-curve comparisons.
+  \item \textbf{SVAMP} should be used as an evaluation-only robustness check for
+  arithmetic word-problem variations \cite{patel2021svamp}. This helps test
+  whether AD-CISPO improves reasoning robustness rather than merely fitting
+  GSM8K surface patterns.
+  \item \textbf{MATH and MATH-500} should be the next difficulty tier.
+  MATH provides competition-style problems with step-by-step solutions
+  \cite{hendrycks2021math}, while MATH-500 is a smaller representative subset
+  commonly used for cheaper repeated evaluation \cite{lightman2023verify}.
+  These tasks test whether the token-adaptive clipping signal transfers to
+  longer derivations and more diverse mathematical domains.
+  \item \textbf{AIME/AMC-style held-out sets} should be reserved for final
+  stress testing once answer extraction is stable. If broader olympiad-level
+  coverage is needed, add the mathematics split of OlympiadBench as an optional
+  evaluation-only benchmark \cite{he2024olympiadbench}.
+\end{enumerate}
+Training should begin with GSM8K and expand only after scalar CISPO and
+AD-CISPO have matched data loading, answer extraction, rollout count, and
+compute budgets. Harder datasets should be used primarily to measure transfer,
+not to tune the AD-CISPO saliency heuristic.
 
 \paragraph{Baselines.}
 The minimum comparison set is:
@@ -379,7 +401,8 @@ The minimum comparison set is:
 \paragraph{Metrics.}
 Report both task performance and optimizer behavior:
 \begin{itemize}[leftmargin=*]
-  \item GSM8K exact-match accuracy, verifier reward, and pass@k where useful;
+  \item exact-match accuracy, verifier reward, and pass@k by dataset and
+  difficulty tier;
   \item reward-per-token and reward-per-GPU-hour;
   \item upper-clip saturation rate and token update coverage;
   \item entropy, approximate KL to the reference model when logged, and
@@ -446,7 +469,7 @@ whether CISPO's scalar clipping is already sufficient, and whether
 attention-derived structural signals are too weak or too noisy for optimizer
 control.
 
-\begin{thebibliography}{9}
+\begin{thebibliography}{99}
 
 \bibitem{schulman2017ppo}
 John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov.
@@ -510,6 +533,31 @@ Karl Cobbe et al.
 \newblock Training Verifiers to Solve Math Word Problems.
 \newblock \emph{arXiv:2110.14168}, 2021.
 \newblock \url{https://arxiv.org/abs/2110.14168}.
+
+\bibitem{patel2021svamp}
+Arkil Patel, Satwik Bhattamishra, and Navin Goyal.
+\newblock Are NLP Models really able to Solve Simple Math Word Problems?
+\newblock \emph{arXiv:2103.07191}, 2021.
+\newblock \url{https://arxiv.org/abs/2103.07191}.
+
+\bibitem{hendrycks2021math}
+Dan Hendrycks et al.
+\newblock Measuring Mathematical Problem Solving With the MATH Dataset.
+\newblock \emph{arXiv:2103.03874}, 2021.
+\newblock \url{https://arxiv.org/abs/2103.03874}.
+
+\bibitem{lightman2023verify}
+Hunter Lightman et al.
+\newblock Let's Verify Step by Step.
+\newblock \emph{arXiv:2305.20050}, 2023.
+\newblock \url{https://arxiv.org/abs/2305.20050}.
+
+\bibitem{he2024olympiadbench}
+Chaoqun He et al.
+\newblock OlympiadBench: A Challenging Benchmark for Promoting AGI with
+Olympiad-Level Bilingual Multimodal Scientific Problems.
+\newblock \emph{arXiv:2402.14008}, 2024.
+\newblock \url{https://arxiv.org/abs/2402.14008}.
 
 \end{thebibliography}
 
