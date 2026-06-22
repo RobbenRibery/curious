@@ -18,6 +18,7 @@ DRY_RUN="${DRY_RUN:-0}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-1.7B}"
 TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-32}"
+EVAL_BATCH_SIZE="${EVAL_BATCH_SIZE:-64}"
 GROUP_SIZE="${GROUP_SIZE:-8}"
 MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-2048}"
 MAX_TRAIN_BATCHES="${MAX_TRAIN_BATCHES:-130}"
@@ -114,6 +115,7 @@ echo "  sglang_mem_fraction_static: ${SGLANG_MEM_FRACTION_STATIC}"
 echo "  sglang_request_batch_size: ${SGLANG_REQUEST_BATCH_SIZE}"
 echo "  sglang_weight_sync_interval: ${SGLANG_WEIGHT_SYNC_INTERVAL}"
 echo "  train_batch_size: ${TRAIN_BATCH_SIZE}"
+echo "  eval_batch_size: ${EVAL_BATCH_SIZE}"
 echo "  group_size: ${GROUP_SIZE}"
 echo "  rollout_batch_size: ${ROLLOUT_BATCH_SIZE}"
 echo "  max_train_batches: ${MAX_TRAIN_BATCHES}"
@@ -146,7 +148,7 @@ command=("${PYTHON_BIN}" -m curious.training \
   --base-config.device-index 0 \
   --base-config.dataset-name "openai/gsm8k" \
   --base-config.train-batch-size "${TRAIN_BATCH_SIZE}" \
-  --base-config.eval-batch-size 512 \
+  --base-config.eval-batch-size "${EVAL_BATCH_SIZE}" \
   --base-config.num-epochs 1 \
   --base-config.max-train-batches "${MAX_TRAIN_BATCHES}" \
   --base-config.num-workers 16 \

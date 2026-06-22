@@ -56,7 +56,7 @@ class BaseConfig:
     The batch size to use for training 
     """
 
-    eval_batch_size: int = 256
+    eval_batch_size: int = 64
     """
     The batch size to use for evaluation
     """
