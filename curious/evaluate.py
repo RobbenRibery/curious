@@ -29,7 +29,7 @@ class FixedSamplingConfig:
     A dataclass for storing the fixed sampling configuration.
     """
     
-    max_new_tokens: int = 2048
+    max_new_tokens: int = 1536
     """
     The maximum number of new tokens to use for the evaluation.
     """
