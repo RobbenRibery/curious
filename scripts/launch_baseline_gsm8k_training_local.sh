@@ -23,7 +23,8 @@ GROUP_SIZE="${GROUP_SIZE:-8}"
 MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-1536}"
 MAX_TRAIN_BATCHES="${MAX_TRAIN_BATCHES:-130}"
 MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-32}"
-LOGITS_MINIBATCH_SIZE="${LOGITS_MINIBATCH_SIZE:-${MINI_BATCH_SIZE}}"
+BACKWARD_MICRO_BATCH_SIZE="${BACKWARD_MICRO_BATCH_SIZE:-16}"
+LOGITS_MINIBATCH_SIZE="${LOGITS_MINIBATCH_SIZE:-16}"
 TRAIN_ENTROPY_LOG_INTERVAL="${TRAIN_ENTROPY_LOG_INTERVAL:-10}"
 EVAL_INTERVAL="${EVAL_INTERVAL:-10}"
 TRAIN_TEXT_LOG_INTERVAL="${TRAIN_TEXT_LOG_INTERVAL:-10}"
@@ -34,10 +35,10 @@ if [[ "${USE_CISPO_LOSS}" == "1" ]]; then
   KL_WEIGHT=0
 fi
 REF_MODEL_UPDATE_FREQ="${REF_MODEL_UPDATE_FREQ:-0}"
-SGLANG_MEM_FRACTION_STATIC="${SGLANG_MEM_FRACTION_STATIC:-0.20}"
+SGLANG_MEM_FRACTION_STATIC="${SGLANG_MEM_FRACTION_STATIC:-0.12}"
 SGLANG_ATTENTION_BACKEND="${SGLANG_ATTENTION_BACKEND:-fa3}"
 SGLANG_DTYPE="${SGLANG_DTYPE:-bfloat16}"
-SGLANG_REQUEST_BATCH_SIZE="${SGLANG_REQUEST_BATCH_SIZE:-16}"
+SGLANG_REQUEST_BATCH_SIZE="${SGLANG_REQUEST_BATCH_SIZE:-8}"
 SGLANG_PORT="${SGLANG_PORT:-30000}"
 SGLANG_WEIGHT_SYNC_DIR="${SGLANG_WEIGHT_SYNC_DIR:-/tmp/curious-sglang-weight-sync}"
 SGLANG_WEIGHT_SYNC_INTERVAL="${SGLANG_WEIGHT_SYNC_INTERVAL:-1}"
@@ -47,6 +48,8 @@ AD_CISPO_MIN_MULTIPLIER="${AD_CISPO_MIN_MULTIPLIER:-0.0}"
 AD_CISPO_MAX_MULTIPLIER="${AD_CISPO_MAX_MULTIPLIER:-}"
 AD_CISPO_EPS="${AD_CISPO_EPS:-1e-8}"
 AD_CISPO_ATTENTION_BLOCK_SIZE="${AD_CISPO_ATTENTION_BLOCK_SIZE:-256}"
+PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+export PYTORCH_CUDA_ALLOC_CONF
 
 while (($#)); do
   case "$1" in
@@ -120,7 +123,9 @@ echo "  group_size: ${GROUP_SIZE}"
 echo "  rollout_batch_size: ${ROLLOUT_BATCH_SIZE}"
 echo "  max_train_batches: ${MAX_TRAIN_BATCHES}"
 echo "  mini_batch_size: ${MINI_BATCH_SIZE}"
+echo "  backward_micro_batch_size: ${BACKWARD_MICRO_BATCH_SIZE}"
 echo "  logits_minibatch_size: ${LOGITS_MINIBATCH_SIZE}"
+echo "  pytorch_cuda_alloc_conf: ${PYTORCH_CUDA_ALLOC_CONF}"
 echo "  train_entropy_log_interval: ${TRAIN_ENTROPY_LOG_INTERVAL}"
 echo "  eval_interval: ${EVAL_INTERVAL}"
 echo "  train_text_log_interval: ${TRAIN_TEXT_LOG_INTERVAL}"
@@ -188,6 +193,7 @@ command=("${PYTHON_BIN}" -m curious.training \
   --rl-config.no-use-fixed-response-length \
   --rl-config.use-surrogate-loss \
   --rl-config.mini-batch-size "${MINI_BATCH_SIZE}" \
+  --rl-config.backward-micro-batch-size "${BACKWARD_MICRO_BATCH_SIZE}" \
   --rl-config.epochs-per-step 1 \
   --rl-config.max-grad-norm 0.5 \
   --rl-config.normalize-centered-returns \

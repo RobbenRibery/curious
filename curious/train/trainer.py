@@ -14,7 +14,7 @@ from curious.utils.utils import (
     format_completion_sample_rows,
     log_completion_sample_table,
 )
-from curious.replay.experience import Experience, ReplayBuffer
+from curious.replay.experience import Experience, ReplayBuffer, slice_experience_batch
 from curious.train.training_setup import TrainingSetup, TrainState
 from curious.sampling.sampling import rollout, sequences_log_probs
 from curious.policy_gradient.loss import masked_mean, approx_kl_divergence, ActorLoss
@@ -159,6 +159,28 @@ class PolicyGradientTrainer:
                     "num_batches_visited": batch_idx,
                 }
             )
+
+    def _iter_backward_microbatches(self, experience: Experience) -> Iterator[tuple[Experience, float]]:
+        micro_batch_size = getattr(self.rl_config, "backward_micro_batch_size", 0)
+        batch_size = experience.sequences.size(0)
+        if micro_batch_size <= 0 or micro_batch_size >= batch_size:
+            yield experience, 1.0
+            return
+
+        if self.actor_loss.aggregation_dim is None:
+            total_weight = float(experience.action_mask.sum().item())
+            weight_for = lambda item: float(item.action_mask.sum().item())
+        else:
+            total_weight = float(batch_size)
+            weight_for = lambda item: float(item.sequences.size(0))
+
+        if total_weight <= 0:
+            raise ValueError("Cannot update from a minibatch with no weighted training tokens.")
+
+        for start in range(0, batch_size, micro_batch_size):
+            end = min(batch_size, start + micro_batch_size)
+            micro_experience = slice_experience_batch(experience, start, end)
+            yield micro_experience, weight_for(micro_experience) / total_weight
 
     def train(self, train_state: TrainState) -> Tuple[TrainState, ReplayBuffer]:
         evaluate(
@@ -366,24 +388,45 @@ class PolicyGradientTrainer:
 
                 optimizer.zero_grad(set_to_none=True)
                 experience = experience.to(device)
-                with self._trace_phase("update_forward_loss", batch_idx, device):
-                    log_probs, _ = sequences_log_probs(
-                        model,
-                        sequence_ids=experience.sequences,
-                        attention_mask=experience.attention_mask,
-                        return_entropy=False,
-                        logits_minibatch_size=self.rl_config.logits_minibatch_size,
-                    )
-                    kl_weight_used = self.actor_loss.kl_weight if self.rl_config.kl_weight > 0 else 0.0
-                    loss, mean_kl, mean_actor_loss = self.actor_loss(
-                        log_probs=log_probs,
-                        experience=experience
-                    )
+                kl_weight_used = self.actor_loss.kl_weight if self.rl_config.kl_weight > 0 else 0.0
+                mean_loss = 0.0
+                mean_kl = 0.0
+                mean_actor_loss = 0.0
+                skip_minibatch = False
 
-                if not loss.isfinite():
-                    print(f"Loss not finite, skipping backward, loss={loss}")
-                    print(f"experience.advantages={experience.advantages}")
-                    del log_probs, experience, loss, mean_kl, mean_actor_loss
+                for micro_experience, micro_weight in self._iter_backward_microbatches(experience):
+                    with self._trace_phase("update_forward_loss", batch_idx, device):
+                        log_probs, _ = sequences_log_probs(
+                            model,
+                            sequence_ids=micro_experience.sequences,
+                            attention_mask=micro_experience.attention_mask,
+                            return_entropy=False,
+                            logits_minibatch_size=self.rl_config.logits_minibatch_size,
+                        )
+                        loss, micro_mean_kl, micro_mean_actor_loss = self.actor_loss(
+                            log_probs=log_probs,
+                            experience=micro_experience,
+                        )
+
+                    if not loss.isfinite():
+                        print(f"Loss not finite, skipping backward, loss={loss}")
+                        print(f"experience.advantages={micro_experience.advantages}")
+                        del log_probs, loss, micro_mean_kl, micro_mean_actor_loss
+                        optimizer.zero_grad(set_to_none=True)
+                        skip_minibatch = True
+                        break
+
+                    scaled_loss = loss * micro_weight
+                    with self._trace_phase("backward", batch_idx, device):
+                        scaled_loss.backward()
+
+                    mean_loss += loss.detach().cpu().item() * micro_weight
+                    mean_kl += micro_mean_kl.detach().cpu().item() * micro_weight
+                    mean_actor_loss += micro_mean_actor_loss.detach().cpu().item() * micro_weight
+                    del log_probs, loss, scaled_loss, micro_mean_kl, micro_mean_actor_loss, micro_experience
+
+                if skip_minibatch:
+                    del experience
                     self._cleanup(
                         "minibatch",
                         batch_idx=batch_idx,
@@ -392,8 +435,7 @@ class PolicyGradientTrainer:
                     )
                     continue
 
-                with self._trace_phase("backward", batch_idx, device):
-                    loss.backward()
+                with self._trace_phase("clip_grad", batch_idx, device):
                     grad_norm = torch.nn.utils.clip_grad_norm_(
                         model.parameters(),
                         max_norm=self.rl_config.max_grad_norm,
@@ -402,9 +444,6 @@ class PolicyGradientTrainer:
                     optimizer.step()
                 did_update = True
 
-                mean_loss = loss.detach().cpu().item()
-                mean_kl = mean_kl.detach().cpu().item()
-                mean_actor_loss = mean_actor_loss.detach().cpu().item()
                 mean_kl_loss = mean_loss - mean_actor_loss
                 grad_norm_value = grad_norm.detach().cpu().item() if hasattr(grad_norm, "detach") else float(grad_norm)
 
@@ -428,7 +467,7 @@ class PolicyGradientTrainer:
                     }
                 )
 
-                del log_probs, experience, loss, mean_kl, mean_actor_loss, grad_norm
+                del experience, grad_norm
                 self._cleanup(
                     "minibatch",
                     batch_idx=batch_idx,

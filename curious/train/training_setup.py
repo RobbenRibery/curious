@@ -102,6 +102,8 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
     assert config.base_config.mode == "train"
     assert config.rl_config.mini_batch_size % config.rl_config.group_size == 0
     assert config.base_config.train_batch_size * config.rl_config.group_size % config.rl_config.mini_batch_size == 0
+    if config.rl_config.backward_micro_batch_size > config.rl_config.mini_batch_size:
+        raise ValueError("backward_micro_batch_size must be <= mini_batch_size when enabled")
     if config.base_config.deepspeed_config is not None:
         raise ValueError("DeepSpeed is disabled for this launch path; leave base_config.deepspeed_config unset.")
     if config.sampling_config.generation_backend not in {"hf", "sglang"}:

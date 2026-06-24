@@ -242,7 +242,7 @@ class SamplingConfig:
     The floating dtype to use for SGLang rollout generation.
     """
 
-    sglang_mem_fraction_static: float = 0.40
+    sglang_mem_fraction_static: float = 0.12
     """
     The static memory fraction reserved by SGLang on the H100.
     """
@@ -452,6 +452,12 @@ class RLConfig:
     mini_batch_size: int = 16 * 2
     """
     The mini batch size to use for the GRPO.
+    """
+
+    backward_micro_batch_size: int = 0
+    """
+    The microbatch size to use for memory-safe backward accumulation inside each optimizer minibatch.
+    Set to 0 or lower to disable backward microbatching.
     """
     
     epochs_per_step: int = 1
