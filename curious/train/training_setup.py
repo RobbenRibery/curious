@@ -176,7 +176,10 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
     training_setup["cpu_device"] = cpu_device
 
     # target policy
-    print(f"#### Loading target policy {config.base_config.model_name} ####")
+    print(
+        f"#### Loading target policy {config.base_config.model_name} "
+        f"(compile_train_model={config.base_config.compile_train_model}) ####"
+    )
     model, tokenizer = load_model_tokenizer(
         model_name_or_path=config.base_config.model_name, 
         trust_remote_code=True,
@@ -184,6 +187,7 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
         device_map=device, 
         freeze_model=False,
         checkpoint_path=None,
+        compile_model=config.base_config.compile_train_model,
     )
     assert model.generation_config.pad_token_id == tokenizer.pad_token_id, \
     print(model.generation_config.pad_token_id, tokenizer.pad_token_id, tokenizer.pad_token)

@@ -175,6 +175,13 @@ class BaseConfig:
     The path to the deepspeed config file.
     """
 
+    compile_train_model: bool = False
+    """
+    Whether to wrap the train policy forward pass in torch.compile.
+    Keep this disabled by default because compiled model forward can conflict with
+    gradient checkpointing and Liger custom autograd on the H100 training path.
+    """
+
 
 @dataclass
 class SamplingConfig:

@@ -1,7 +1,11 @@
-from curious.config import RLConfig
+from curious.config import BaseConfig, RLConfig
 import pytest
 
 from curious.train.training_setup import needs_reference_policy, normalize_rl_config_for_objective
+
+
+def test_train_model_compile_defaults_off_for_h100_training_path():
+    assert not BaseConfig().compile_train_model
 
 
 def test_zero_kl_grpo_without_ad_cispo_does_not_need_reference_policy():
