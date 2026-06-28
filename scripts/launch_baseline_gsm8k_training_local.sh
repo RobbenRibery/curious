@@ -26,6 +26,7 @@ MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-32}"
 BACKWARD_MICRO_BATCH_SIZE="${BACKWARD_MICRO_BATCH_SIZE:-8}"
 LOGITS_MINIBATCH_SIZE="${LOGITS_MINIBATCH_SIZE:-16}"
 COMPILE_TRAIN_MODEL="${COMPILE_TRAIN_MODEL:-0}"
+EPOCHS_PER_STEP="${EPOCHS_PER_STEP:-1}"
 TRAIN_ENTROPY_LOG_INTERVAL="${TRAIN_ENTROPY_LOG_INTERVAL:-10}"
 EVAL_INTERVAL="${EVAL_INTERVAL:-10}"
 TRAIN_TEXT_LOG_INTERVAL="${TRAIN_TEXT_LOG_INTERVAL:-10}"
@@ -131,6 +132,7 @@ echo "  mini_batch_size: ${MINI_BATCH_SIZE}"
 echo "  backward_micro_batch_size: ${BACKWARD_MICRO_BATCH_SIZE}"
 echo "  logits_minibatch_size: ${LOGITS_MINIBATCH_SIZE}"
 echo "  compile_train_model: ${COMPILE_TRAIN_MODEL}"
+echo "  epochs_per_step: ${EPOCHS_PER_STEP}"
 echo "  pytorch_cuda_alloc_conf: ${PYTORCH_CUDA_ALLOC_CONF}"
 echo "  train_entropy_log_interval: ${TRAIN_ENTROPY_LOG_INTERVAL}"
 echo "  eval_interval: ${EVAL_INTERVAL}"
@@ -200,7 +202,7 @@ command=("${PYTHON_BIN}" -m curious.training \
   --rl-config.use-surrogate-loss \
   --rl-config.mini-batch-size "${MINI_BATCH_SIZE}" \
   --rl-config.backward-micro-batch-size "${BACKWARD_MICRO_BATCH_SIZE}" \
-  --rl-config.epochs-per-step 1 \
+  --rl-config.epochs-per-step "${EPOCHS_PER_STEP}" \
   --rl-config.max-grad-norm 0.5 \
   --rl-config.normalize-centered-returns \
   --rl-config.no-use-rloo-scalar \

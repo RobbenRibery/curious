@@ -49,6 +49,7 @@ class PolicyGradientTrainer:
 
         self.actor_loss: ActorLoss= self.training_setup["actor_loss"]
         self.logger = lambda x: print(x)
+        self.optimizer_step_count = 0
 
     def _cleanup_policy(self) -> CleanupPolicy:
         return CleanupPolicy(
@@ -91,6 +92,80 @@ class PolicyGradientTrainer:
                 "num_batches_visited": batch_idx,
             }
         )
+
+    def _update_diagnostics(
+        self,
+        log_probs: torch.Tensor,
+        experience: Experience,
+    ) -> Dict[str, float]:
+        with torch.no_grad():
+            action_mask = experience.action_mask.bool()
+            advantages = experience.advantages
+            if advantages.ndim == 1:
+                advantages = advantages.unsqueeze(1)
+            advantages = advantages.to(dtype=torch.float32)
+            returns = experience.returns.to(dtype=torch.float32)
+            solved_mask = experience.solved_mask.to(dtype=torch.float32)
+
+            active_log_probs = log_probs.detach()[action_mask].to(dtype=torch.float32)
+            old_log_probs = experience.action_log_probs.detach()[action_mask].to(dtype=torch.float32)
+            ratio = (active_log_probs - old_log_probs).exp()
+
+            if experience.token_clip_high is None:
+                clip_high = torch.full_like(ratio, 1.0 + self.actor_loss.epsilon_high)
+                token_clip_high = torch.full_like(ratio, self.actor_loss.epsilon_high)
+            else:
+                token_clip_high = experience.token_clip_high.detach()[action_mask].to(
+                    device=ratio.device,
+                    dtype=ratio.dtype,
+                )
+                clip_high = 1.0 + token_clip_high
+            if self.actor_loss.use_cispo_loss:
+                clip_low = torch.zeros_like(ratio)
+            else:
+                clip_low = torch.full_like(ratio, 1.0 - self.actor_loss.epsilon_low)
+
+            action_tokens_per_sequence = action_mask.sum(dim=-1).to(dtype=torch.float32)
+            nonzero_advantages = advantages.abs() > 1e-8
+            if ratio.numel() == 0:
+                ratio = torch.ones(1, dtype=torch.float32, device=log_probs.device)
+                clip_high = torch.ones_like(ratio)
+                clip_low = torch.zeros_like(ratio)
+                token_clip_high = torch.zeros_like(ratio)
+
+            return {
+                "train/update_advantage_mean": advantages.mean().detach().cpu().item(),
+                "train/update_advantage_abs_mean": advantages.abs().mean().detach().cpu().item(),
+                "train/update_advantage_std": advantages.std(unbiased=False).detach().cpu().item(),
+                "train/update_advantage_nonzero_fraction": nonzero_advantages.to(dtype=torch.float32).mean().detach().cpu().item(),
+                "train/update_return_std": returns.std(unbiased=False).detach().cpu().item(),
+                "train/update_solved_rate": solved_mask.mean().detach().cpu().item(),
+                "train/update_action_tokens_mean": action_tokens_per_sequence.mean().detach().cpu().item(),
+                "train/update_policy_ratio_mean": ratio.mean().detach().cpu().item(),
+                "train/update_policy_ratio_std": ratio.std(unbiased=False).detach().cpu().item(),
+                "train/update_policy_ratio_min": ratio.min().detach().cpu().item(),
+                "train/update_policy_ratio_max": ratio.max().detach().cpu().item(),
+                "train/update_clip_high_mean": clip_high.mean().detach().cpu().item(),
+                "train/update_clip_high_min": clip_high.min().detach().cpu().item(),
+                "train/update_clip_high_max": clip_high.max().detach().cpu().item(),
+                "train/update_token_clip_high_mean": token_clip_high.mean().detach().cpu().item(),
+                "train/update_ratio_above_clip_fraction": (ratio > clip_high).to(dtype=torch.float32).mean().detach().cpu().item(),
+                "train/update_ratio_below_clip_fraction": (ratio < clip_low).to(dtype=torch.float32).mean().detach().cpu().item(),
+            }
+
+    @staticmethod
+    def _merge_weighted_diagnostics(
+        accumulated: Dict[str, float],
+        metrics: Dict[str, float],
+        weight: float,
+    ) -> None:
+        for key, value in metrics.items():
+            if key.endswith("_min"):
+                accumulated[key] = min(accumulated.get(key, value), value)
+            elif key.endswith("_max"):
+                accumulated[key] = max(accumulated.get(key, value), value)
+            else:
+                accumulated[key] = accumulated.get(key, 0.0) + value * weight
 
     @contextmanager
     def _trace_phase(
@@ -392,6 +467,7 @@ class PolicyGradientTrainer:
                 mean_loss = 0.0
                 mean_kl = 0.0
                 mean_actor_loss = 0.0
+                update_diagnostics: Dict[str, float] = {}
                 skip_minibatch = False
 
                 for micro_experience, micro_weight in self._iter_backward_microbatches(experience):
@@ -407,6 +483,7 @@ class PolicyGradientTrainer:
                             log_probs=log_probs,
                             experience=micro_experience,
                         )
+                        micro_diagnostics = self._update_diagnostics(log_probs, micro_experience)
 
                     if not loss.isfinite():
                         print(f"Loss not finite, skipping backward, loss={loss}")
@@ -423,7 +500,12 @@ class PolicyGradientTrainer:
                     mean_loss += loss.detach().cpu().item() * micro_weight
                     mean_kl += micro_mean_kl.detach().cpu().item() * micro_weight
                     mean_actor_loss += micro_mean_actor_loss.detach().cpu().item() * micro_weight
-                    del log_probs, loss, scaled_loss, micro_mean_kl, micro_mean_actor_loss, micro_experience
+                    self._merge_weighted_diagnostics(
+                        update_diagnostics,
+                        micro_diagnostics,
+                        micro_weight,
+                    )
+                    del log_probs, loss, scaled_loss, micro_mean_kl, micro_mean_actor_loss, micro_diagnostics, micro_experience
 
                 if skip_minibatch:
                     del experience
@@ -443,6 +525,7 @@ class PolicyGradientTrainer:
                 with self._trace_phase("optimizer_step", batch_idx, device):
                     optimizer.step()
                 did_update = True
+                self.optimizer_step_count += 1
 
                 mean_kl_loss = mean_loss - mean_actor_loss
                 grad_norm_value = grad_norm.detach().cpu().item() if hasattr(grad_norm, "detach") else float(grad_norm)
@@ -453,8 +536,7 @@ class PolicyGradientTrainer:
                     self.actor_loss.kl_weight = kl_controller.value
                     kl_weight_next = kl_controller.value
 
-                self.logger(
-                    {
+                log_payload = {
                         "train/loss": mean_loss,
                         "train/mean_kl": mean_kl,
                         "train/actor_loss": mean_actor_loss,
@@ -463,9 +545,12 @@ class PolicyGradientTrainer:
                         "train/kl_weight_used": kl_weight_used,
                         "train/kl_weight_next": kl_weight_next,
                         "train/grad_norm": grad_norm_value,
+                        "train/optimizer_steps": self.optimizer_step_count,
+                        "train/minibatch_idx": minibatch_idx,
                         "num_batches_visited": batch_idx,
-                    }
-                )
+                }
+                log_payload.update(update_diagnostics)
+                self.logger(log_payload)
 
                 del experience, grad_norm
                 self._cleanup(
@@ -548,6 +633,10 @@ class PolicyGradientTrainer:
             "train/min_num_words_in_completions": num_words_in_completions.min().item(),
 
             "train/lr": rollout_stats["rl_scheduler"].get_lr()[0],
+            "train/rollout_questions": len(rollout_stats["question"]),
+            "train/rollout_samples": len(rollout_stats["completions"]),
+            "train/minibatches_per_rollout": int(np.ceil(len(rollout_stats["completions"]) / self.rl_config.mini_batch_size)),
+            "train/optimizer_steps": self.optimizer_step_count,
             "num_batches_visited": batch_idx,
         }
         mean_action_entropy = rollout_stats.get("mean_action_entropy")
@@ -562,8 +651,20 @@ class PolicyGradientTrainer:
                     "ad_cispo/clip_mean": ad_cispo_stats.clip_mean,
                     "ad_cispo/clip_min": ad_cispo_stats.clip_min,
                     "ad_cispo/clip_max": ad_cispo_stats.clip_max,
+                    "ad_cispo/clip_std": ad_cispo_stats.clip_std,
+                    "ad_cispo/clip_p10": ad_cispo_stats.clip_p10,
+                    "ad_cispo/clip_p50": ad_cispo_stats.clip_p50,
+                    "ad_cispo/clip_p90": ad_cispo_stats.clip_p90,
+                    "ad_cispo/clip_below_mean_fraction": ad_cispo_stats.clip_below_mean_fraction,
+                    "ad_cispo/clip_above_mean_fraction": ad_cispo_stats.clip_above_mean_fraction,
+                    "ad_cispo/clip_at_min_fraction": ad_cispo_stats.clip_at_min_fraction,
+                    "ad_cispo/clip_at_max_fraction": ad_cispo_stats.clip_at_max_fraction,
                     "ad_cispo/multiplier_mean": ad_cispo_stats.multiplier_mean,
+                    "ad_cispo/multiplier_min": ad_cispo_stats.multiplier_min,
+                    "ad_cispo/multiplier_max": ad_cispo_stats.multiplier_max,
+                    "ad_cispo/multiplier_std": ad_cispo_stats.multiplier_std,
                     "ad_cispo/saliency_mean": ad_cispo_stats.saliency_mean,
+                    "ad_cispo/saliency_std": ad_cispo_stats.saliency_std,
                     "num_batches_visited": batch_idx,
                 }
             )

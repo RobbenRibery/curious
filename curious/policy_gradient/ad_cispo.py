@@ -61,8 +61,20 @@ class ADCispoStats:
     clip_mean: float
     clip_min: float
     clip_max: float
-    multiplier_mean: float
-    saliency_mean: float
+    clip_std: float = 0.0
+    clip_p10: float = 0.0
+    clip_p50: float = 0.0
+    clip_p90: float = 0.0
+    clip_below_mean_fraction: float = 0.0
+    clip_above_mean_fraction: float = 0.0
+    clip_at_min_fraction: float = 0.0
+    clip_at_max_fraction: float = 0.0
+    multiplier_mean: float = 0.0
+    multiplier_min: float = 0.0
+    multiplier_max: float = 0.0
+    multiplier_std: float = 0.0
+    saliency_mean: float = 0.0
+    saliency_std: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -443,12 +455,31 @@ def summarize_ad_cispo(
     masked_clips = to_ad_cispo_float_dtype(token_clip_thresholds.values)[mask]
     masked_multipliers = to_ad_cispo_float_dtype(token_clip_thresholds.multipliers)[mask]
     masked_saliency = to_ad_cispo_float_dtype(action_saliency.values)[mask]
+    clip_values = masked_clips.to(dtype=torch.float32)
+    multiplier_values = masked_multipliers.to(dtype=torch.float32)
+    saliency_values = masked_saliency.to(dtype=torch.float32)
+    clip_mean = clip_values.mean()
+    clip_min = clip_values.min()
+    clip_max = clip_values.max()
+    clip_atol = torch.finfo(clip_values.dtype).eps * 8
     return ADCispoStats(
-        clip_mean=masked_clips.mean().detach().cpu().item(),
-        clip_min=masked_clips.min().detach().cpu().item(),
-        clip_max=masked_clips.max().detach().cpu().item(),
-        multiplier_mean=masked_multipliers.mean().detach().cpu().item(),
-        saliency_mean=masked_saliency.mean().detach().cpu().item(),
+        clip_mean=clip_mean.detach().cpu().item(),
+        clip_min=clip_min.detach().cpu().item(),
+        clip_max=clip_max.detach().cpu().item(),
+        clip_std=clip_values.std(unbiased=False).detach().cpu().item(),
+        clip_p10=torch.quantile(clip_values, 0.10).detach().cpu().item(),
+        clip_p50=torch.quantile(clip_values, 0.50).detach().cpu().item(),
+        clip_p90=torch.quantile(clip_values, 0.90).detach().cpu().item(),
+        clip_below_mean_fraction=(clip_values < clip_mean).to(dtype=torch.float32).mean().detach().cpu().item(),
+        clip_above_mean_fraction=(clip_values > clip_mean).to(dtype=torch.float32).mean().detach().cpu().item(),
+        clip_at_min_fraction=torch.isclose(clip_values, clip_min, atol=clip_atol, rtol=0.0).to(dtype=torch.float32).mean().detach().cpu().item(),
+        clip_at_max_fraction=torch.isclose(clip_values, clip_max, atol=clip_atol, rtol=0.0).to(dtype=torch.float32).mean().detach().cpu().item(),
+        multiplier_mean=multiplier_values.mean().detach().cpu().item(),
+        multiplier_min=multiplier_values.min().detach().cpu().item(),
+        multiplier_max=multiplier_values.max().detach().cpu().item(),
+        multiplier_std=multiplier_values.std(unbiased=False).detach().cpu().item(),
+        saliency_mean=saliency_values.mean().detach().cpu().item(),
+        saliency_std=saliency_values.std(unbiased=False).detach().cpu().item(),
     )
 
 
