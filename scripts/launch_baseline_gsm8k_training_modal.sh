@@ -26,8 +26,9 @@ GROUP_SIZE="${GROUP_SIZE:-8}"
 MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-1536}"
 MAX_TRAIN_BATCHES="${MAX_TRAIN_BATCHES:-130}"
 MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-32}"
-BACKWARD_MICRO_BATCH_SIZE="${BACKWARD_MICRO_BATCH_SIZE:-16}"
+BACKWARD_MICRO_BATCH_SIZE="${BACKWARD_MICRO_BATCH_SIZE:-8}"
 LOGITS_MINIBATCH_SIZE="${LOGITS_MINIBATCH_SIZE:-16}"
+COMPILE_TRAIN_MODEL="${COMPILE_TRAIN_MODEL:-0}"
 TRAIN_ENTROPY_LOG_INTERVAL="${TRAIN_ENTROPY_LOG_INTERVAL:-10}"
 EVAL_INTERVAL="${EVAL_INTERVAL:-10}"
 TRAIN_TEXT_LOG_INTERVAL="${TRAIN_TEXT_LOG_INTERVAL:-10}"
@@ -83,6 +84,10 @@ if (( ROLLOUT_BATCH_SIZE % MINI_BATCH_SIZE != 0 )); then
   echo "TRAIN_BATCH_SIZE * GROUP_SIZE must be divisible by MINI_BATCH_SIZE: ${ROLLOUT_BATCH_SIZE} % ${MINI_BATCH_SIZE} != 0" >&2
   exit 2
 fi
+if [[ "${COMPILE_TRAIN_MODEL}" != "0" && "${COMPILE_TRAIN_MODEL}" != "1" ]]; then
+  echo "COMPILE_TRAIN_MODEL must be 0 or 1; got ${COMPILE_TRAIN_MODEL}" >&2
+  exit 2
+fi
 
 if [[ "${DRY_RUN}" != "1" && -z "${WANDB_API_KEY:-}" && -z "${MODAL_SECRET}" && ! -f ".env" ]]; then
   echo "WANDB_API_KEY is not set, MODAL_SECRET is empty, and .env was not found." >&2
@@ -119,6 +124,7 @@ echo "  max_train_batches: ${MAX_TRAIN_BATCHES}"
 echo "  mini_batch_size: ${MINI_BATCH_SIZE}"
 echo "  backward_micro_batch_size: ${BACKWARD_MICRO_BATCH_SIZE}"
 echo "  logits_minibatch_size: ${LOGITS_MINIBATCH_SIZE}"
+echo "  compile_train_model: ${COMPILE_TRAIN_MODEL}"
 echo "  train_entropy_log_interval: ${TRAIN_ENTROPY_LOG_INTERVAL}"
 echo "  eval_interval: ${EVAL_INTERVAL}"
 echo "  train_text_log_interval: ${TRAIN_TEXT_LOG_INTERVAL}"
@@ -192,6 +198,12 @@ command=(scripts/modal_train.sh "${modal_args[@]}" -- \
   --rl-config.normalize-centered-returns \
   --rl-config.no-use-rloo-scalar \
   --rl-config.logits-minibatch-size "${LOGITS_MINIBATCH_SIZE}")
+
+if [[ "${COMPILE_TRAIN_MODEL}" == "1" ]]; then
+  command+=(--base-config.compile-train-model)
+else
+  command+=(--base-config.no-compile-train-model)
+fi
 
 if [[ "${USE_CISPO_LOSS}" == "1" ]]; then
   command+=(--rl-config.use-cispo-loss)
