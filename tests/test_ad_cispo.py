@@ -31,7 +31,7 @@ from curious.replay.experience import (
     split_experience_batch,
 )
 from curious.sampling.sampling import _sequence_log_probs_from_logits, compute_group_advantages, decode_action_tokens
-from curious.train.trainer import build_ad_cispo_top_token_rows
+from curious.train.trainer import build_ad_cispo_distribution_metrics, build_ad_cispo_top_token_rows
 from curious.utils.utils import (
     CleanupPolicy,
     CudaMemorySnapshot,
@@ -217,7 +217,7 @@ def test_blockwise_future_indegree_masks_special_query_and_target_tokens():
     assert torch.allclose(saliency, bf16_tensor([[0.0, 0.25, 0.0, 0.0]]), atol=BF16_ATOL)
 
 
-def test_experience_split_join_preserves_token_clip_high():
+def test_experience_split_join_preserves_ad_cispo_token_features():
     experience = Experience(
         sequences=torch.arange(8).reshape(2, 4),
         attention_mask=torch.ones(2, 4, dtype=torch.bool),
@@ -228,11 +228,15 @@ def test_experience_split_join_preserves_token_clip_high():
         action_log_probs=torch.zeros(2, 3),
         log_probs_ref=torch.zeros(2, 3),
         token_clip_high=torch.arange(6, dtype=torch.float32).reshape(2, 3),
+        token_saliency=torch.arange(6, dtype=torch.float32).reshape(2, 3) / 10.0,
+        token_clip_multiplier=torch.arange(6, dtype=torch.float32).reshape(2, 3) + 1.0,
     )
 
     joined = join_experience_batch(split_experience_batch(experience))
 
     assert torch.equal(joined.token_clip_high, experience.token_clip_high)
+    assert torch.equal(joined.token_saliency, experience.token_saliency)
+    assert torch.equal(joined.token_clip_multiplier, experience.token_clip_multiplier)
 
 
 def test_iter_experience_minibatches_slices_batched_experience_without_restacking():
@@ -246,6 +250,8 @@ def test_iter_experience_minibatches_slices_batched_experience_without_restackin
         action_log_probs=torch.arange(15, dtype=torch.bfloat16).reshape(5, 3),
         log_probs_ref=torch.full((5, 3), -1.0, dtype=torch.bfloat16),
         token_clip_high=torch.full((5, 3), 0.28, dtype=torch.bfloat16),
+        token_saliency=torch.arange(15, dtype=torch.bfloat16).reshape(5, 3),
+        token_clip_multiplier=torch.full((5, 3), 1.5, dtype=torch.bfloat16),
     )
 
     minibatches = list(iter_experience_minibatches(experience, mini_batch_size=2))
@@ -253,6 +259,8 @@ def test_iter_experience_minibatches_slices_batched_experience_without_restackin
     assert [(batch.start, batch.end) for batch in minibatches] == [(0, 2), (2, 4), (4, 5)]
     assert torch.equal(minibatches[1].experience.sequences, experience.sequences[2:4])
     assert torch.equal(minibatches[2].experience.token_clip_high, experience.token_clip_high[4:5])
+    assert torch.equal(minibatches[1].experience.token_saliency, experience.token_saliency[2:4])
+    assert torch.equal(minibatches[2].experience.token_clip_multiplier, experience.token_clip_multiplier[4:5])
 
 
 def test_cleanup_policy_keeps_minibatch_empty_cache_off_by_default():
@@ -563,6 +571,33 @@ def test_build_ad_cispo_top_token_rows_uses_action_aligned_positions():
     assert math.isclose(rows[0]["clip_high"], 0.2, rel_tol=0, abs_tol=1e-6)
     assert math.isclose(rows[1]["multiplier"], 2.0, rel_tol=0, abs_tol=1e-6)
     assert rows[2]["question"] == "q1"
+
+
+def test_build_ad_cispo_distribution_metrics_summarizes_high_saliency_tokens():
+    action_mask = torch.tensor([[True, True, False], [True, False, True]])
+    reference_features = ReferencePolicyFeatures(
+        log_probs=None,
+        raw_saliency=RawTokenSaliency(values=torch.zeros(2, 4)),
+        action_saliency=ActionTokenSaliency(
+            values=torch.tensor([[0.1, 0.9, 0.0], [0.8, 0.2, 0.7]]),
+            action_mask=action_mask,
+        ),
+        token_clip_thresholds=TokenClipThresholds(
+            values=torch.tensor([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]),
+            multipliers=torch.tensor([[0.5, 1.0, 1.5], [2.0, 2.5, 3.0]]),
+        ),
+        stats=ADCispoStats(clip_mean=0.0, clip_min=0.0, clip_max=0.0),
+    )
+
+    metrics = build_ad_cispo_distribution_metrics(reference_features)
+
+    assert metrics["ad_cispo/active_token_count"] == 4.0
+    assert math.isclose(metrics["ad_cispo/clip_bound_p50"], 1.3, rel_tol=0, abs_tol=1e-6)
+    assert math.isclose(metrics["ad_cispo/multiplier_p90"], 2.7, rel_tol=0, abs_tol=1e-6)
+    assert math.isclose(metrics["ad_cispo/high_saliency_threshold_p90"], 0.87, rel_tol=0, abs_tol=1e-6)
+    assert metrics["ad_cispo/high_saliency_token_count"] == 1.0
+    assert math.isclose(metrics["ad_cispo/high_saliency/saliency_mean"], 0.9, rel_tol=0, abs_tol=1e-6)
+    assert math.isclose(metrics["ad_cispo/high_saliency/multiplier_mean"], 1.0, rel_tol=0, abs_tol=1e-6)
 
 
 def test_move_paddings_to_right_vectorized_preserves_action_tokens():

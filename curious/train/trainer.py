@@ -53,6 +53,104 @@ AD_CISPO_TOP_TOKEN_COLUMNS = [
     "completion_excerpt",
 ]
 
+AD_CISPO_DISTRIBUTION_QUANTILES = (0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99)
+AD_CISPO_HIGH_SALIENCY_QUANTILE = 0.90
+
+
+def _quantile_suffix(quantile: float) -> str:
+    return f"p{int(round(quantile * 100)):02d}"
+
+
+def _finite_flattened(values: torch.Tensor) -> torch.Tensor:
+    flattened = values.detach().reshape(-1).to(dtype=torch.float32)
+    return flattened[torch.isfinite(flattened)]
+
+
+def _summarize_distribution(
+    prefix: str,
+    values: torch.Tensor,
+    *,
+    quantiles: Tuple[float, ...] = AD_CISPO_DISTRIBUTION_QUANTILES,
+) -> Dict[str, float]:
+    finite_values = _finite_flattened(values)
+    payload: Dict[str, float] = {
+        f"{prefix}_count": float(finite_values.numel()),
+    }
+    if finite_values.numel() == 0:
+        return payload
+
+    payload.update(
+        {
+            f"{prefix}_mean": finite_values.mean().item(),
+            f"{prefix}_std": finite_values.std(unbiased=False).item(),
+            f"{prefix}_min": finite_values.min().item(),
+            f"{prefix}_max": finite_values.max().item(),
+        }
+    )
+    for quantile in quantiles:
+        payload[f"{prefix}_{_quantile_suffix(quantile)}"] = torch.quantile(
+            finite_values,
+            quantile,
+        ).item()
+    return payload
+
+
+def _select_high_saliency_tokens(saliency_values: torch.Tensor) -> Tuple[torch.Tensor, float]:
+    finite_saliency = _finite_flattened(saliency_values)
+    if finite_saliency.numel() == 0:
+        return torch.zeros_like(saliency_values, dtype=torch.bool), 0.0
+    threshold = torch.quantile(finite_saliency, AD_CISPO_HIGH_SALIENCY_QUANTILE)
+    return saliency_values.to(dtype=torch.float32) >= threshold, threshold.item()
+
+
+def build_ad_cispo_distribution_metrics(reference_features: ReferencePolicyFeatures) -> Dict[str, float]:
+    action_saliency = reference_features.action_saliency
+    token_clip_thresholds = reference_features.token_clip_thresholds
+    action_mask = action_saliency.action_mask.bool()
+    active_count = int(action_mask.sum().item())
+    payload: Dict[str, float] = {
+        "ad_cispo/active_token_count": float(active_count),
+    }
+    if active_count == 0:
+        return payload
+
+    clip_values = token_clip_thresholds.values.detach()[action_mask].to(dtype=torch.float32)
+    clip_bounds = 1.0 + clip_values
+    saliency_values = action_saliency.values.detach()[action_mask].to(dtype=torch.float32)
+    multipliers = token_clip_thresholds.multipliers.detach()[action_mask].to(dtype=torch.float32)
+
+    payload.update(_summarize_distribution("ad_cispo/clip", clip_values))
+    payload.update(_summarize_distribution("ad_cispo/clip_bound", clip_bounds))
+    payload.update(_summarize_distribution("ad_cispo/saliency", saliency_values))
+    payload.update(_summarize_distribution("ad_cispo/multiplier", multipliers))
+
+    high_saliency_mask, threshold = _select_high_saliency_tokens(saliency_values)
+    payload["ad_cispo/high_saliency_threshold_p90"] = threshold
+    payload["ad_cispo/high_saliency_token_count"] = float(high_saliency_mask.sum().item())
+    payload["ad_cispo/high_saliency_token_fraction"] = high_saliency_mask.to(dtype=torch.float32).mean().item()
+    if high_saliency_mask.any():
+        payload.update(_summarize_distribution("ad_cispo/high_saliency/clip", clip_values[high_saliency_mask]))
+        payload.update(_summarize_distribution("ad_cispo/high_saliency/clip_bound", clip_bounds[high_saliency_mask]))
+        payload.update(_summarize_distribution("ad_cispo/high_saliency/saliency", saliency_values[high_saliency_mask]))
+        payload.update(_summarize_distribution("ad_cispo/high_saliency/multiplier", multipliers[high_saliency_mask]))
+    for existing_key in (
+        "ad_cispo/clip_mean",
+        "ad_cispo/clip_min",
+        "ad_cispo/clip_max",
+        "ad_cispo/clip_std",
+        "ad_cispo/clip_p10",
+        "ad_cispo/clip_p50",
+        "ad_cispo/clip_p90",
+        "ad_cispo/saliency_mean",
+        "ad_cispo/saliency_std",
+        "ad_cispo/multiplier_mean",
+        "ad_cispo/multiplier_min",
+        "ad_cispo/multiplier_max",
+        "ad_cispo/multiplier_std",
+    ):
+        payload.pop(existing_key, None)
+    return payload
+
 
 def _decode_token_text(tokenizer: Any, token_id: int) -> str:
     try:
@@ -232,11 +330,11 @@ class PolicyGradientTrainer:
             }
         )
 
-    def _update_diagnostics(
+    def _update_diagnostic_tensors(
         self,
         log_probs: torch.Tensor,
         experience: Experience,
-    ) -> Dict[str, float]:
+    ) -> Dict[str, torch.Tensor]:
         with torch.no_grad():
             action_mask = experience.action_mask.bool()
             advantages = experience.advantages
@@ -272,25 +370,148 @@ class PolicyGradientTrainer:
                 clip_low = torch.zeros_like(ratio)
                 token_clip_high = torch.zeros_like(ratio)
 
-            return {
-                "train/update_advantage_mean": advantages.mean().detach().cpu().item(),
-                "train/update_advantage_abs_mean": advantages.abs().mean().detach().cpu().item(),
-                "train/update_advantage_std": advantages.std(unbiased=False).detach().cpu().item(),
-                "train/update_advantage_nonzero_fraction": nonzero_advantages.to(dtype=torch.float32).mean().detach().cpu().item(),
-                "train/update_return_std": returns.std(unbiased=False).detach().cpu().item(),
-                "train/update_solved_rate": solved_mask.mean().detach().cpu().item(),
-                "train/update_action_tokens_mean": action_tokens_per_sequence.mean().detach().cpu().item(),
-                "train/update_policy_ratio_mean": ratio.mean().detach().cpu().item(),
-                "train/update_policy_ratio_std": ratio.std(unbiased=False).detach().cpu().item(),
-                "train/update_policy_ratio_min": ratio.min().detach().cpu().item(),
-                "train/update_policy_ratio_max": ratio.max().detach().cpu().item(),
-                "train/update_clip_high_mean": clip_high.mean().detach().cpu().item(),
-                "train/update_clip_high_min": clip_high.min().detach().cpu().item(),
-                "train/update_clip_high_max": clip_high.max().detach().cpu().item(),
-                "train/update_token_clip_high_mean": token_clip_high.mean().detach().cpu().item(),
-                "train/update_ratio_above_clip_fraction": (ratio > clip_high).to(dtype=torch.float32).mean().detach().cpu().item(),
-                "train/update_ratio_below_clip_fraction": (ratio < clip_low).to(dtype=torch.float32).mean().detach().cpu().item(),
+            tensors: Dict[str, torch.Tensor] = {
+                "advantages": advantages.detach().reshape(-1).cpu(),
+                "returns": returns.detach().reshape(-1).cpu(),
+                "solved_mask": solved_mask.detach().reshape(-1).cpu(),
+                "action_tokens_per_sequence": action_tokens_per_sequence.detach().cpu(),
+                "nonzero_advantages": nonzero_advantages.detach().reshape(-1).to(dtype=torch.float32).cpu(),
+                "ratio": ratio.detach().cpu(),
+                "clip_high": clip_high.detach().cpu(),
+                "clip_low": clip_low.detach().cpu(),
+                "token_clip_high": token_clip_high.detach().cpu(),
             }
+            if experience.token_saliency is not None:
+                token_saliency = experience.token_saliency.detach()[action_mask].to(
+                    device=ratio.device,
+                    dtype=ratio.dtype,
+                )
+                tensors["saliency"] = token_saliency.detach().cpu()
+            if experience.token_clip_multiplier is not None:
+                token_clip_multiplier = experience.token_clip_multiplier.detach()[action_mask].to(
+                    device=ratio.device,
+                    dtype=ratio.dtype,
+                )
+                tensors["multiplier"] = token_clip_multiplier.detach().cpu()
+            return tensors
+
+    @staticmethod
+    def _concat_diagnostic_tensors(
+        tensor_parts: List[Dict[str, torch.Tensor]],
+        key: str,
+    ) -> torch.Tensor:
+        values = [
+            part[key].detach().reshape(-1).to(dtype=torch.float32)
+            for part in tensor_parts
+            if key in part and part[key] is not None and part[key].numel() > 0
+        ]
+        if not values:
+            return torch.empty(0, dtype=torch.float32)
+        return torch.cat(values, dim=0)
+
+    def _summarize_update_diagnostics(
+        self,
+        tensor_parts: List[Dict[str, torch.Tensor]],
+    ) -> Dict[str, float]:
+        ratio = self._concat_diagnostic_tensors(tensor_parts, "ratio")
+        clip_high = self._concat_diagnostic_tensors(tensor_parts, "clip_high")
+        clip_low = self._concat_diagnostic_tensors(tensor_parts, "clip_low")
+        token_clip_high = self._concat_diagnostic_tensors(tensor_parts, "token_clip_high")
+        advantages = self._concat_diagnostic_tensors(tensor_parts, "advantages")
+        returns = self._concat_diagnostic_tensors(tensor_parts, "returns")
+        solved_mask = self._concat_diagnostic_tensors(tensor_parts, "solved_mask")
+        action_tokens_per_sequence = self._concat_diagnostic_tensors(tensor_parts, "action_tokens_per_sequence")
+        nonzero_advantages = self._concat_diagnostic_tensors(tensor_parts, "nonzero_advantages")
+        saliency = self._concat_diagnostic_tensors(tensor_parts, "saliency")
+        multiplier = self._concat_diagnostic_tensors(tensor_parts, "multiplier")
+
+        if ratio.numel() == 0:
+            ratio = torch.ones(1, dtype=torch.float32)
+            clip_high = torch.ones_like(ratio)
+            clip_low = torch.zeros_like(ratio)
+            token_clip_high = torch.zeros_like(ratio)
+
+        clipped_mask = ratio > clip_high
+        below_clip_mask = ratio < clip_low
+        clip_utilization = ratio / clip_high.clamp_min(1e-12)
+        clip_margin = ratio - clip_high
+
+        payload: Dict[str, float] = {
+            "train/update_active_token_count": float(ratio.numel()),
+            "train/update_policy_ratio_mean": ratio.mean().item(),
+            "train/update_policy_ratio_std": ratio.std(unbiased=False).item(),
+            "train/update_policy_ratio_min": ratio.min().item(),
+            "train/update_policy_ratio_max": ratio.max().item(),
+            "train/update_clip_high_mean": clip_high.mean().item(),
+            "train/update_clip_high_min": clip_high.min().item(),
+            "train/update_clip_high_max": clip_high.max().item(),
+            "train/update_token_clip_high_mean": token_clip_high.mean().item(),
+            "train/update_ratio_above_clip_fraction": clipped_mask.to(dtype=torch.float32).mean().item(),
+            "train/update_ratio_below_clip_fraction": below_clip_mask.to(dtype=torch.float32).mean().item(),
+        }
+        if advantages.numel() > 0:
+            payload.update(
+                {
+                    "train/update_advantage_mean": advantages.mean().item(),
+                    "train/update_advantage_abs_mean": advantages.abs().mean().item(),
+                    "train/update_advantage_std": advantages.std(unbiased=False).item(),
+                }
+            )
+        if nonzero_advantages.numel() > 0:
+            payload["train/update_advantage_nonzero_fraction"] = nonzero_advantages.mean().item()
+        if returns.numel() > 0:
+            payload["train/update_return_std"] = returns.std(unbiased=False).item()
+        if solved_mask.numel() > 0:
+            payload["train/update_solved_rate"] = solved_mask.mean().item()
+        if action_tokens_per_sequence.numel() > 0:
+            payload["train/update_action_tokens_mean"] = action_tokens_per_sequence.mean().item()
+
+        payload.update(_summarize_distribution("train/update_policy_ratio", ratio))
+        payload.update(_summarize_distribution("train/update_clip_high", clip_high))
+        payload.update(_summarize_distribution("train/update_token_clip_high", token_clip_high))
+        payload.update(_summarize_distribution("train/update_clip_utilization", clip_utilization))
+        payload.update(_summarize_distribution("train/update_clip_margin", clip_margin))
+        if saliency.numel() > 0:
+            payload.update(_summarize_distribution("train/update_saliency", saliency))
+        if multiplier.numel() > 0:
+            payload.update(_summarize_distribution("train/update_multiplier", multiplier))
+
+        def add_subset_metrics(name: str, subset_mask: torch.Tensor) -> None:
+            payload[f"train/update_{name}_token_count"] = float(subset_mask.sum().item())
+            payload[f"train/update_{name}_token_fraction"] = subset_mask.to(dtype=torch.float32).mean().item()
+            if not subset_mask.any():
+                return
+            payload.update(_summarize_distribution(f"train/update_{name}/policy_ratio", ratio[subset_mask]))
+            payload.update(_summarize_distribution(f"train/update_{name}/clip_high", clip_high[subset_mask]))
+            payload.update(_summarize_distribution(f"train/update_{name}/token_clip_high", token_clip_high[subset_mask]))
+            payload.update(_summarize_distribution(f"train/update_{name}/clip_utilization", clip_utilization[subset_mask]))
+            payload.update(_summarize_distribution(f"train/update_{name}/clip_margin", clip_margin[subset_mask]))
+            if saliency.numel() == ratio.numel():
+                payload.update(_summarize_distribution(f"train/update_{name}/saliency", saliency[subset_mask]))
+            if multiplier.numel() == ratio.numel():
+                payload.update(_summarize_distribution(f"train/update_{name}/multiplier", multiplier[subset_mask]))
+
+        add_subset_metrics("clipped", clipped_mask)
+        if saliency.numel() == ratio.numel():
+            high_saliency_mask, high_saliency_threshold = _select_high_saliency_tokens(saliency)
+            payload["train/update_high_saliency_threshold_p90"] = high_saliency_threshold
+            payload["train/update_high_saliency_ratio_above_clip_fraction"] = (
+                clipped_mask[high_saliency_mask].to(dtype=torch.float32).mean().item()
+                if high_saliency_mask.any()
+                else 0.0
+            )
+            add_subset_metrics("high_saliency", high_saliency_mask)
+            payload["train/update_clipped_high_saliency_fraction"] = (
+                high_saliency_mask[clipped_mask].to(dtype=torch.float32).mean().item()
+                if clipped_mask.any()
+                else 0.0
+            )
+            payload["train/update_high_saliency_clipped_fraction"] = (
+                clipped_mask[high_saliency_mask].to(dtype=torch.float32).mean().item()
+                if high_saliency_mask.any()
+                else 0.0
+            )
+        return payload
 
     @staticmethod
     def _merge_weighted_diagnostics(
@@ -503,6 +724,7 @@ class PolicyGradientTrainer:
             stats["mean_action_entropy"] = mean_action_entropy
 
         kl, log_probs_ref, token_clip_high = None, None, None
+        token_saliency, token_clip_multiplier = None, None
         reference_features = None
         with self._trace_phase("reference_features", batch_indx, train_state["device"]):
             if self.training_setup["rl_config"].use_ad_cispo:
@@ -525,7 +747,10 @@ class PolicyGradientTrainer:
                     )
                 )
                 token_clip_high = reference_features.token_clip_thresholds.values
+                token_saliency = reference_features.action_saliency.values
+                token_clip_multiplier = reference_features.token_clip_thresholds.multipliers
                 stats["ad_cispo_stats"] = reference_features.stats
+                stats["ad_cispo_distribution_metrics"] = build_ad_cispo_distribution_metrics(reference_features)
                 stats["ad_cispo_top_token_rows"] = build_ad_cispo_top_token_rows(
                     tokenizer=self.tokenizer,
                     reference_features=reference_features,
@@ -572,6 +797,8 @@ class PolicyGradientTrainer:
             log_probs_ref=log_probs_ref,
             kl=kl,
             token_clip_high=token_clip_high,
+            token_saliency=token_saliency,
+            token_clip_multiplier=token_clip_multiplier,
         )
         replay_buffer.append_batch(experience)
 
@@ -580,6 +807,8 @@ class PolicyGradientTrainer:
             kl,
             log_probs_ref,
             token_clip_high,
+            token_saliency,
+            token_clip_multiplier,
             log_probs,
             entropy,
             attention_mask,
@@ -620,7 +849,7 @@ class PolicyGradientTrainer:
                 mean_loss = 0.0
                 mean_kl = 0.0
                 mean_actor_loss = 0.0
-                update_diagnostics: Dict[str, float] = {}
+                update_diagnostic_tensors: List[Dict[str, torch.Tensor]] = []
                 skip_minibatch = False
 
                 for micro_experience, micro_weight in self._iter_backward_microbatches(experience):
@@ -636,12 +865,12 @@ class PolicyGradientTrainer:
                             log_probs=log_probs,
                             experience=micro_experience,
                         )
-                        micro_diagnostics = self._update_diagnostics(log_probs, micro_experience)
+                        micro_diagnostic_tensors = self._update_diagnostic_tensors(log_probs, micro_experience)
 
                     if not loss.isfinite():
                         print(f"Loss not finite, skipping backward, loss={loss}")
                         print(f"experience.advantages={micro_experience.advantages}")
-                        del log_probs, loss, micro_mean_kl, micro_mean_actor_loss
+                        del log_probs, loss, micro_mean_kl, micro_mean_actor_loss, micro_diagnostic_tensors
                         optimizer.zero_grad(set_to_none=True)
                         skip_minibatch = True
                         break
@@ -653,15 +882,11 @@ class PolicyGradientTrainer:
                     mean_loss += loss.detach().cpu().item() * micro_weight
                     mean_kl += micro_mean_kl.detach().cpu().item() * micro_weight
                     mean_actor_loss += micro_mean_actor_loss.detach().cpu().item() * micro_weight
-                    self._merge_weighted_diagnostics(
-                        update_diagnostics,
-                        micro_diagnostics,
-                        micro_weight,
-                    )
-                    del log_probs, loss, scaled_loss, micro_mean_kl, micro_mean_actor_loss, micro_diagnostics, micro_experience
+                    update_diagnostic_tensors.append(micro_diagnostic_tensors)
+                    del log_probs, loss, scaled_loss, micro_mean_kl, micro_mean_actor_loss, micro_diagnostic_tensors, micro_experience
 
                 if skip_minibatch:
-                    del experience
+                    del experience, update_diagnostic_tensors
                     self._cleanup(
                         "minibatch",
                         batch_idx=batch_idx,
@@ -702,10 +927,11 @@ class PolicyGradientTrainer:
                         "train/minibatch_idx": minibatch_idx,
                         "num_batches_visited": batch_idx,
                 }
+                update_diagnostics = self._summarize_update_diagnostics(update_diagnostic_tensors)
                 log_payload.update(update_diagnostics)
                 self.logger(log_payload)
 
-                del experience, grad_norm
+                del experience, grad_norm, update_diagnostic_tensors, update_diagnostics
                 self._cleanup(
                     "minibatch",
                     batch_idx=batch_idx,
@@ -821,6 +1047,14 @@ class PolicyGradientTrainer:
                     "num_batches_visited": batch_idx,
                 }
             )
+            distribution_metrics = rollout_stats.get("ad_cispo_distribution_metrics")
+            if distribution_metrics:
+                self.logger(
+                    {
+                        **distribution_metrics,
+                        "num_batches_visited": batch_idx,
+                    }
+                )
             log_ad_cispo_top_token_table(
                 logger=self.logger,
                 rows=rollout_stats.get("ad_cispo_top_token_rows", []),
