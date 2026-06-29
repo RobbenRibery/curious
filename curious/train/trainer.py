@@ -20,6 +20,7 @@ from curious.sampling.sampling import rollout, sequences_log_probs
 from curious.policy_gradient.loss import masked_mean, approx_kl_divergence, ActorLoss
 from curious.policy_gradient.ad_cispo import (
     ADCispoStats,
+    ReferencePolicyFeatures,
     ReferencePolicyFeatureRequest,
     collect_special_token_ids,
     compute_reference_policy_features,
@@ -29,6 +30,144 @@ import torch
 
 import numpy as np
 from rich import print
+
+
+AD_CISPO_TOP_TOKEN_COLUMNS = [
+    "batch_idx",
+    "rank",
+    "sequence_idx",
+    "question_idx",
+    "rollout_idx",
+    "token_position",
+    "token_id",
+    "token",
+    "token_context",
+    "saliency",
+    "clip_high",
+    "multiplier",
+    "return",
+    "solved",
+    "advantage",
+    "question",
+    "answer",
+    "completion_excerpt",
+]
+
+
+def _decode_token_text(tokenizer: Any, token_id: int) -> str:
+    try:
+        return tokenizer.decode([token_id], skip_special_tokens=False)
+    except Exception:
+        return str(token_id)
+
+
+def _decode_token_context(
+    tokenizer: Any,
+    sequence_ids: torch.Tensor,
+    token_position: int,
+    window_size: int = 5,
+) -> str:
+    begin = max(0, token_position - window_size)
+    end = min(sequence_ids.numel(), token_position + window_size + 1)
+    token_ids = sequence_ids[begin:end].detach().cpu().tolist()
+    try:
+        return tokenizer.decode(token_ids, skip_special_tokens=False)
+    except Exception:
+        return " ".join(str(token_id) for token_id in token_ids)
+
+
+def build_ad_cispo_top_token_rows(
+    *,
+    tokenizer: Any,
+    reference_features: ReferencePolicyFeatures,
+    sequence_ids: torch.Tensor,
+    questions: List[str],
+    answers: List[str],
+    completions: List[str],
+    returns: torch.Tensor,
+    solved_mask: torch.Tensor,
+    advantages: torch.Tensor,
+    group_size: int,
+    batch_idx: int,
+    top_k: int = 10,
+) -> List[Dict[str, Any]]:
+    action_saliency = reference_features.action_saliency
+    token_clip_thresholds = reference_features.token_clip_thresholds
+    mask = action_saliency.action_mask.bool()
+    active_positions = mask.nonzero(as_tuple=False)
+    if active_positions.numel() == 0:
+        return []
+
+    active_saliency = action_saliency.values.detach()[mask].to(dtype=torch.float32)
+    k = min(top_k, active_saliency.numel())
+    top_values, top_indices = torch.topk(active_saliency, k=k)
+    positions = active_positions.detach().cpu()[top_indices.detach().cpu()]
+
+    flat_returns = returns.detach().cpu().reshape(-1)
+    flat_solved = solved_mask.detach().cpu().reshape(-1)
+    flat_advantages = advantages.detach().cpu().reshape(-1)
+    clip_values = token_clip_thresholds.values.detach().cpu()
+    multipliers = token_clip_thresholds.multipliers.detach().cpu()
+    sequence_ids_cpu = sequence_ids.detach().cpu()
+
+    rows: List[Dict[str, Any]] = []
+    for rank, ((sequence_idx_tensor, action_idx_tensor), saliency_tensor) in enumerate(
+        zip(positions.tolist(), top_values.detach().cpu().tolist()),
+        start=1,
+    ):
+        sequence_idx = int(sequence_idx_tensor)
+        action_idx = int(action_idx_tensor)
+        token_position = action_idx + 1
+        token_id = int(sequence_ids_cpu[sequence_idx, token_position].item())
+        question_idx = sequence_idx // group_size
+        rollout_idx = sequence_idx % group_size
+        rows.append(
+            {
+                "batch_idx": batch_idx,
+                "rank": rank,
+                "sequence_idx": sequence_idx,
+                "question_idx": question_idx,
+                "rollout_idx": rollout_idx,
+                "token_position": token_position,
+                "token_id": token_id,
+                "token": _decode_token_text(tokenizer, token_id),
+                "token_context": _decode_token_context(tokenizer, sequence_ids_cpu[sequence_idx], token_position),
+                "saliency": float(saliency_tensor),
+                "clip_high": float(clip_values[sequence_idx, action_idx].item()),
+                "multiplier": float(multipliers[sequence_idx, action_idx].item()),
+                "return": float(flat_returns[sequence_idx].item()),
+                "solved": float(flat_solved[sequence_idx].item()),
+                "advantage": float(flat_advantages[sequence_idx].item()),
+                "question": questions[question_idx] if question_idx < len(questions) else "",
+                "answer": answers[question_idx] if question_idx < len(answers) else "",
+                "completion_excerpt": completions[sequence_idx][:500] if sequence_idx < len(completions) else "",
+            }
+        )
+    return rows
+
+
+def log_ad_cispo_top_token_table(
+    *,
+    logger: Any,
+    rows: List[Dict[str, Any]],
+) -> None:
+    if not rows:
+        return
+
+    data = [[row[column] for column in AD_CISPO_TOP_TOKEN_COLUMNS] for row in rows]
+    try:
+        import wandb
+
+        value: Any = wandb.Table(columns=AD_CISPO_TOP_TOKEN_COLUMNS, data=data)
+    except Exception:
+        value = data
+
+    logger(
+        {
+            "ad_cispo/top_salient_tokens": value,
+            "num_batches_visited": rows[0]["batch_idx"],
+        }
+    )
 
 
 class PolicyGradientTrainer:
@@ -387,6 +526,20 @@ class PolicyGradientTrainer:
                 )
                 token_clip_high = reference_features.token_clip_thresholds.values
                 stats["ad_cispo_stats"] = reference_features.stats
+                stats["ad_cispo_top_token_rows"] = build_ad_cispo_top_token_rows(
+                    tokenizer=self.tokenizer,
+                    reference_features=reference_features,
+                    sequence_ids=sequence_ids,
+                    questions=stats["question"],
+                    answers=stats["answer"],
+                    completions=completions,
+                    returns=returns,
+                    solved_mask=solved_mask,
+                    advantages=advantages,
+                    group_size=self.generation_config.num_return_sequences,
+                    batch_idx=batch_indx,
+                    top_k=10,
+                )
                 if self.training_setup["rl_config"].kl_weight > 0:
                     assert reference_features.log_probs is not None
                     log_probs_ref = reference_features.log_probs
@@ -667,6 +820,10 @@ class PolicyGradientTrainer:
                     "ad_cispo/saliency_std": ad_cispo_stats.saliency_std,
                     "num_batches_visited": batch_idx,
                 }
+            )
+            log_ad_cispo_top_token_table(
+                logger=self.logger,
+                rows=rollout_stats.get("ad_cispo_top_token_rows", []),
             )
 
         text_log_interval = self.training_setup["base_config"].train_text_log_interval

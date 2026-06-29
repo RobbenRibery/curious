@@ -4,12 +4,16 @@ import torch
 import torch.nn as nn
 
 from curious.policy_gradient.ad_cispo import (
+    ADCispoStats,
     ADCispoThresholdConfig,
     LayerAttentionInputs,
     RawTokenSaliency,
+    ActionTokenSaliency,
     ReferencePolicyFeatureRequest,
+    ReferencePolicyFeatures,
     SaliencyMasks,
     SequenceTokenBatch,
+    TokenClipThresholds,
     align_saliency_to_actions,
     build_adaptive_clip_mask,
     build_future_attention_masks,
@@ -27,6 +31,7 @@ from curious.replay.experience import (
     split_experience_batch,
 )
 from curious.sampling.sampling import _sequence_log_probs_from_logits, compute_group_advantages, decode_action_tokens
+from curious.train.trainer import build_ad_cispo_top_token_rows
 from curious.utils.utils import (
     CleanupPolicy,
     CudaMemorySnapshot,
@@ -509,6 +514,55 @@ def test_decode_action_tokens_uses_batch_decode_when_available():
 
     assert tokenizer.batch_decode_calls == 1
     assert completions == ["21 22", "31"]
+
+
+def test_build_ad_cispo_top_token_rows_uses_action_aligned_positions():
+    class ListDecodeTokenizer:
+        def decode(self, token_ids: list[int], skip_special_tokens: bool = False) -> str:
+            del skip_special_tokens
+            return " ".join(str(token_id) for token_id in token_ids)
+
+    sequence_ids = torch.tensor([[10, 11, 12, 13], [20, 21, 22, 23]])
+    action_mask = torch.tensor([[True, True, False], [True, False, True]])
+    reference_features = ReferencePolicyFeatures(
+        log_probs=None,
+        raw_saliency=RawTokenSaliency(values=torch.zeros_like(sequence_ids, dtype=torch.float32)),
+        action_saliency=ActionTokenSaliency(
+            values=torch.tensor([[0.1, 0.9, 0.0], [0.8, 0.2, 0.7]]),
+            action_mask=action_mask,
+        ),
+        token_clip_thresholds=TokenClipThresholds(
+            values=torch.tensor([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]),
+            multipliers=torch.tensor([[0.5, 1.0, 1.5], [2.0, 2.5, 3.0]]),
+        ),
+        stats=ADCispoStats(clip_mean=0.0, clip_min=0.0, clip_max=0.0),
+    )
+
+    rows = build_ad_cispo_top_token_rows(
+        tokenizer=ListDecodeTokenizer(),
+        reference_features=reference_features,
+        sequence_ids=sequence_ids,
+        questions=["q0", "q1"],
+        answers=["a0", "a1"],
+        completions=["c0", "c1"],
+        returns=torch.tensor([1.0, -1.0]),
+        solved_mask=torch.tensor([1.0, 0.0]),
+        advantages=torch.tensor([0.5, -0.5]),
+        group_size=1,
+        batch_idx=7,
+        top_k=3,
+    )
+
+    assert [row["token_id"] for row in rows] == [12, 21, 23]
+    assert [row["token_position"] for row in rows] == [2, 1, 3]
+    assert [row["sequence_idx"] for row in rows] == [0, 1, 1]
+    assert all(
+        math.isclose(row["saliency"], expected, rel_tol=0, abs_tol=1e-6)
+        for row, expected in zip(rows, [0.9, 0.8, 0.7])
+    )
+    assert math.isclose(rows[0]["clip_high"], 0.2, rel_tol=0, abs_tol=1e-6)
+    assert math.isclose(rows[1]["multiplier"], 2.0, rel_tol=0, abs_tol=1e-6)
+    assert rows[2]["question"] == "q1"
 
 
 def test_move_paddings_to_right_vectorized_preserves_action_tokens():

@@ -158,8 +158,12 @@ itself. The novel contribution is the combination of:
 Symbol & Meaning & Shape or domain \\
 \midrule
 $q$ & prompt/question & text \\
+$i$ & index of a sampled response within a prompt group & $i \in \{1,\ldots,G\}$ \\
 $o_i$ & response $i$ in a sampled group & token sequence \\
-$o_{i,t}$ & token $t$ of response $i$ & token id \\
+$t$ & token position in response $i$ whose saliency, IS weight, or multiplier is being computed & $t \in M_i$ \\
+$j$ & later token position in response $i$ that attends back to position $t$ & $j \in M_i$, $j > t$ \\
+$u$ & summation index over valid generated positions in response $i$ & $u \in M_i$ \\
+$o_{i,t}$ & token at position $t$ of response $i$ & token id \\
 $G$ & number of responses sampled per prompt & positive integer \\
 $\pi_\theta$ & current policy being optimized & language model \\
 $\pi_{\theta_{\mathrm{old}}}$ & rollout policy that produced the batch & language model \\
@@ -177,6 +181,14 @@ $\epsilon^{IS}_{i,t,\mathrm{high}}$ & token-adaptive upper IS clipping radius & 
 \bottomrule
 \end{tabular}
 \end{center}
+
+\paragraph{Index conventions.}
+For each prompt, the model samples $G$ responses; $i$ selects one of them.
+Within response $i$, positions $t$, $j$, and $u$ all refer to token indices in
+the same sequence, but play different roles: $t$ is the position whose saliency
+or clipping budget is being assigned; $j$ is a \emph{later} position whose
+attention query looks back at $t$; and $u$ is a dummy index used only when
+averaging or summing over all valid generated positions in $M_i$.
 
 \section{Baseline: MiniMax-Style CISPO}
 
@@ -259,7 +271,10 @@ and the objective is
   \right].
 \end{equation}
 
-The adaptive multiplier is computed from frozen-reference saliency:
+The adaptive multiplier is computed from frozen-reference saliency. Here $u$
+ranges over all valid generated positions in response $i$ to form the mean
+saliency in the denominator, while $t$ is the position whose multiplier is
+being computed:
 \begin{equation}
   \tilde{m}_{i,t}
   =
@@ -279,8 +294,9 @@ A plain clamp is insufficient because it changes the total clipping budget.
 The main AD-CISPO implementation uses exact frozen-reference future-attention
 in-degree. For a selected reference layer $\ell$ and head $h$, let
 $a^{(\ell,h)}_{i,j,t}$ denote the causal attention probability from the query at
-token position $j$ to the key/value position $t$. The saliency assigned to
-token $o_{i,t}$ is
+token position $j$ to the key/value position $t$. Position $t$ is the saliency
+target; position $j$ is each later valid generated token that attends to $t$.
+The saliency assigned to token $o_{i,t}$ is
 \begin{equation}
   S_{i,t}
   =
