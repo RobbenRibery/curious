@@ -56,6 +56,7 @@ DEFAULT_METRICS = (
     "ad_cispo/clip_p90",
     "ad_cispo/clip_at_min_fraction",
     "ad_cispo/clip_at_max_fraction",
+    "ad_cispo/saliency_source_target_policy",
     "ad_cispo/multiplier_std",
     "ad_cispo/multiplier_min",
     "ad_cispo/multiplier_max",

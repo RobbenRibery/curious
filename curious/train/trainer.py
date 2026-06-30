@@ -725,12 +725,12 @@ class PolicyGradientTrainer:
 
         kl, log_probs_ref, token_clip_high = None, None, None
         token_saliency, token_clip_multiplier = None, None
-        reference_features = None
-        with self._trace_phase("reference_features", batch_indx, train_state["device"]):
+        ad_cispo_features = None
+        with self._trace_phase("ad_cispo_saliency_features", batch_indx, train_state["device"]):
             if self.training_setup["rl_config"].use_ad_cispo:
-                reference_features = compute_reference_policy_features(
+                ad_cispo_features = compute_reference_policy_features(
                     ReferencePolicyFeatureRequest(
-                        model=train_state["reference_model"],
+                        model=train_state["model"],
                         sequence_ids=sequence_ids,
                         attention_mask=attention_mask,
                         action_mask=action_mask,
@@ -740,20 +740,22 @@ class PolicyGradientTrainer:
                         min_multiplier=self.training_setup["rl_config"].ad_cispo_min_multiplier,
                         max_multiplier=self.training_setup["rl_config"].ad_cispo_max_multiplier,
                         eps=self.training_setup["rl_config"].ad_cispo_eps,
-                        return_log_probs=self.training_setup["rl_config"].kl_weight > 0,
+                        return_log_probs=False,
                         saliency_method=self.training_setup["rl_config"].ad_cispo_saliency_method,
                         attention_block_size=self.training_setup["rl_config"].ad_cispo_attention_block_size,
                         sink_token_ids=collect_special_token_ids(self.tokenizer),
                     )
                 )
-                token_clip_high = reference_features.token_clip_thresholds.values
-                token_saliency = reference_features.action_saliency.values
-                token_clip_multiplier = reference_features.token_clip_thresholds.multipliers
-                stats["ad_cispo_stats"] = reference_features.stats
-                stats["ad_cispo_distribution_metrics"] = build_ad_cispo_distribution_metrics(reference_features)
+                token_clip_high = ad_cispo_features.token_clip_thresholds.values
+                token_saliency = ad_cispo_features.action_saliency.values
+                token_clip_multiplier = ad_cispo_features.token_clip_thresholds.multipliers
+                stats["ad_cispo_stats"] = ad_cispo_features.stats
+                stats["ad_cispo_distribution_metrics"] = build_ad_cispo_distribution_metrics(ad_cispo_features)
+                stats["ad_cispo_distribution_metrics"]["ad_cispo/saliency_source_target_policy"] = 1.0
+                stats["ad_cispo_distribution_metrics"]["ad_cispo/saliency_source_reference_policy"] = 0.0
                 stats["ad_cispo_top_token_rows"] = build_ad_cispo_top_token_rows(
                     tokenizer=self.tokenizer,
-                    reference_features=reference_features,
+                    reference_features=ad_cispo_features,
                     sequence_ids=sequence_ids,
                     questions=stats["question"],
                     answers=stats["answer"],
@@ -765,11 +767,11 @@ class PolicyGradientTrainer:
                     batch_idx=batch_indx,
                     top_k=10,
                 )
-                if self.training_setup["rl_config"].kl_weight > 0:
-                    assert reference_features.log_probs is not None
-                    log_probs_ref = reference_features.log_probs
-            elif self.training_setup["rl_config"].kl_weight > 0:
+
+            if self.training_setup["rl_config"].kl_weight > 0:
                 # compute the log probs of the reference model
+                if train_state["reference_model"] is None:
+                    raise RuntimeError("KL regularization requires a reference model.")
                 log_probs_ref, _ = sequences_log_probs(
                     model=train_state["reference_model"],
                     sequence_ids=sequence_ids,
@@ -815,7 +817,7 @@ class PolicyGradientTrainer:
             sequence_ids,
             action_mask,
             rollout_out,
-            reference_features,
+            ad_cispo_features,
             experience,
             stats,
         )

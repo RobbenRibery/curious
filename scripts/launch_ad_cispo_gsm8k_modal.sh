@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Share the CISPO config; override AD-CISPO identity plus the safer 1.7B comparison knobs.
-export RUN_NAME="${RUN_NAME:-gsm8k-ad-cispo-qwen3-1p7b-top4-b160-v4}"
+export RUN_NAME="${RUN_NAME:-gsm8k-ad-cispo-qwen3-1p7b-target-top4-max1p5-b160-v5}"
 export WANDB_GROUP="${WANDB_GROUP:-ad-cispo-gsm8k}"
 export OBJECTIVE_NAME="AD-CISPO"
 export USE_CISPO_LOSS="1"
@@ -25,7 +25,7 @@ export COMPILE_TRAIN_MODEL="${COMPILE_TRAIN_MODEL:-0}"
 export AD_CISPO_SALIENCY_METHOD="${AD_CISPO_SALIENCY_METHOD:-future_attention_in_degree}"
 export AD_CISPO_TOP_LAYERS="${AD_CISPO_TOP_LAYERS:-4}"
 export AD_CISPO_MIN_MULTIPLIER="${AD_CISPO_MIN_MULTIPLIER:-0.25}"
-export AD_CISPO_MAX_MULTIPLIER="${AD_CISPO_MAX_MULTIPLIER:-2.0}"
+export AD_CISPO_MAX_MULTIPLIER="${AD_CISPO_MAX_MULTIPLIER:-1.5}"
 export AD_CISPO_EPS="${AD_CISPO_EPS:-1e-8}"
 export AD_CISPO_ATTENTION_BLOCK_SIZE="${AD_CISPO_ATTENTION_BLOCK_SIZE:-128}"
 

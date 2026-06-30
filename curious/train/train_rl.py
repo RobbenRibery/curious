@@ -218,11 +218,12 @@ def train(
             )
 
             kl, log_probs_ref, token_clip_high = None, None, None
+            token_saliency, token_clip_multiplier = None, None
             ad_cispo_stats: ADCispoStats | None = None
             if args.rl_config.use_ad_cispo:
-                reference_features = compute_reference_policy_features(
+                ad_cispo_features = compute_reference_policy_features(
                     ReferencePolicyFeatureRequest(
-                        model=reference_model,
+                        model=model,
                         sequence_ids=sequence_ids,
                         attention_mask=attention_mask,
                         action_mask=action_mask,
@@ -232,19 +233,21 @@ def train(
                         min_multiplier=args.rl_config.ad_cispo_min_multiplier,
                         max_multiplier=args.rl_config.ad_cispo_max_multiplier,
                         eps=args.rl_config.ad_cispo_eps,
-                        return_log_probs=args.rl_config.kl_weight > 0,
+                        return_log_probs=False,
                         saliency_method=args.rl_config.ad_cispo_saliency_method,
                         attention_block_size=args.rl_config.ad_cispo_attention_block_size,
                         sink_token_ids=collect_special_token_ids(tokenizer),
                     )
                 )
-                token_clip_high = reference_features.token_clip_thresholds.values
-                ad_cispo_stats = reference_features.stats
-                if args.rl_config.kl_weight > 0:
-                    assert reference_features.log_probs is not None
-                    log_probs_ref = reference_features.log_probs
-            elif args.rl_config.kl_weight > 0:
+                token_clip_high = ad_cispo_features.token_clip_thresholds.values
+                token_saliency = ad_cispo_features.action_saliency.values
+                token_clip_multiplier = ad_cispo_features.token_clip_thresholds.multipliers
+                ad_cispo_stats = ad_cispo_features.stats
+
+            if args.rl_config.kl_weight > 0:
                 # compute the log probs of the reference model
+                if reference_model is None:
+                    raise RuntimeError("KL regularization requires a reference model.")
                 log_probs_ref, _ = sequences_log_probs(
                     model=reference_model,
                     sequence_ids=sequence_ids,
@@ -272,6 +275,8 @@ def train(
                 log_probs_ref=log_probs_ref,
                 kl=kl,
                 token_clip_high=token_clip_high,
+                token_saliency=token_saliency,
+                token_clip_multiplier=token_clip_multiplier,
             )
             replay_buffer.append(experience.to(cpu_device))
             
@@ -279,6 +284,8 @@ def train(
             kl,
             log_probs_ref,
             token_clip_high,
+            token_saliency,
+            token_clip_multiplier,
             log_probs,
             entropy,
             attention_mask,

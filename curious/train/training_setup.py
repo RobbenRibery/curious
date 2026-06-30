@@ -68,7 +68,7 @@ class TrainingSetup(TypedDict):
 
 
 def needs_reference_policy(rl_config: RLConfig) -> bool:
-    return rl_config.kl_weight > 0 or rl_config.use_ad_cispo
+    return rl_config.kl_weight > 0
 
 
 def normalize_rl_config_for_objective(rl_config: RLConfig) -> None:

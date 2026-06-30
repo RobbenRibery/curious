@@ -20,10 +20,10 @@ def test_kl_regularization_needs_reference_policy():
     assert needs_reference_policy(rl_config)
 
 
-def test_ad_cispo_needs_reference_policy_even_without_kl_regularization():
+def test_ad_cispo_without_kl_uses_target_policy_saliency_without_reference_policy():
     rl_config = RLConfig(kl_weight=0.0, use_ad_cispo=True)
 
-    assert needs_reference_policy(rl_config)
+    assert not needs_reference_policy(rl_config)
 
 
 def test_cispo_normalization_forces_zero_kl_and_token_level_loss():
