@@ -342,18 +342,13 @@ def _head_to_head_html(
     prompts: list[str],
     completions: list[str],
     token_rows: list[list[dict[str, Any]]],
-    attention_scores: list[list[float]],
-    causal_scores: list[list[float]],
+    method_scores: list[tuple[str, list[list[float]], tuple[int, int, int]]],
 ) -> str:
     rows_html = []
-    for trace_idx, (prompt, completion, tokens, attention_row, causal_row) in enumerate(
-        zip(prompts, completions, token_rows, attention_scores, causal_scores)
-    ):
+    for trace_idx, (prompt, completion, tokens) in enumerate(zip(prompts, completions, token_rows)):
         method_rows = []
-        for method_name, scores, color in (
-            ("future_attention_in_degree", attention_row, (220, 113, 32)),
-            ("causal_tangent", causal_row, (17, 128, 122)),
-        ):
+        for method_name, score_rows, color in method_scores:
+            scores = score_rows[trace_idx]
             red, green, blue = color
             normalized = _normalize(scores)
             token_html = []
@@ -466,6 +461,11 @@ def _page_html(*, title: str, body: str) -> str:
 """
 
 
+def _strip_trailing_whitespace(text: str) -> str:
+    stripped = "\n".join(line.rstrip() for line in text.splitlines())
+    return f"{stripped}\n" if text.endswith("\n") else stripped
+
+
 @app.function(
     image=analysis_image,
     gpu=DEFAULT_GPU,
@@ -495,6 +495,7 @@ def run_saliency_comparison(
         compute_token_clip_thresholds,
         extract_causal_tangent_saliency,
         extract_future_attention_indegree_saliency,
+        smooth_raw_saliency_radius_one,
     )
     from curious.policy_gradient.ad_cispo import collect_ad_cispo_sink_token_ids
     from curious.utils.utils import configure_bf16_precision, load_model_tokenizer
@@ -588,6 +589,10 @@ def run_saliency_comparison(
         top_layers=top_layers,
         return_logits=False,
     )
+    smoothed_causal_raw = smooth_raw_saliency_radius_one(
+        raw_saliency=causal_raw,
+        full_target_mask=masks.full_target_mask,
+    )
 
     threshold_config = ADCispoThresholdConfig(clip_high=1.2, min_multiplier=0.25, max_multiplier=1.5)
     _, attention_thresholds, _ = compute_token_clip_thresholds(
@@ -600,12 +605,19 @@ def run_saliency_comparison(
         action_mask=masks.adaptive_clip_mask,
         threshold_config=threshold_config,
     )
+    _, smoothed_causal_thresholds, _ = compute_token_clip_thresholds(
+        raw_saliency=RawTokenSaliency(values=smoothed_causal_raw.values),
+        action_mask=masks.adaptive_clip_mask,
+        threshold_config=threshold_config,
+    )
 
     token_rows = _token_rows(tokenizer, sequence_ids, action_mask)
     attention_scores = _scores_for_tokens(attention_raw.values[:, 1:], action_mask)
     causal_scores = _scores_for_tokens(causal_raw.values[:, 1:], action_mask)
+    smoothed_causal_scores = _scores_for_tokens(smoothed_causal_raw.values[:, 1:], action_mask)
     attention_multipliers = _scores_for_tokens(attention_thresholds.multipliers, action_mask)
     causal_multipliers = _scores_for_tokens(causal_thresholds.multipliers, action_mask)
+    smoothed_causal_multipliers = _scores_for_tokens(smoothed_causal_thresholds.multipliers, action_mask)
 
     summary = {
         "model_name": model_name,
@@ -625,14 +637,16 @@ def run_saliency_comparison(
                 "num_saliency_tokens": len(tokens),
                 "attention_top_tokens": attention_top,
                 "causal_tangent_top_tokens": causal_top,
+                "causal_tangent_smoothed_top_tokens": smoothed_causal_top,
             }
-            for idx, (prompt, completion, tokens, attention_top, causal_top) in enumerate(
+            for idx, (prompt, completion, tokens, attention_top, causal_top, smoothed_causal_top) in enumerate(
                 zip(
                     prompts,
                     completions,
                     token_rows,
                     _top_tokens(token_rows, attention_scores),
                     _top_tokens(token_rows, causal_scores),
+                    _top_tokens(token_rows, smoothed_causal_scores),
                 )
             )
         ],
@@ -647,6 +661,15 @@ def run_saliency_comparison(
         "causal_tangent": {
             "scores": causal_scores,
             "multipliers": causal_multipliers,
+        },
+        "causal_tangent_smoothed": {
+            "scores": smoothed_causal_scores,
+            "multipliers": smoothed_causal_multipliers,
+            "kernel": {
+                "radius": 1,
+                "center_weight": 0.70,
+                "neighbor_weight": 0.15,
+            },
         },
     }
 
@@ -670,12 +693,25 @@ def run_saliency_comparison(
         top_tokens=_top_tokens(token_rows, causal_scores),
         color=(17, 128, 122),
     )
+    smoothed_causal_html = _method_heatmap_html(
+        title="Locally Smoothed Causal-Tangent Saliency Heatmaps",
+        method_name="causal_tangent_smoothed",
+        prompts=prompts,
+        completions=completions,
+        token_rows=token_rows,
+        score_rows=smoothed_causal_scores,
+        top_tokens=_top_tokens(token_rows, smoothed_causal_scores),
+        color=(103, 80, 164),
+    )
     head_to_head_html = _head_to_head_html(
         prompts=prompts,
         completions=completions,
         token_rows=token_rows,
-        attention_scores=attention_scores,
-        causal_scores=causal_scores,
+        method_scores=[
+            ("future_attention_in_degree", attention_scores, (220, 113, 32)),
+            ("causal_tangent", causal_scores, (17, 128, 122)),
+            ("causal_tangent_smoothed", smoothed_causal_scores, (103, 80, 164)),
+        ],
     )
 
     remote_dir = Path(ARTIFACTS_DIR) / "saliency_reasoning_traces"
@@ -685,10 +721,11 @@ def run_saliency_comparison(
         "saliency_data.json": json.dumps(data, indent=2),
         "attention_heatmap.html": attention_html,
         "causal_tangent_heatmap.html": causal_html,
+        "causal_tangent_smoothed_heatmap.html": smoothed_causal_html,
         "head_to_head_heatmap.html": head_to_head_html,
     }
     for filename, content in files.items():
-        (remote_dir / filename).write_text(content)
+        (remote_dir / filename).write_text(_strip_trailing_whitespace(content))
     artifacts_volume.commit()
 
     return {
@@ -760,7 +797,7 @@ def main(*arglist: str) -> None:
     output_dir = Path(args.local_output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     for filename, content in result["files"].items():
-        (output_dir / filename).write_text(content)
+        (output_dir / filename).write_text(_strip_trailing_whitespace(content))
     print(f"Wrote saliency comparison artifacts to {output_dir.resolve()}")
     print(f"Modal volume artifacts: {result['remote_dir']}")
     print(json.dumps(result["summary"], indent=2))

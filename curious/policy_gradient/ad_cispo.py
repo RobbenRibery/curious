@@ -600,9 +600,9 @@ def compute_reference_policy_features(
                 top_layers=request.top_layers,
                 return_logits=request.return_log_probs,
             )
-        elif request.saliency_method == "causal_tangent":
+        elif request.saliency_method in {"causal_tangent", "causal_tangent_smoothed"}:
             if request.advantages is None:
-                raise ValueError("AD-CISPO causal_tangent saliency requires advantages")
+                raise ValueError(f"AD-CISPO {request.saliency_method} saliency requires advantages")
             mini_advantages = request.advantages[begin_idx:begin_idx + request.logits_minibatch_size]
             mini_logits, mini_saliency = extract_causal_tangent_saliency(
                 model=request.model,
@@ -612,6 +612,11 @@ def compute_reference_policy_features(
                 top_layers=request.top_layers,
                 return_logits=request.return_log_probs,
             )
+            if request.saliency_method == "causal_tangent_smoothed":
+                mini_saliency = smooth_raw_saliency_radius_one(
+                    raw_saliency=mini_saliency,
+                    full_target_mask=mini_masks.full_target_mask,
+                )
         else:
             raise ValueError(f"Unsupported AD-CISPO saliency method: {request.saliency_method}")
         if request.return_log_probs:
@@ -656,6 +661,51 @@ def compute_reference_policy_features(
         stats=stats,
         diagnostics=diagnostics,
     )
+
+
+def smooth_raw_saliency_radius_one(
+    raw_saliency: RawTokenSaliency,
+    full_target_mask: torch.Tensor,
+    center_weight: float = 0.70,
+    neighbor_weight: float = 0.15,
+    eps: float = 1e-8,
+) -> RawTokenSaliency:
+    values = raw_saliency.values.to(dtype=torch.float32)
+    mask = full_target_mask.to(device=values.device).bool()
+    if values.shape != mask.shape:
+        raise ValueError(
+            "AD-CISPO smoothed saliency mask must align with raw saliency: "
+            f"got saliency {tuple(values.shape)} and mask {tuple(mask.shape)}"
+        )
+    if center_weight < 0 or neighbor_weight < 0:
+        raise ValueError("AD-CISPO smoothing weights must be non-negative")
+    if center_weight <= 0 and neighbor_weight <= 0:
+        raise ValueError("AD-CISPO smoothing weights cannot all be zero")
+
+    masked_values = torch.where(mask, values, torch.zeros_like(values))
+    left_values = torch.zeros_like(masked_values)
+    right_values = torch.zeros_like(masked_values)
+    left_values[:, 1:] = masked_values[:, :-1]
+    right_values[:, :-1] = masked_values[:, 1:]
+
+    left_mask = torch.zeros_like(mask)
+    right_mask = torch.zeros_like(mask)
+    left_mask[:, 1:] = mask[:, :-1]
+    right_mask[:, :-1] = mask[:, 1:]
+
+    weighted_sum = (
+        center_weight * masked_values
+        + neighbor_weight * left_values
+        + neighbor_weight * right_values
+    )
+    available_weight = (
+        center_weight * mask.to(dtype=torch.float32)
+        + neighbor_weight * left_mask.to(dtype=torch.float32)
+        + neighbor_weight * right_mask.to(dtype=torch.float32)
+    )
+    smoothed = weighted_sum / available_weight.clamp_min(eps)
+    smoothed = torch.where(mask, smoothed, torch.zeros_like(smoothed))
+    return RawTokenSaliency(values=smoothed.to(dtype=FLOAT_TENSOR_DTYPE))
 
 
 def summarize_sink_guard(

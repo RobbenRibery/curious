@@ -24,6 +24,7 @@ from curious.policy_gradient.ad_cispo import (
     compute_token_clip_thresholds,
     extract_causal_tangent_saliency,
     extract_kv_norm_saliency,
+    smooth_raw_saliency_radius_one,
 )
 from curious.policy_gradient.loss import ActorLoss
 from curious.replay.experience import (
@@ -838,6 +839,46 @@ def test_causal_tangent_reference_features_require_advantages_and_mask_sink_toke
     assert math.isclose(features.diagnostics["ad_cispo/saliency_method_causal_tangent"], 1.0)
     assert math.isclose(features.diagnostics["ad_cispo/sink_guard_removed_token_fraction"], 1 / 3)
     assert all(parameter.grad is None for parameter in model.parameters())
+
+
+def test_smooth_raw_saliency_radius_one_spreads_only_across_valid_targets():
+    raw_saliency = RawTokenSaliency(values=torch.tensor([[0.0, 0.0, 10.0, 0.0, 5.0]]))
+    full_target_mask = torch.tensor([[False, True, True, True, False]])
+
+    smoothed = smooth_raw_saliency_radius_one(raw_saliency, full_target_mask)
+
+    assert smoothed.values.dtype == torch.bfloat16
+    assert smoothed.values[0, 0] == 0
+    assert smoothed.values[0, 4] == 0
+    assert torch.allclose(smoothed.values[0, 1], bf16_tensor(10.0 * 0.15 / 0.85), atol=BF16_ATOL)
+    assert torch.allclose(smoothed.values[0, 2], bf16_tensor(7.0), atol=BF16_ATOL)
+    assert torch.allclose(smoothed.values[0, 3], bf16_tensor(10.0 * 0.15 / 0.85), atol=BF16_ATOL)
+
+
+def test_causal_tangent_smoothed_reference_features_logs_method_marker():
+    features = compute_reference_policy_features(
+        ReferencePolicyFeatureRequest(
+            model=FakeCausalTangentModel(),
+            sequence_ids=torch.tensor([[1, 2, 3, 4]]),
+            attention_mask=torch.ones(1, 4, dtype=torch.long),
+            action_mask=torch.tensor([[True, True, True]]),
+            clip_high=0.28,
+            logits_minibatch_size=1,
+            top_layers=1,
+            min_multiplier=0.25,
+            max_multiplier=1.5,
+            eps=1e-8,
+            return_log_probs=False,
+            saliency_method="causal_tangent_smoothed",
+            sink_token_ids=frozenset({2}),
+            advantages=torch.tensor([1.0]),
+        )
+    )
+
+    assert features.log_probs is None
+    assert features.action_saliency.action_mask.tolist() == [[False, True, True]]
+    assert features.raw_saliency.values.shape == (1, 4)
+    assert math.isclose(features.diagnostics["ad_cispo/saliency_method_causal_tangent_smoothed"], 1.0)
 
 
 def test_causal_tangent_falls_back_to_scalar_clip_when_sink_guard_removes_all_actions():

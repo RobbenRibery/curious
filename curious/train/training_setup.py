@@ -124,10 +124,15 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
     if config.rl_config.use_rloo_scalar and config.rl_config.normalize_centered_returns:
         raise ValueError("RLOO scalar advantages should not also use GRPO std normalization")
     if config.rl_config.use_ad_cispo:
-        if config.rl_config.ad_cispo_saliency_method not in {"future_attention_in_degree", "kv_norm", "causal_tangent"}:
+        if config.rl_config.ad_cispo_saliency_method not in {
+            "future_attention_in_degree",
+            "kv_norm",
+            "causal_tangent",
+            "causal_tangent_smoothed",
+        }:
             raise ValueError(
                 "AD-CISPO currently supports ad_cispo_saliency_method='future_attention_in_degree', "
-                "'kv_norm', or 'causal_tangent'"
+                "'kv_norm', 'causal_tangent', or 'causal_tangent_smoothed'"
             )
         if config.rl_config.ad_cispo_top_layers <= 0:
             raise ValueError("AD-CISPO ad_cispo_top_layers must be positive")

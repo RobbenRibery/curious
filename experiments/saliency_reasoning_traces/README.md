@@ -19,10 +19,13 @@ Artifacts:
 
 - `attention_heatmap.html`: future-attention in-degree saliency over the six traces.
 - `causal_tangent_heatmap.html`: causal-tangent saliency over the same six traces.
-- `head_to_head_heatmap.html`: both methods stacked trace-by-trace over identical token rows.
+- `causal_tangent_smoothed_heatmap.html`: radius-1 locally smoothed causal-tangent saliency over the same six traces.
+- `head_to_head_heatmap.html`: all three methods stacked trace-by-trace over identical token rows.
 - `summary.json`: compact run metadata and top-token summaries.
 - `saliency_data.json`: full token rows, saliency scores, and derived multipliers.
 
 The default run intentionally keeps sink guarding disabled so separator and punctuation tokens remain visible. This makes the old attention-centrality failure mode easier to inspect directly.
 
-Observed pattern in this focused sample: future-attention in-degree often emphasizes early setup tokens, punctuation, whitespace-like tokens, and paragraph separators. Causal-tangent saliency is much lower scale and tends to move mass toward objective-connected terms in the algebra or self-check regions, though punctuation can still appear when it is locally tied to the model's likelihood objective.
+The locally smoothed causal-tangent variant uses a radius-1 kernel: `0.15 * left + 0.70 * center + 0.15 * right`, renormalized at target-mask boundaries. It is intended to reduce tokenizer-boundary brittleness while keeping saliency local.
+
+Observed pattern in this focused sample: future-attention in-degree often emphasizes early setup tokens, punctuation, whitespace-like tokens, and paragraph separators. Causal-tangent saliency is much lower scale and tends to move mass toward objective-connected terms in the algebra or self-check regions, though punctuation can still appear when it is locally tied to the model's likelihood objective. The smoothed variant spreads sharp causal-tangent spikes to neighboring phrase tokens, which makes multi-token quantities and subwords easier to read while slightly increasing local bleed around punctuation.
