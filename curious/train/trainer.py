@@ -737,6 +737,7 @@ class PolicyGradientTrainer:
                         action_mask=action_mask,
                         clip_high=self.actor_loss.epsilon_high,
                         logits_minibatch_size=self.training_setup["rl_config"].logits_minibatch_size,
+                        saliency_minibatch_size=self.training_setup["rl_config"].ad_cispo_saliency_minibatch_size,
                         top_layers=self.training_setup["rl_config"].ad_cispo_top_layers,
                         min_multiplier=self.training_setup["rl_config"].ad_cispo_min_multiplier,
                         max_multiplier=self.training_setup["rl_config"].ad_cispo_max_multiplier,

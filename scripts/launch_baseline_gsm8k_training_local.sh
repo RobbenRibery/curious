@@ -25,6 +25,7 @@ MAX_TRAIN_BATCHES="${MAX_TRAIN_BATCHES:-130}"
 MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-32}"
 BACKWARD_MICRO_BATCH_SIZE="${BACKWARD_MICRO_BATCH_SIZE:-8}"
 LOGITS_MINIBATCH_SIZE="${LOGITS_MINIBATCH_SIZE:-16}"
+AD_CISPO_SALIENCY_MINIBATCH_SIZE="${AD_CISPO_SALIENCY_MINIBATCH_SIZE:-0}"
 COMPILE_TRAIN_MODEL="${COMPILE_TRAIN_MODEL:-0}"
 EPOCHS_PER_STEP="${EPOCHS_PER_STEP:-1}"
 TRAIN_ENTROPY_LOG_INTERVAL="${TRAIN_ENTROPY_LOG_INTERVAL:-10}"
@@ -151,6 +152,7 @@ if [[ "${USE_AD_CISPO}" == "1" ]]; then
   echo "  ad_cispo_max_multiplier: ${AD_CISPO_MAX_MULTIPLIER:-None}"
   echo "  ad_cispo_eps: ${AD_CISPO_EPS}"
   echo "  ad_cispo_attention_block_size: ${AD_CISPO_ATTENTION_BLOCK_SIZE}"
+  echo "  ad_cispo_saliency_minibatch_size: ${AD_CISPO_SALIENCY_MINIBATCH_SIZE:-auto}"
 fi
 
 command=("${PYTHON_BIN}" -m curious.training \
@@ -232,6 +234,7 @@ if [[ "${USE_AD_CISPO}" == "1" ]]; then
   fi
   command+=(--rl-config.ad-cispo-eps "${AD_CISPO_EPS}")
   command+=(--rl-config.ad-cispo-attention-block-size "${AD_CISPO_ATTENTION_BLOCK_SIZE}")
+  command+=(--rl-config.ad-cispo-saliency-minibatch-size "${AD_CISPO_SALIENCY_MINIBATCH_SIZE}")
 else
   command+=(--rl-config.no-use-ad-cispo)
 fi

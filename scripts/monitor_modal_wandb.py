@@ -59,6 +59,8 @@ DEFAULT_METRICS = (
     "ad_cispo/saliency_source_target_policy",
     "ad_cispo/saliency_method_causal_tangent",
     "ad_cispo/saliency_method_causal_tangent_smoothed",
+    "ad_cispo/logits_minibatch_size",
+    "ad_cispo/saliency_minibatch_size",
     "ad_cispo/sink_guard_removed_token_fraction",
     "ad_cispo/sink_guard_removed_saliency_fraction",
     "ad_cispo/multiplier_std",

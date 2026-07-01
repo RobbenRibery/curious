@@ -229,6 +229,7 @@ def train(
                         action_mask=action_mask,
                         clip_high=objective.epsilon_high,
                         logits_minibatch_size=args.rl_config.logits_minibatch_size,
+                        saliency_minibatch_size=args.rl_config.ad_cispo_saliency_minibatch_size,
                         top_layers=args.rl_config.ad_cispo_top_layers,
                         min_multiplier=args.rl_config.ad_cispo_min_multiplier,
                         max_multiplier=args.rl_config.ad_cispo_max_multiplier,

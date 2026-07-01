@@ -730,9 +730,11 @@ class FakeCausalTangentModel(nn.Module):
         self.embed = nn.Embedding(vocab_size, width)
         self.model = FakeCausalTangentInnerModel(width)
         self.lm_head = nn.Linear(width, vocab_size, bias=False)
+        self.forward_calls = 0
 
     def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor, use_cache: bool = False):
         del attention_mask, use_cache
+        self.forward_calls += 1
         hidden_states = self.embed(input_ids)
         hidden_states = self.model(hidden_states)
         return {"logits": self.lm_head(hidden_states)}
@@ -879,6 +881,31 @@ def test_causal_tangent_smoothed_reference_features_logs_method_marker():
     assert features.action_saliency.action_mask.tolist() == [[False, True, True]]
     assert features.raw_saliency.values.shape == (1, 4)
     assert math.isclose(features.diagnostics["ad_cispo/saliency_method_causal_tangent_smoothed"], 1.0)
+
+
+def test_causal_tangent_saliency_minibatch_size_limits_feature_forward_batching():
+    model = FakeCausalTangentModel()
+    features = compute_reference_policy_features(
+        ReferencePolicyFeatureRequest(
+            model=model,
+            sequence_ids=torch.tensor([[1, 2, 3, 4], [1, 3, 4, 5]]),
+            attention_mask=torch.ones(2, 4, dtype=torch.long),
+            action_mask=torch.tensor([[True, True, True], [True, True, True]]),
+            clip_high=0.28,
+            logits_minibatch_size=2,
+            saliency_minibatch_size=1,
+            top_layers=1,
+            min_multiplier=0.25,
+            max_multiplier=1.5,
+            eps=1e-8,
+            return_log_probs=False,
+            saliency_method="causal_tangent_smoothed",
+            advantages=torch.tensor([1.0, 1.0]),
+        )
+    )
+
+    assert features.raw_saliency.values.shape == (2, 4)
+    assert model.forward_calls == 2
 
 
 def test_causal_tangent_falls_back_to_scalar_clip_when_sink_guard_removes_all_actions():

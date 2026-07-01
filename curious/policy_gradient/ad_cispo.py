@@ -133,6 +133,7 @@ class ReferencePolicyFeatureRequest:
     return_log_probs: bool = True
     saliency_method: str = "future_attention_in_degree"
     attention_block_size: int = 256
+    saliency_minibatch_size: int = 0
     sink_token_ids: frozenset[int] = frozenset()
     advantages: Optional[torch.Tensor] = None
 
@@ -572,11 +573,23 @@ def compute_reference_policy_features(
 ) -> ReferencePolicyFeatures:
     token_logprobs = []
     raw_saliency_values = []
+    feature_minibatch_size = (
+        request.saliency_minibatch_size
+        if request.saliency_minibatch_size > 0
+        else request.logits_minibatch_size
+    )
+    if request.logits_minibatch_size <= 0:
+        raise ValueError("AD-CISPO logits_minibatch_size must be positive")
+    if feature_minibatch_size <= 0:
+        raise ValueError("AD-CISPO saliency_minibatch_size must be positive when enabled")
+    if request.return_log_probs and feature_minibatch_size > request.logits_minibatch_size:
+        raise ValueError("AD-CISPO saliency_minibatch_size must be <= logits_minibatch_size when returning log probs")
 
-    for begin_idx in range(0, request.sequence_ids.shape[0], request.logits_minibatch_size):
-        mini_ids = request.sequence_ids[begin_idx:begin_idx + request.logits_minibatch_size]
-        mini_mask = request.attention_mask[begin_idx:begin_idx + request.logits_minibatch_size]
-        mini_action_mask = request.action_mask[begin_idx:begin_idx + request.logits_minibatch_size]
+    for begin_idx in range(0, request.sequence_ids.shape[0], feature_minibatch_size):
+        end_idx = begin_idx + feature_minibatch_size
+        mini_ids = request.sequence_ids[begin_idx:end_idx]
+        mini_mask = request.attention_mask[begin_idx:end_idx]
+        mini_action_mask = request.action_mask[begin_idx:end_idx]
         mini_masks = build_saliency_masks(
             sequence_ids=mini_ids,
             attention_mask=mini_mask,
@@ -603,7 +616,7 @@ def compute_reference_policy_features(
         elif request.saliency_method in {"causal_tangent", "causal_tangent_smoothed"}:
             if request.advantages is None:
                 raise ValueError(f"AD-CISPO {request.saliency_method} saliency requires advantages")
-            mini_advantages = request.advantages[begin_idx:begin_idx + request.logits_minibatch_size]
+            mini_advantages = request.advantages[begin_idx:end_idx]
             mini_logits, mini_saliency = extract_causal_tangent_saliency(
                 model=request.model,
                 token_batch=token_batch,
@@ -653,6 +666,8 @@ def compute_reference_policy_features(
         adaptive_clip_mask=adaptive_clip_mask,
     )
     diagnostics[f"ad_cispo/saliency_method_{request.saliency_method}"] = 1.0
+    diagnostics["ad_cispo/logits_minibatch_size"] = float(request.logits_minibatch_size)
+    diagnostics["ad_cispo/saliency_minibatch_size"] = float(feature_minibatch_size)
     return ReferencePolicyFeatures(
         log_probs=log_probs,
         raw_saliency=raw_saliency,

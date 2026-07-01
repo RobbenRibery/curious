@@ -457,6 +457,12 @@ class RLConfig:
     The query block size used by exact future-attention in-degree saliency.
     """
 
+    ad_cispo_saliency_minibatch_size: int = 0
+    """
+    The minibatch size used for AD-CISPO saliency extraction. Set to 0 or lower to reuse logits_minibatch_size.
+    Causal-tangent saliency uses an extra backward pass, so H100 launchers should keep this smaller than logits_minibatch_size.
+    """
+
     mini_batch_size: int = 16 * 2
     """
     The mini batch size to use for the GRPO.

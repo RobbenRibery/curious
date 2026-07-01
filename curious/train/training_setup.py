@@ -138,6 +138,8 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
             raise ValueError("AD-CISPO ad_cispo_top_layers must be positive")
         if config.rl_config.ad_cispo_attention_block_size <= 0:
             raise ValueError("AD-CISPO ad_cispo_attention_block_size must be positive")
+        if config.rl_config.ad_cispo_saliency_minibatch_size > config.rl_config.logits_minibatch_size:
+            raise ValueError("AD-CISPO ad_cispo_saliency_minibatch_size must be <= logits_minibatch_size when enabled")
         if config.rl_config.ad_cispo_min_multiplier < 0:
             raise ValueError("AD-CISPO ad_cispo_min_multiplier must be non-negative")
         if config.rl_config.ad_cispo_min_multiplier > 1:
