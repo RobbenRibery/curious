@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Share the CISPO config; override AD-CISPO identity plus the safer 1.7B comparison knobs.
-export RUN_NAME="${RUN_NAME:-gsm8k-ad-cispo-qwen3-1p7b-causal-tangent-top4-max1p5-b160-v1}"
+export RUN_NAME="${RUN_NAME:-gsm8k-ad-cispo-qwen3-1p7b-causal-tangent-smoothed-top4-max1p5-b160-v1}"
 export WANDB_GROUP="${WANDB_GROUP:-ad-cispo-gsm8k}"
 export OBJECTIVE_NAME="AD-CISPO"
 export USE_CISPO_LOSS="1"
@@ -22,7 +22,7 @@ export MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-1536}"
 export SGLANG_MEM_FRACTION_STATIC="${SGLANG_MEM_FRACTION_STATIC:-0.12}"
 export SGLANG_REQUEST_BATCH_SIZE="${SGLANG_REQUEST_BATCH_SIZE:-8}"
 export COMPILE_TRAIN_MODEL="${COMPILE_TRAIN_MODEL:-0}"
-export AD_CISPO_SALIENCY_METHOD="${AD_CISPO_SALIENCY_METHOD:-causal_tangent}"
+export AD_CISPO_SALIENCY_METHOD="${AD_CISPO_SALIENCY_METHOD:-causal_tangent_smoothed}"
 export AD_CISPO_TOP_LAYERS="${AD_CISPO_TOP_LAYERS:-4}"
 export AD_CISPO_MIN_MULTIPLIER="${AD_CISPO_MIN_MULTIPLIER:-0.25}"
 export AD_CISPO_MAX_MULTIPLIER="${AD_CISPO_MAX_MULTIPLIER:-1.5}"
