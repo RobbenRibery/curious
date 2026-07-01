@@ -22,7 +22,7 @@ from curious.policy_gradient.ad_cispo import (
     ADCispoStats,
     ReferencePolicyFeatures,
     ReferencePolicyFeatureRequest,
-    collect_special_token_ids,
+    collect_ad_cispo_sink_token_ids,
     compute_reference_policy_features,
 )
 
@@ -111,6 +111,7 @@ def build_ad_cispo_distribution_metrics(reference_features: ReferencePolicyFeatu
     payload: Dict[str, float] = {
         "ad_cispo/active_token_count": float(active_count),
     }
+    payload.update(reference_features.diagnostics)
     if active_count == 0:
         return payload
 
@@ -743,7 +744,8 @@ class PolicyGradientTrainer:
                         return_log_probs=False,
                         saliency_method=self.training_setup["rl_config"].ad_cispo_saliency_method,
                         attention_block_size=self.training_setup["rl_config"].ad_cispo_attention_block_size,
-                        sink_token_ids=collect_special_token_ids(self.tokenizer),
+                        sink_token_ids=collect_ad_cispo_sink_token_ids(self.tokenizer),
+                        advantages=advantages,
                     )
                 )
                 token_clip_high = ad_cispo_features.token_clip_thresholds.values

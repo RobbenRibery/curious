@@ -25,7 +25,7 @@ from curious.policy_gradient.loss import (
 from curious.policy_gradient.ad_cispo import (
     ADCispoStats,
     ReferencePolicyFeatureRequest,
-    collect_special_token_ids,
+    collect_ad_cispo_sink_token_ids,
     compute_reference_policy_features,
 )
 from curious.train.training_setup import (
@@ -236,7 +236,8 @@ def train(
                         return_log_probs=False,
                         saliency_method=args.rl_config.ad_cispo_saliency_method,
                         attention_block_size=args.rl_config.ad_cispo_attention_block_size,
-                        sink_token_ids=collect_special_token_ids(tokenizer),
+                        sink_token_ids=collect_ad_cispo_sink_token_ids(tokenizer),
+                        advantages=advantages,
                     )
                 )
                 token_clip_high = ad_cispo_features.token_clip_thresholds.values

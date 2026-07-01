@@ -1,5 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import importlib
+import math
 from typing import Any, Optional
 
 import torch
@@ -10,6 +11,38 @@ from curious.sampling.sampling import _sequence_log_probs_from_logits
 
 FLOAT_TENSOR_DTYPE = torch.bfloat16
 _ROTARY_HELPER_CACHE: dict[str, Any] = {}
+SEPARATOR_SINK_TOKEN_TEXTS = frozenset(
+    {
+        "",
+        " ",
+        "\t",
+        "\n",
+        "\r",
+        ",",
+        ".",
+        ";",
+        ":",
+        "!",
+        "?",
+        "(",
+        ")",
+        "[",
+        "]",
+        "{",
+        "}",
+        '"',
+        "'",
+        "`",
+        " ,",
+        " .",
+        " ;",
+        " :",
+        " !",
+        " ?",
+        "\n,",
+        "\n.",
+    }
+)
 
 
 def to_ad_cispo_float_dtype(tensor: torch.Tensor) -> torch.Tensor:
@@ -101,6 +134,7 @@ class ReferencePolicyFeatureRequest:
     saliency_method: str = "future_attention_in_degree"
     attention_block_size: int = 256
     sink_token_ids: frozenset[int] = frozenset()
+    advantages: Optional[torch.Tensor] = None
 
 
 @dataclass(frozen=True)
@@ -110,6 +144,7 @@ class ReferencePolicyFeatures:
     action_saliency: ActionTokenSaliency
     token_clip_thresholds: TokenClipThresholds
     stats: ADCispoStats
+    diagnostics: dict[str, float] = field(default_factory=dict)
 
 
 def align_saliency_to_actions(raw_saliency: RawTokenSaliency, action_mask: torch.Tensor) -> ActionTokenSaliency:
@@ -132,6 +167,32 @@ def collect_special_token_ids(tokenizer: Any) -> frozenset[int]:
         if token_id is not None:
             token_ids.add(int(token_id))
     return frozenset(token_ids)
+
+
+def collect_ad_cispo_sink_token_ids(tokenizer: Any) -> frozenset[int]:
+    cached_token_ids = getattr(tokenizer, "_ad_cispo_sink_token_ids_cache", None)
+    if cached_token_ids is not None:
+        return frozenset(cached_token_ids)
+
+    token_ids = set(collect_special_token_ids(tokenizer))
+    encode = getattr(tokenizer, "encode", None)
+    if callable(encode):
+        for text in SEPARATOR_SINK_TOKEN_TEXTS:
+            try:
+                encoded = encode(text, add_special_tokens=False)
+            except TypeError:
+                encoded = encode(text)
+            except Exception:
+                continue
+            for token_id in encoded or []:
+                if token_id is not None:
+                    token_ids.add(int(token_id))
+    sink_token_ids = frozenset(token_ids)
+    try:
+        setattr(tokenizer, "_ad_cispo_sink_token_ids_cache", sink_token_ids)
+    except Exception:
+        pass
+    return sink_token_ids
 
 
 def build_adaptive_clip_mask(
@@ -539,6 +600,18 @@ def compute_reference_policy_features(
                 top_layers=request.top_layers,
                 return_logits=request.return_log_probs,
             )
+        elif request.saliency_method == "causal_tangent":
+            if request.advantages is None:
+                raise ValueError("AD-CISPO causal_tangent saliency requires advantages")
+            mini_advantages = request.advantages[begin_idx:begin_idx + request.logits_minibatch_size]
+            mini_logits, mini_saliency = extract_causal_tangent_saliency(
+                model=request.model,
+                token_batch=token_batch,
+                masks=mini_masks,
+                advantages=mini_advantages,
+                top_layers=request.top_layers,
+                return_logits=request.return_log_probs,
+            )
         else:
             raise ValueError(f"Unsupported AD-CISPO saliency method: {request.saliency_method}")
         if request.return_log_probs:
@@ -569,13 +642,57 @@ def compute_reference_policy_features(
             eps=request.eps,
         ),
     )
+    diagnostics = summarize_sink_guard(
+        raw_saliency=raw_saliency,
+        action_mask=request.action_mask,
+        adaptive_clip_mask=adaptive_clip_mask,
+    )
+    diagnostics[f"ad_cispo/saliency_method_{request.saliency_method}"] = 1.0
     return ReferencePolicyFeatures(
         log_probs=log_probs,
         raw_saliency=raw_saliency,
         action_saliency=action_saliency,
         token_clip_thresholds=token_clip_thresholds,
         stats=stats,
+        diagnostics=diagnostics,
     )
+
+
+def summarize_sink_guard(
+    raw_saliency: RawTokenSaliency,
+    action_mask: torch.Tensor,
+    adaptive_clip_mask: torch.Tensor,
+) -> dict[str, float]:
+    original_mask = action_mask.bool()
+    adaptive_mask = adaptive_clip_mask.bool()
+    removed_mask = original_mask & ~adaptive_mask
+    original_count = int(original_mask.sum().item())
+    removed_count = int(removed_mask.sum().item())
+    active_count = int(adaptive_mask.sum().item())
+
+    action_values = raw_saliency.values[:, 1:]
+    finite_positive_values = torch.where(
+        torch.isfinite(action_values) & (action_values > 0),
+        action_values,
+        torch.zeros_like(action_values),
+    ).to(dtype=torch.float32)
+    total_saliency = (finite_positive_values * original_mask.to(dtype=torch.float32)).sum()
+    removed_saliency = (finite_positive_values * removed_mask.to(dtype=torch.float32)).sum()
+    total_saliency_value = total_saliency.detach().cpu().item()
+    if total_saliency_value > 0:
+        removed_saliency_fraction = (removed_saliency / total_saliency).detach().cpu().item()
+    else:
+        removed_saliency_fraction = 0.0
+
+    return {
+        "ad_cispo/sink_guard_original_token_count": float(original_count),
+        "ad_cispo/sink_guard_active_token_count": float(active_count),
+        "ad_cispo/sink_guard_removed_token_count": float(removed_count),
+        "ad_cispo/sink_guard_removed_token_fraction": (
+            float(removed_count) / float(original_count) if original_count else 0.0
+        ),
+        "ad_cispo/sink_guard_removed_saliency_fraction": float(removed_saliency_fraction),
+    }
 
 
 def extract_future_attention_indegree_saliency(
@@ -628,6 +745,121 @@ def extract_future_attention_indegree_saliency(
 
     raw_saliency = aggregate_saliency_layers(captured_saliencies)
     return logits, raw_saliency
+
+
+def extract_causal_tangent_saliency(
+    model: PreTrainedModel,
+    token_batch: SequenceTokenBatch,
+    masks: SaliencyMasks,
+    advantages: torch.Tensor,
+    top_layers: int,
+    return_logits: bool = True,
+) -> tuple[Optional[torch.Tensor], RawTokenSaliency]:
+    if top_layers <= 0:
+        raise ValueError("AD-CISPO top_layers must be positive")
+    if advantages.ndim != 1 or advantages.shape[0] != token_batch.sequence_ids.shape[0]:
+        raise ValueError(
+            "AD-CISPO causal_tangent advantages must be a rank-1 tensor aligned with sequence_ids: "
+            f"got advantages {tuple(advantages.shape)} and sequence_ids {tuple(token_batch.sequence_ids.shape)}"
+        )
+
+    selected_layers = select_reference_attention_layers(model, top_layers)
+    captured_hidden_states: list[torch.Tensor] = []
+    handles = []
+
+    def capture_layer_input(_module, args, kwargs):
+        hidden_states = _get_forward_arg(args=args, kwargs=kwargs, name="hidden_states", index=0)
+        if not hidden_states.requires_grad:
+            raise RuntimeError("AD-CISPO causal_tangent hidden states must require gradients")
+        captured_hidden_states.append(hidden_states)
+
+    for layer in selected_layers:
+        handles.append(layer.register_forward_pre_hook(capture_layer_input, with_kwargs=True))
+
+    try:
+        with torch.enable_grad():
+            model_output = model(
+                input_ids=token_batch.sequence_ids,
+                attention_mask=token_batch.attention_mask,
+                use_cache=False,
+            )
+            logits = model_output["logits"]
+            action_log_probs = _sequence_log_probs_for_saliency_objective(
+                logits=logits[:, :-1],
+                output_ids=token_batch.sequence_ids[:, 1:],
+            )
+            objective_mask = masks.adaptive_clip_mask.to(device=action_log_probs.device)
+            objective = _causal_tangent_objective(
+                action_log_probs=action_log_probs,
+                action_mask=objective_mask,
+                advantages=advantages.to(device=action_log_probs.device),
+            )
+            if not captured_hidden_states:
+                raise RuntimeError("AD-CISPO causal_tangent did not capture any hidden states")
+            hidden_grads = torch.autograd.grad(
+                objective,
+                captured_hidden_states,
+                retain_graph=False,
+                create_graph=False,
+                allow_unused=True,
+            )
+            raw_saliency = _score_causal_tangent_layers(
+                hidden_states=captured_hidden_states,
+                hidden_grads=hidden_grads,
+                full_target_mask=masks.full_target_mask,
+            )
+            logits_for_return = logits.detach() if return_logits else None
+    finally:
+        for handle in handles:
+            handle.remove()
+
+    return logits_for_return, raw_saliency
+
+
+def _sequence_log_probs_for_saliency_objective(logits: torch.Tensor, output_ids: torch.Tensor) -> torch.Tensor:
+    logits = logits.to(dtype=torch.float32)
+    gathered_logits = logits.gather(dim=-1, index=output_ids.unsqueeze(-1)).squeeze(-1)
+    return gathered_logits - logits.logsumexp(dim=-1)
+
+
+def _causal_tangent_objective(
+    action_log_probs: torch.Tensor,
+    action_mask: torch.Tensor,
+    advantages: torch.Tensor,
+) -> torch.Tensor:
+    mask = action_mask.to(device=action_log_probs.device, dtype=action_log_probs.dtype)
+    token_counts = mask.sum(dim=-1).clamp_min(1.0)
+    per_sequence_log_prob = (action_log_probs * mask).sum(dim=-1) / token_counts
+    weights = torch.nan_to_num(advantages.detach().abs().to(dtype=action_log_probs.dtype), nan=0.0, posinf=0.0, neginf=0.0)
+    return (weights * per_sequence_log_prob).sum()
+
+
+def _score_causal_tangent_layers(
+    hidden_states: list[torch.Tensor],
+    hidden_grads: tuple[Optional[torch.Tensor], ...],
+    full_target_mask: torch.Tensor,
+) -> RawTokenSaliency:
+    if len(hidden_states) != len(hidden_grads):
+        raise RuntimeError("AD-CISPO causal_tangent hidden-state and gradient captures are misaligned")
+
+    layer_scores: list[torch.Tensor] = []
+    for hidden_state, hidden_grad in zip(hidden_states, hidden_grads):
+        if hidden_grad is None:
+            continue
+        hidden = hidden_state.detach().to(dtype=torch.float32)
+        grad = hidden_grad.detach().to(dtype=torch.float32)
+        mask = full_target_mask.to(device=hidden.device, dtype=torch.float32)
+        token_counts = mask.sum(dim=-1, keepdim=True).clamp_min(1.0)
+        mean_hidden = (hidden * mask.unsqueeze(-1)).sum(dim=1, keepdim=True) / token_counts.unsqueeze(-1)
+        centered_hidden = hidden - mean_hidden
+        score = (grad * centered_hidden).sum(dim=-1).abs()
+        score = score / math.sqrt(float(hidden.shape[-1]))
+        score = torch.where(mask.bool(), score, torch.zeros_like(score))
+        layer_scores.append(score.to(dtype=FLOAT_TENSOR_DTYPE))
+
+    if not layer_scores:
+        raise RuntimeError("AD-CISPO causal_tangent did not produce any usable hidden-state gradients")
+    return RawTokenSaliency(values=torch.stack(layer_scores, dim=0).mean(dim=0))
 
 
 def extract_kv_norm_saliency(

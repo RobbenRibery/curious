@@ -428,7 +428,7 @@ class RLConfig:
 
     ad_cispo_saliency_method: str = "future_attention_in_degree"
     """
-    The saliency method to use for AD-CISPO. Supported values are future_attention_in_degree and kv_norm.
+    The saliency method to use for AD-CISPO. Supported values are future_attention_in_degree, kv_norm, and causal_tangent.
     """
 
     ad_cispo_top_layers: int = 4

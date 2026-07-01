@@ -21,12 +21,14 @@ same clipping radius to every generated token. This proposal studies
 AD-CISPO, a token-adaptive extension of MiniMax's clipped importance-sampling
 policy optimization (CISPO). The central hypothesis is that CISPO's dense
 token-gradient property can be preserved while improving sample efficiency by
-allocating a wider upper importance-sampling corridor to tokens that a frozen
-reference model treats as structurally important for subsequent generated
-tokens. The proposed novelty is a mean-preserving, saliency-budgeted upper
-clipping rule: the average clipping budget remains equal to the scalar CISPO
-baseline, but the budget is redistributed across generated tokens using exact
-future-attention in-degree from selected reference-model layers.
+allocating a wider upper importance-sampling corridor to tokens that are
+estimated to be important for the sampled trajectory. The proposed novelty is a
+mean-preserving, saliency-budgeted upper clipping rule: the average clipping
+budget remains equal to the scalar CISPO baseline, but the budget is
+redistributed across generated tokens. After observing attention-sink failures
+in future-attention in-degree saliency, the next-generation extractor uses
+causal-tangent saliency: a first-order estimate of how much each token-position
+representation affects the advantage-weighted policy-gradient objective.
 \end{abstract}
 
 \section{Problem and Motivation}
@@ -113,18 +115,21 @@ Existing reasoning-RL objectives answer two separate questions only partially:
 
 The gap is a token-budgeted trust-region objective for language-model RL: one
 that keeps the same average clipping budget as a scalar baseline, but reallocates
-that budget according to a frozen, reproducible structural signal. AD-CISPO is
-designed to fill this gap for CISPO-style clipped IS-weight policy gradients.
+that budget according to a token-importance signal tied to the sampled
+trajectory. AD-CISPO is designed to fill this gap for CISPO-style clipped
+IS-weight policy gradients.
 
 \section{Proposed Solution}
 
 AD-CISPO replaces the scalar upper IS clipping radius in CISPO with a
 token-adaptive upper radius. The lower bound remains inactive by default to
 match the MiniMax-style CISPO baseline. Each generated token receives a
-multiplier computed from frozen-reference saliency, and the multipliers are
+multiplier computed from a saliency extractor, and the multipliers are
 normalized so their mean over valid generated tokens is $1$. This preserves the
 same average clipping budget as scalar CISPO while changing where the budget is
-spent.
+spent. The first implementation used frozen-reference future-attention
+in-degree; the next-generation implementation should use causal-tangent
+saliency because attention in-degree can be dominated by sink tokens.
 
 \paragraph{Core hypothesis.}
 For reasoning tasks with sparse sequence-level rewards, reallocating CISPO's
@@ -134,17 +139,18 @@ uniform multipliers should remove the gain if the saliency signal is doing real
 work.
 
 \paragraph{What is novel.}
-The proposal's novelty is not the use of attention as a saliency heuristic by
+The proposal's novelty is not the use of one particular saliency heuristic by
 itself. The novel contribution is the combination of:
 \begin{enumerate}[leftmargin=*]
   \item CISPO-compatible token-adaptive upper IS clipping that preserves dense
   token gradients;
   \item mean-preserving multiplier normalization, so AD-CISPO changes budget
   allocation rather than increasing the total average clipping budget;
-  \item exact frozen-reference future-attention in-degree, computed only over
-  valid generated tokens and excluding prompt/sink tokens;
-  \item blockwise implementation that avoids materializing full attention
-  tensors while preserving exact selected-layer attention weights;
+  \item an explicit saliency interface, where attention in-degree is a cheap
+  baseline and causal-tangent saliency is the first objective-sensitive
+  replacement;
+  \item sink-token diagnostics and guards, so punctuation or boilerplate
+  attention sinks cannot silently absorb the adaptive clipping budget;
   \item falsifiable ablations that separate saliency from extra variance,
   asymmetric clipping, and reference-model overhead.
 \end{enumerate}
@@ -167,13 +173,13 @@ $o_{i,t}$ & token at position $t$ of response $i$ & token id \\
 $G$ & number of responses sampled per prompt & positive integer \\
 $\pi_\theta$ & current policy being optimized & language model \\
 $\pi_{\theta_{\mathrm{old}}}$ & rollout policy that produced the batch & language model \\
-$\pi_{\mathrm{ref}}$ & frozen reference model for saliency and optional KL & language model \\
+$\pi_{\mathrm{ref}}$ & frozen reference model for optional KL and saliency baselines & language model \\
 $r_{i,t}(\theta)$ & IS weight
   $\frac{\pi_\theta(o_{i,t}|q,o_{i,<t})}
   {\pi_{\theta_{\mathrm{old}}}(o_{i,t}|q,o_{i,<t})}$ & positive scalar \\
 $\hat{A}_i$ & group-relative sequence advantage for response $i$ & scalar \\
-$M_i$ & valid generated-token mask for response $i$ & token-position set \\
-$S_{i,t}$ & raw frozen-reference saliency for token $o_{i,t}$ & nonnegative scalar \\
+$M_i$ & valid generated-token action positions for response $i$ & token-position set \\
+$S_{i,t}$ & raw saliency for token $o_{i,t}$ & nonnegative scalar \\
 $m_{i,t}$ & normalized token multiplier & nonnegative scalar, mean $1$ over $M_i$ \\
 $\epsilon^{IS}_{\mathrm{low}}$ & lower IS clipping radius & nonnegative scalar \\
 $\epsilon^{IS}_{\mathrm{high}}$ & scalar upper IS clipping radius & positive scalar \\
@@ -271,10 +277,12 @@ and the objective is
   \right].
 \end{equation}
 
-The adaptive multiplier is computed from frozen-reference saliency. Here $u$
-ranges over all valid generated positions in response $i$ to form the mean
-saliency in the denominator, while $t$ is the position whose multiplier is
-being computed:
+The adaptive multiplier is computed from token saliency. Let $M_i$ denote the
+set of generated-token action positions in response $i$ that are eligible for
+adaptive clipping. It excludes prompt positions, padding, masked-out actions,
+special tokens, and any explicit sink-token categories removed by the saliency
+guard. Here $u$ ranges over all positions in $M_i$ to form the mean saliency in
+the denominator, while $t$ is the position whose multiplier is being computed:
 \begin{equation}
   \tilde{m}_{i,t}
   =
@@ -309,8 +317,9 @@ The saliency assigned to token $o_{i,t}$ is
 \end{equation}
 Thus a token is salient when later valid generated tokens attend to it under
 the frozen reference model. The strict condition $j>t$ prevents self-attention
-from inflating saliency. $M_i$ excludes prompt positions and special-token
-sinks from both source queries and target keys.
+from inflating saliency. In this estimator, $M_i$ is used both as the source
+query set and target key set, so prompt, padding, special-token, and explicitly
+guarded sink-token positions do not participate in the saliency budget.
 
 The implementation computes this quantity blockwise from reference-model
 post-RoPE query and key states. This avoids materializing a full batch of
@@ -329,6 +338,206 @@ A cheaper ablation is frozen-reference key-vector norm:
 It should be reported as a proxy baseline, not as the primary saliency
 definition.
 
+\section{Mathematical Failure Mode: Attention Sinks versus Causal Importance}
+
+The future-attention in-degree estimator is best understood as an
+attention-centrality score:
+\begin{equation}
+  S_{i,t}
+  =
+  \sum_{\ell,h}
+  \sum_{\substack{j \in M_i \\ j > t}}
+  a^{(\ell,h)}_{i,j,t}.
+\end{equation}
+It answers the question ``how much do later generated tokens look back at
+position $t$?'' AD-CISPO, however, ultimately needs a different quantity:
+how much changing the representation at position $t$ would change the
+policy-gradient objective. These two quantities can diverge because attention
+mass is not a causal explanation of model behavior \cite{jain2019attention}.
+
+In a transformer attention layer, the value mixed into query position $j$ is
+\begin{equation}
+  z_{i,j}
+  =
+  \sum_{t \leq j} a_{i,j,t} V_{i,t}.
+\end{equation}
+A large coefficient $a_{i,j,t}$ says that position $j$ reads from position
+$t$, but it does not imply that $V_{i,t}$ changes the final answer, reward, or
+policy-gradient update. This distinction matters for attention sinks
+\cite{xiao2024streamingllm}: early separator or formatting tokens can attract
+many small attention weights from later positions for non-semantic reasons.
+
+For example, suppose a response begins with a common reasoning preamble:
+\begin{quote}
+\texttt{Okay, let's try to figure out ...}
+\end{quote}
+Let $t_c$ be the comma position. If many future layer-head-query terms assign a
+small amount of attention to this comma, the accumulated in-degree can dominate:
+\begin{equation}
+  a^{(\ell,h)}_{i,j,t_c} \approx 0.02,
+  \qquad
+  400 \text{ contributing terms}
+  \quad\Rightarrow\quad
+  S_{i,t_c} \approx 8.0.
+\end{equation}
+A genuinely reasoning-critical token may receive stronger attention from fewer
+positions:
+\begin{equation}
+  20 \text{ contributing terms} \times 0.10
+  \quad\Rightarrow\quad
+  S_{i,t_{\mathrm{math}}} \approx 2.0.
+\end{equation}
+Under attention centrality, the comma receives the larger score even though it
+may not be useful for solving the problem.
+
+This creates a direct optimizer-level failure. AD-CISPO converts saliency into
+an upper clipping budget:
+\begin{equation}
+  \epsilon^{IS}_{i,t,\mathrm{high}}
+  =
+  \epsilon^{IS}_{\mathrm{high}} m_{i,t}.
+\end{equation}
+If the comma sink receives $m_{i,t_c}=2$ and
+$\epsilon^{IS}_{\mathrm{high}}=0.2$, its upper IS bound becomes
+\begin{equation}
+  1+\epsilon^{IS}_{i,t_c,\mathrm{high}}
+  =
+  1+0.2 \cdot 2
+  =
+  1.4.
+\end{equation}
+Thus the largest adaptive trust region can be allocated to punctuation in a
+boilerplate prefix rather than to the tokens whose representations influence
+the rewarded reasoning trajectory.
+
+\paragraph{Causal-tangent saliency.}
+A better first-generation replacement is an attribution-patching-style
+first-order estimator, which approximates causal intervention effects with a
+single backward pass \cite{meng2022rome,wang2022ioi,syed2023attribution}.
+Define a teacher-forced scalar objective over sampled completions:
+\begin{equation}
+  F(\theta)
+  =
+  \sum_i
+  |\hat{A}_i|
+  \frac{
+    \sum_{t \in M_i}
+    \log \pi_\theta(o_{i,t}\mid q_i,o_{i,<t})
+  }{|M_i|}.
+\end{equation}
+Let $h^{(\ell)}_{i,t}$ be the residual-stream activation at selected layer
+$\ell$ and generated position $t$. A first-order Taylor expansion gives
+\begin{equation}
+  F(h^{(\ell)}_{i,t}+\Delta)
+  -
+  F(h^{(\ell)}_{i,t})
+  \approx
+  \nabla_{h^{(\ell)}_{i,t}} F \cdot \Delta.
+\end{equation}
+
+The word ``causal'' is used in the intervention sense, not as a claim that the
+score is a complete causal proof. The ideal causal question is: if one could
+intervene on the hidden state at token position $t$ while holding the rest of
+the computation fixed as much as possible, how much would the scalar objective
+$F$ change? Exact activation patching answers this by replacing or perturbing
+$h^{(\ell)}_{i,t}$ and rerunning the downstream computation, but doing this for
+every token, layer, and rollout is too expensive inside RL training. The
+first-order term above is the tangent-space approximation to that intervention:
+it estimates the local effect of an infinitesimal do-intervention
+$\operatorname{do}(h^{(\ell)}_{i,t}\leftarrow h^{(\ell)}_{i,t}+\Delta)$ on
+$F$. Thus the method is ``causal'' because it estimates the effect of changing
+an internal state on the objective, and ``tangent'' because it uses the local
+linearization rather than an explicit finite intervention.
+
+This suggests a token saliency score
+\begin{equation}
+  S^{\mathrm{CT}}_{i,t}
+  =
+  \sum_{\ell \in L_{\mathrm{top}}}
+  \frac{
+    \left|
+      \nabla_{h^{(\ell)}_{i,t}} F
+      \cdot
+      \left(
+        h^{(\ell)}_{i,t}
+        -
+        \frac{1}{|M_i|}
+        \sum_{u \in M_i} h^{(\ell)}_{i,u}
+      \right)
+    \right|
+  }{\sqrt{d_{\mathrm{model}}}}.
+\end{equation}
+
+The geometric intuition behind this score is that
+$\nabla_{h^{(\ell)}_{i,t}}F$ is the normal vector to the local tangent plane of
+the training objective with respect to the token-position representation. The
+centered activation
+\begin{equation}
+  \bar{h}^{(\ell)}_{i,t}
+  =
+  h^{(\ell)}_{i,t}
+  -
+  \frac{1}{|M_i|}
+  \sum_{u \in M_i} h^{(\ell)}_{i,u}
+\end{equation}
+is a direction from the response's average generated-token state toward the
+specific token's representation. Their inner product measures how much the
+token-specific representation points in a direction that locally increases or
+decreases the scalar objective. Taking the absolute value treats both positive
+and negative local influence as importance: a token can matter because it
+supports the rewarded trajectory, or because the objective is strongly trying
+to move away from its current representation.
+
+This differs from attention in-degree in three important ways. First, a token
+must be connected to the objective gradient; receiving attention is not enough.
+If $\nabla_{h^{(\ell)}_{i,t}}F \approx 0$, then
+$S^{\mathrm{CT}}_{i,t}$ is small even when the token is an attention sink.
+Second, centering removes common sequence-level activation structure, so generic
+boilerplate magnitude is less likely to dominate. Third, summing over the final
+selected layers asks whether the token representation remains useful near the
+model's decision surface, rather than whether it was merely read by later
+tokens in an earlier attention computation.
+
+For AD-CISPO, the practical interpretation is:
+\begin{quote}
+  allocate more upper IS clipping budget to tokens whose hidden states lie in
+  directions to which the actual policy-gradient objective is locally
+  sensitive.
+\end{quote}
+This is why causal-tangent saliency is a better match to adaptive clipping than
+attention centrality. The clip multiplier is no longer driven by how often a
+token is looked at; it is driven by a first-order estimate of how much the
+training objective would change if that token-position representation were
+perturbed.
+
+The proposed next-generation extractor should therefore treat attention
+in-degree as a diagnostic baseline and use causal-tangent saliency, plus
+explicit sink-token guards, as the first serious replacement when attention
+sinks dominate the top-saliency table.
+
+\paragraph{Target policy versus frozen policy.}
+Causal-tangent saliency should use activations and gradients from the current
+target policy $\pi_\theta$, not from the frozen reference policy
+$\pi_{\mathrm{ref}}$. The reason is built into the definition of $F$: it is the
+teacher-forced objective whose log-probability terms are produced by the model
+being updated. The gradient
+\begin{equation}
+  \nabla_{h^{(\ell)}_{i,t}} F
+\end{equation}
+is therefore a sensitivity of the target policy's computation graph. If the
+same score were computed on $\pi_{\mathrm{ref}}$, it would estimate the effect
+of perturbing hidden states in a model that will not receive the CISPO update.
+That would reintroduce the same mismatch that made frozen-reference
+attention-saliency fragile: the saliency source could emphasize obsolete
+features or sink behavior from a policy that is no longer the object being
+optimized.
+
+The frozen policy remains useful as a baseline and diagnostic. It can provide
+KL/reference metrics, future-attention in-degree ablations, and drift
+measurements. But the primary causal-tangent extractor should run after
+rollouts are collected and before the policy update, using the current
+training model $\pi_\theta$ on the sampled prompt-response sequences.
+
 \section{Implementation Plan}
 
 The minimum implementation should use the existing Curious training path and
@@ -339,16 +548,21 @@ configuration, so that full ablations are affordable on a single H100.
 \begin{center}
 \fbox{\begin{minipage}{0.88\linewidth}
 \small
-\textbf{Implementation flow:}
+\textbf{Next-generation implementation flow:}
 $\pi_{\theta_{\mathrm{old}}}$ samples grouped responses
-$\rightarrow$ rule-based verifier computes rewards and group advantages
-$\rightarrow$ frozen $\pi_{\mathrm{ref}}$ computes log-probs and saliency
+$\rightarrow$ verifier computes rewards and group advantages
+$\rightarrow$ target policy is run teacher-forced on sampled responses
+$\rightarrow$ final-layer hidden states are captured
+$\rightarrow$ the advantage-weighted log-prob objective $F$ is backpropagated
+to those hidden states
+$\rightarrow$ causal-tangent saliency $S^{\mathrm{CT}}_{i,t}$ is computed and
+sink-guarded
 $\rightarrow$ saliency is normalized into $m_{i,t}$
 $\rightarrow$ token thresholds
 $\epsilon^{IS}_{i,t,\mathrm{high}}=\epsilon^{IS}_{\mathrm{high}}m_{i,t}$
 $\rightarrow$ CISPO loss uses detached clipped IS weights
-$\rightarrow$ metrics log reward, exact match, clipping, saliency, and
-runtime overhead.
+$\rightarrow$ metrics log reward, exact match, clipping, saliency shape,
+sink-guard behavior, and runtime overhead.
 \end{minipage}}
 \end{center}
 
@@ -367,8 +581,45 @@ A mathematically aligned AD-CISPO implementation should satisfy the following:
   is being clipped. In next-token prediction implementations, generated-token
   saliency must align with next-token log-probability terms, not the preceding
   hidden-state position.
-  \item Claims about compute and memory must distinguish active-policy overhead
-  from frozen-reference overhead.
+  \item Causal-tangent saliency should be computed from the target policy on the
+  sampled completions, with the scalar objective using the same generated-token
+  log-probability terms and group advantages that drive the CISPO update.
+  Frozen-policy activations should be reserved for explicit ablations, not for
+  the primary extractor.
+  \item The causal-tangent backward pass should differentiate only the saliency
+  objective used to score token positions; the final CISPO update should still
+  use the normal training loss and should not accidentally reuse stale gradients
+  from saliency extraction.
+  \item Sink guards should be explicit and logged. Separator punctuation,
+  whitespace, special tokens, and prompt tokens should either be removed from
+  multiplier assignment or capped at multiplier $1$, while numeric tokens and
+  mathematical operators should remain eligible unless ablated.
+  \item Claims about compute and memory must distinguish active-policy saliency
+  overhead from frozen-reference overhead.
+\end{enumerate}
+
+\paragraph{Causal-tangent extractor steps.}
+The recommended first implementation is:
+\begin{enumerate}[leftmargin=*]
+  \item Add a saliency method flag such as
+  \texttt{ad\_cispo\_saliency\_method=causal\_tangent}.
+  \item During trajectory processing, run the target policy teacher-forced over
+  the sampled prompt-response sequences, using the same logits-minibatch
+  boundary used for log-probability computation.
+  This should use the current training model before the update step, not the
+  frozen reference model.
+  \item Register hooks on the last four decoder layers and retain gradients for
+  their hidden-state tensors at generated-token positions.
+  \item Form $F$ from generated-token log-probabilities weighted by
+  $|\hat{A}_i|$, with per-response length normalization so long completions do
+  not dominate saliency solely by length.
+  \item Backpropagate $F$, compute $S^{\mathrm{CT}}_{i,t}$ from
+  gradient--centered-activation inner products, then detach and clear temporary
+  gradients before the policy update.
+  \item Apply sink guards and log the fraction of tokens and saliency mass
+  removed by those guards.
+  \item Reuse the existing mean-preserving multiplier projection and AD-CISPO
+  clip-high plumbing.
 \end{enumerate}
 
 \section{Evaluation Plan}
@@ -408,6 +659,7 @@ The minimum comparison set is:
   \item DAPO-style asymmetric clipping or clip-high baseline.
   \item MiniMax-style CISPO: no KL, no active lower IS bound, scalar upper
   IS radius.
+  \item AD-CISPO with causal-tangent saliency and sink guards.
   \item AD-CISPO with exact future-attention in-degree saliency.
   \item AD-CISPO with KV-norm proxy saliency.
   \item Shuffled-saliency and uniform-multiplier controls.
@@ -425,7 +677,11 @@ Report both task performance and optimizer behavior:
   response length;
   \item AD-CISPO multiplier mean, min, max, saliency mean, and saliency
   concentration;
-  \item frozen-reference overhead in wall-clock time and peak memory.
+  \item high-saliency token category frequencies, including comma,
+  punctuation, numeric, mathematical-operator, and answer-token fractions;
+  \item sink-guard removed-token fraction and removed-saliency-mass fraction;
+  \item saliency-extractor overhead in wall-clock time and peak memory,
+  separately for target-policy causal-tangent and frozen-reference baselines.
 \end{itemize}
 
 \paragraph{Decision rule.}
@@ -441,32 +697,39 @@ the proposed saliency mechanism.
 \begin{enumerate}[leftmargin=*]
   \item \textbf{Week 1:} verify MiniMax-style CISPO against GRPO on GSM8K with
   matched model, batch size, rollout count, and reward function.
-  \item \textbf{Week 2:} profile exact future-attention saliency and KV-norm
-  saliency on short runs; confirm mean-preserving multiplier statistics.
-  \item \textbf{Week 3:} run AD-CISPO, scalar CISPO, KV-norm, shuffled, and
-  uniform ablations with matched seeds.
+  \item \textbf{Week 2:} implement causal-tangent saliency, sink guards, and
+  top-token category logging; run short smoke tests to verify that high-saliency
+  tokens are not dominated by comma or boilerplate punctuation.
+  \item \textbf{Week 3:} run AD-CISPO causal-tangent, scalar CISPO,
+  future-attention in-degree, KV-norm, shuffled, and uniform ablations with
+  matched seeds.
   \item \textbf{Week 4:} analyze reward curves, clipping dynamics, saliency
-  concentration, runtime overhead, and representative trajectory changes.
+  concentration, sink-guard behavior, runtime overhead, and representative
+  trajectory changes.
 \end{enumerate}
 
 \section{Risks, Ablations, and Fallbacks}
 
 \paragraph{Risk: attention saliency is not causal.}
 Attention weights may not explain model behavior \cite{jain2019attention}.
-This is why AD-CISPO is framed as a budget-allocation heuristic. The shuffled
-saliency ablation is required; gradient-based or leave-one-token-out saliency
-can be explored if attention in-degree fails.
+This is why the next-generation plan treats future-attention in-degree as a
+diagnostic baseline and uses causal-tangent saliency as the primary extractor.
+The shuffled saliency ablation remains required to verify that any gain is
+coming from the token-importance signal rather than from multiplier variance.
 
 \paragraph{Risk: attention sinks distort saliency.}
 Initial and special tokens can attract attention for non-semantic reasons
 \cite{xiao2024streamingllm}. The implementation must mask prompt and sink
 tokens, use generated-token-only normalization, and report saliency
-concentration diagnostics.
+concentration diagnostics. For causal-tangent saliency, sink guards should be
+kept explicit rather than hidden inside the saliency formula so that the removed
+token and removed-mass fractions can be audited.
 
-\paragraph{Risk: frozen-reference overhead dominates.}
-Exact future-attention in-degree requires additional reference-model work. The
-fallback is KV-norm saliency, fewer top layers, larger attention blocks, or
-saliency recomputation at a lower cadence.
+\paragraph{Risk: causal-tangent overhead dominates.}
+Causal-tangent saliency adds an extra objective-specific backward pass. The
+fallback is to compute it every $N$ rollout batches, use only the final two
+decoder layers, reduce the saliency minibatch size, or fall back to KV-norm or
+future-attention in-degree for cheaper diagnostic runs.
 
 \paragraph{Risk: budget concentration increases variance.}
 Large multipliers may overemphasize a small set of tokens. The fallback is a
@@ -479,11 +742,11 @@ If successful, AD-CISPO would provide evidence that reasoning-RL trust regions
 should be token-budgeted rather than uniformly scalar. The contribution would
 be useful even if the exact attention heuristic is later replaced: the broader
 idea is to preserve the average IS clipping budget while assigning update
-freedom where a frozen model predicts later tokens will reuse earlier generated
-content. A negative result would still be informative because it would test
-whether CISPO's scalar clipping is already sufficient, and whether
-attention-derived structural signals are too weak or too noisy for optimizer
-control.
+freedom where the current model's objective-sensitive token representations
+suggest the update can matter most. A negative result would still be
+informative because it would test whether CISPO's scalar clipping is already
+sufficient, and whether token-level saliency signals are too weak or too noisy
+for optimizer control.
 
 \begin{thebibliography}{99}
 
@@ -543,6 +806,25 @@ Guangxuan Xiao et al.
 \newblock Efficient Streaming Language Models with Attention Sinks.
 \newblock \emph{arXiv:2309.17453}, 2024.
 \newblock \url{https://arxiv.org/abs/2309.17453}.
+
+\bibitem{meng2022rome}
+Kevin Meng, David Bau, Alex Andonian, and Yonatan Belinkov.
+\newblock Locating and Editing Factual Associations in GPT.
+\newblock \emph{arXiv:2202.05262}, 2022.
+\newblock \url{https://arxiv.org/abs/2202.05262}.
+
+\bibitem{wang2022ioi}
+Kevin Wang et al.
+\newblock Interpretability in the Wild: A Circuit for Indirect Object
+Identification in GPT-2 Small.
+\newblock \emph{arXiv:2211.00593}, 2022.
+\newblock \url{https://arxiv.org/abs/2211.00593}.
+
+\bibitem{syed2023attribution}
+Aaquib Syed et al.
+\newblock Attribution Patching Outperforms Automated Circuit Discovery.
+\newblock \emph{arXiv:2310.10348}, 2023.
+\newblock \url{https://arxiv.org/abs/2310.10348}.
 
 \bibitem{cobbe2021gsm8k}
 Karl Cobbe et al.

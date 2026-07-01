@@ -18,9 +18,11 @@ from curious.policy_gradient.ad_cispo import (
     build_adaptive_clip_mask,
     build_future_attention_masks,
     build_saliency_masks,
+    collect_ad_cispo_sink_token_ids,
     compute_blockwise_future_indegree,
     compute_reference_policy_features,
     compute_token_clip_thresholds,
+    extract_causal_tangent_saliency,
     extract_kv_norm_saliency,
 )
 from curious.policy_gradient.loss import ActorLoss
@@ -700,6 +702,41 @@ class FakeBackboneReferenceModel(nn.Module):
         return {"logits": torch.zeros(input_ids.shape[0], input_ids.shape[1], 10)}
 
 
+class FakeCausalTangentLayer(nn.Module):
+    def __init__(self, width: int) -> None:
+        super().__init__()
+        self.proj = nn.Linear(width, width, bias=False)
+        nn.init.eye_(self.proj.weight)
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        return torch.tanh(self.proj(hidden_states))
+
+
+class FakeCausalTangentInnerModel(nn.Module):
+    def __init__(self, width: int) -> None:
+        super().__init__()
+        self.layers = nn.ModuleList([FakeCausalTangentLayer(width), FakeCausalTangentLayer(width)])
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        for layer in self.layers:
+            hidden_states = layer(hidden_states)
+        return hidden_states
+
+
+class FakeCausalTangentModel(nn.Module):
+    def __init__(self, vocab_size: int = 16, width: int = 4) -> None:
+        super().__init__()
+        self.embed = nn.Embedding(vocab_size, width)
+        self.model = FakeCausalTangentInnerModel(width)
+        self.lm_head = nn.Linear(width, vocab_size, bias=False)
+
+    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor, use_cache: bool = False):
+        del attention_mask, use_cache
+        hidden_states = self.embed(input_ids)
+        hidden_states = self.model(hidden_states)
+        return {"logits": self.lm_head(hidden_states)}
+
+
 def test_kv_norm_saliency_hook_uses_top_decoder_layers():
     sequence_ids = torch.tensor([[1, 2, 3]])
     logits, raw_saliency = extract_kv_norm_saliency(
@@ -715,6 +752,138 @@ def test_kv_norm_saliency_hook_uses_top_decoder_layers():
     assert logits.shape == (1, 3, 10)
     assert raw_saliency.values.dtype == torch.bfloat16
     assert torch.allclose(raw_saliency.values, expected, atol=BF16_ATOL)
+
+
+def test_causal_tangent_saliency_scores_target_policy_hidden_states_without_param_grads():
+    torch.manual_seed(0)
+    model = FakeCausalTangentModel()
+    sequence_ids = torch.tensor([[1, 2, 3, 4]])
+    action_mask = torch.tensor([[True, True, True]])
+    masks = build_saliency_masks(
+        sequence_ids=sequence_ids,
+        attention_mask=torch.ones_like(sequence_ids),
+        action_mask=action_mask,
+        sink_token_ids=frozenset({2}),
+    )
+
+    logits, raw_saliency = extract_causal_tangent_saliency(
+        model=model,
+        token_batch=SequenceTokenBatch(
+            sequence_ids=sequence_ids,
+            attention_mask=torch.ones_like(sequence_ids),
+        ),
+        masks=masks,
+        advantages=torch.tensor([1.0]),
+        top_layers=2,
+    )
+
+    assert logits.shape == (1, 4, 16)
+    assert raw_saliency.values.shape == sequence_ids.shape
+    assert raw_saliency.values.dtype == torch.bfloat16
+    assert torch.all(raw_saliency.values >= 0)
+    assert raw_saliency.values[0, 0] == 0
+    assert raw_saliency.values[0, 1] == 0
+    assert raw_saliency.values[0, 2:].sum() > 0
+    assert all(parameter.grad is None for parameter in model.parameters())
+
+
+def test_causal_tangent_reference_features_require_advantages_and_mask_sink_tokens():
+    model = FakeCausalTangentModel()
+    sequence_ids = torch.tensor([[1, 2, 3, 4]])
+
+    try:
+        compute_reference_policy_features(
+            ReferencePolicyFeatureRequest(
+                model=model,
+                sequence_ids=sequence_ids,
+                attention_mask=torch.ones_like(sequence_ids),
+                action_mask=torch.tensor([[True, True, True]]),
+                clip_high=0.28,
+                logits_minibatch_size=1,
+                top_layers=1,
+                min_multiplier=0.25,
+                max_multiplier=1.5,
+                eps=1e-8,
+                saliency_method="causal_tangent",
+            )
+        )
+    except ValueError as exc:
+        assert "requires advantages" in str(exc)
+    else:
+        raise AssertionError("causal_tangent saliency should require advantages")
+
+    features = compute_reference_policy_features(
+        ReferencePolicyFeatureRequest(
+            model=model,
+            sequence_ids=sequence_ids,
+            attention_mask=torch.ones_like(sequence_ids),
+            action_mask=torch.tensor([[True, True, True]]),
+            clip_high=0.28,
+            logits_minibatch_size=1,
+            top_layers=1,
+            min_multiplier=0.25,
+            max_multiplier=1.5,
+            eps=1e-8,
+            return_log_probs=False,
+            saliency_method="causal_tangent",
+            sink_token_ids=frozenset({2}),
+            advantages=torch.tensor([1.0]),
+        )
+    )
+
+    assert features.log_probs is None
+    assert features.action_saliency.action_mask.tolist() == [[False, True, True]]
+    assert features.token_clip_thresholds.values.shape == (1, 3)
+    assert torch.allclose(features.token_clip_thresholds.values[0, 0], bf16_tensor(0.28), atol=BF16_ATOL)
+    assert math.isclose(features.diagnostics["ad_cispo/saliency_method_causal_tangent"], 1.0)
+    assert math.isclose(features.diagnostics["ad_cispo/sink_guard_removed_token_fraction"], 1 / 3)
+    assert all(parameter.grad is None for parameter in model.parameters())
+
+
+def test_causal_tangent_falls_back_to_scalar_clip_when_sink_guard_removes_all_actions():
+    features = compute_reference_policy_features(
+        ReferencePolicyFeatureRequest(
+            model=FakeCausalTangentModel(),
+            sequence_ids=torch.tensor([[1, 2, 3]]),
+            attention_mask=torch.ones(1, 3, dtype=torch.long),
+            action_mask=torch.tensor([[True, True]]),
+            clip_high=0.2,
+            logits_minibatch_size=1,
+            top_layers=1,
+            min_multiplier=0.25,
+            max_multiplier=1.5,
+            eps=1e-8,
+            return_log_probs=False,
+            saliency_method="causal_tangent",
+            sink_token_ids=frozenset({2, 3}),
+            advantages=torch.tensor([1.0]),
+        )
+    )
+
+    assert features.action_saliency.action_mask.tolist() == [[False, False]]
+    assert torch.allclose(
+        features.token_clip_thresholds.values,
+        torch.full_like(features.token_clip_thresholds.values, 0.2),
+    )
+
+
+def test_collect_ad_cispo_sink_token_ids_includes_special_and_separator_tokens():
+    class TinyTokenizer:
+        pad_token_id = 0
+        bos_token_id = 1
+        eos_token_id = 2
+        unk_token_id = None
+        additional_special_tokens_ids = [3]
+
+        def encode(self, text: str, add_special_tokens: bool = False):
+            del add_special_tokens
+            mapping = {",": [11], " ,": [12], ".": [13], " ": [14], "+": [15]}
+            return mapping.get(text, [])
+
+    sink_ids = collect_ad_cispo_sink_token_ids(TinyTokenizer())
+
+    assert {0, 1, 2, 3, 11, 12, 13, 14}.issubset(sink_ids)
+    assert 15 not in sink_ids
 
 
 def test_reference_policy_features_return_log_probs_and_token_thresholds():
