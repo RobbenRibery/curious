@@ -1,0 +1,1464 @@
+{
+  "inputs": {
+    "top4": "experiments/saliency_reasoning_traces/saliency_data.json",
+    "top8": "experiments/saliency_reasoning_traces_top8/saliency_data.json",
+    "method": "causal_tangent_smoothed"
+  },
+  "num_traces": 6,
+  "row_lengths": [
+    177,
+    195,
+    177,
+    154,
+    114,
+    197
+  ],
+  "traces": [
+    {
+      "trace_index": 0,
+      "prompt": "Solve this carefully. A train leaves at 2:15 PM traveling 54 mph. Another train leaves the same station at 3:00 PM on the same track traveling 72 mph. When does the second train catch the first? Show your reasoning, revisit assumptions, and self-check the answer.",
+      "completion": "Let the first train's head start be the distance it covers from 2:15 to 3:00. That is 45 minutes = 0.75 hours, so the head start is 54 * 0.75 = 40.5 miles.\n\nNow compare speeds after 3:00. The second train gains at 72 - 54 = 18 mph. Time to close 40.5 miles is 40.5 / 18 = 2.25 hours.\n\nRevisiting the setup: both trains are on the same track and the second starts later from the same station, so relative speed is the right invariant. 2.25 hours after 3:00 PM is 5:15 PM. Answer: 5:15 PM.",
+      "top12_overlap": 10,
+      "top4_top_tokens": [
+        {
+          "text": " close",
+          "token_index": 196,
+          "score": 0.0003376007080078125,
+          "category": "word/subword"
+        },
+        {
+          "text": " start",
+          "token_index": 147,
+          "score": 0.0002574920654296875,
+          "category": "word/subword"
+        },
+        {
+          "text": "Let",
+          "token_index": 105,
+          "score": 0.00025177001953125,
+          "category": "word/subword"
+        },
+        {
+          "text": ".",
+          "token_index": 251,
+          "score": 0.0002498626708984375,
+          "category": "punct"
+        },
+        {
+          "text": " at",
+          "token_index": 180,
+          "score": 0.00023174285888671875,
+          "category": "word/subword"
+        },
+        {
+          "text": " the",
+          "token_index": 106,
+          "score": 0.0002193450927734375,
+          "category": "word/subword"
+        },
+        {
+          "text": " be",
+          "token_index": 112,
+          "score": 0.0002002716064453125,
+          "category": "word/subword"
+        },
+        {
+          "text": " right",
+          "token_index": 249,
+          "score": 0.00018978118896484375,
+          "category": "word/subword"
+        },
+        {
+          "text": "0",
+          "token_index": 174,
+          "score": 0.00017261505126953125,
+          "category": "number/operator"
+        },
+        {
+          "text": " gains",
+          "token_index": 179,
+          "score": 0.000171661376953125,
+          "category": "word/subword"
+        },
+        {
+          "text": " PM",
+          "token_index": 280,
+          "score": 0.000164031982421875,
+          "category": "word/subword"
+        },
+        {
+          "text": " the",
+          "token_index": 248,
+          "score": 0.0001621246337890625,
+          "category": "word/subword"
+        }
+      ],
+      "top8_top_tokens": [
+        {
+          "text": " close",
+          "token_index": 196,
+          "score": 0.000335693359375,
+          "category": "word/subword"
+        },
+        {
+          "text": " gains",
+          "token_index": 179,
+          "score": 0.00026702880859375,
+          "category": "word/subword"
+        },
+        {
+          "text": " start",
+          "token_index": 147,
+          "score": 0.000263214111328125,
+          "category": "word/subword"
+        },
+        {
+          "text": " at",
+          "token_index": 180,
+          "score": 0.00025177001953125,
+          "category": "word/subword"
+        },
+        {
+          "text": " the",
+          "token_index": 106,
+          "score": 0.000209808349609375,
+          "category": "word/subword"
+        },
+        {
+          "text": "Let",
+          "token_index": 105,
+          "score": 0.00020599365234375,
+          "category": "word/subword"
+        },
+        {
+          "text": ".",
+          "token_index": 251,
+          "score": 0.00019550323486328125,
+          "category": "punct"
+        },
+        {
+          "text": " be",
+          "token_index": 112,
+          "score": 0.0001678466796875,
+          "category": "word/subword"
+        },
+        {
+          "text": " train",
+          "token_index": 178,
+          "score": 0.0001678466796875,
+          "category": "word/subword"
+        },
+        {
+          "text": " right",
+          "token_index": 249,
+          "score": 0.0001583099365234375,
+          "category": "word/subword"
+        },
+        {
+          "text": " is",
+          "token_index": 131,
+          "score": 0.00014781951904296875,
+          "category": "word/subword"
+        },
+        {
+          "text": "0",
+          "token_index": 174,
+          "score": 0.00014209747314453125,
+          "category": "number/operator"
+        }
+      ],
+      "rank_delta": [
+        {
+          "text": "Let",
+          "token_index": 105,
+          "top4_rank": 3,
+          "top8_rank": 6
+        },
+        {
+          "text": " the",
+          "token_index": 106,
+          "top4_rank": 6,
+          "top8_rank": 5
+        },
+        {
+          "text": " be",
+          "token_index": 112,
+          "top4_rank": 7,
+          "top8_rank": 8
+        },
+        {
+          "text": " is",
+          "token_index": 131,
+          "top4_rank": null,
+          "top8_rank": 11
+        },
+        {
+          "text": " start",
+          "token_index": 147,
+          "top4_rank": 2,
+          "top8_rank": 3
+        },
+        {
+          "text": "0",
+          "token_index": 174,
+          "top4_rank": 9,
+          "top8_rank": 12
+        },
+        {
+          "text": " train",
+          "token_index": 178,
+          "top4_rank": null,
+          "top8_rank": 9
+        },
+        {
+          "text": " gains",
+          "token_index": 179,
+          "top4_rank": 10,
+          "top8_rank": 2
+        },
+        {
+          "text": " at",
+          "token_index": 180,
+          "top4_rank": 5,
+          "top8_rank": 4
+        },
+        {
+          "text": " close",
+          "token_index": 196,
+          "top4_rank": 1,
+          "top8_rank": 1
+        },
+        {
+          "text": " the",
+          "token_index": 248,
+          "top4_rank": 12,
+          "top8_rank": null
+        },
+        {
+          "text": " right",
+          "token_index": 249,
+          "top4_rank": 8,
+          "top8_rank": 10
+        },
+        {
+          "text": ".",
+          "token_index": 251,
+          "top4_rank": 4,
+          "top8_rank": 7
+        },
+        {
+          "text": " PM",
+          "token_index": 280,
+          "top4_rank": 11,
+          "top8_rank": null
+        }
+      ]
+    },
+    {
+      "trace_index": 1,
+      "prompt": "Solve this carefully. Three notebooks and two pens cost $13.50. Five notebooks and four pens cost $24.50. Find the price of one notebook and one pen. Use deductive reasoning and verify the system.",
+      "completion": "Let n be the notebook price and p be the pen price. The equations are 3n + 2p = 13.50 and 5n + 4p = 24.50.\n\nI want to eliminate p, so double the first equation: 6n + 4p = 27.00. Subtract the second equation from this: n = 2.50.\n\nSubstitute back: 3(2.50) + 2p = 13.50, so 7.50 + 2p = 13.50 and p = 3.00.\n\nCheck: 5(2.50) + 4(3.00) = 12.50 + 12.00 = 24.50. Answer: notebook $2.50, pen $3.00.",
+      "top12_overlap": 10,
+      "top4_top_tokens": [
+        {
+          "text": "2",
+          "token_index": 172,
+          "score": 0.0004024505615234375,
+          "category": "number/operator"
+        },
+        {
+          "text": "7",
+          "token_index": 157,
+          "score": 0.0003490447998046875,
+          "category": "number/operator"
+        },
+        {
+          "text": " are",
+          "token_index": 104,
+          "score": 0.0002651214599609375,
+          "category": "word/subword"
+        },
+        {
+          "text": ".",
+          "token_index": 158,
+          "score": 0.00025177001953125,
+          "category": "punct"
+        },
+        {
+          "text": "stitute",
+          "token_index": 178,
+          "score": 0.00020503997802734375,
+          "category": "word/subword"
+        },
+        {
+          "text": "0",
+          "token_index": 282,
+          "score": 0.0001697540283203125,
+          "category": "number/operator"
+        },
+        {
+          "text": " and",
+          "token_index": 218,
+          "score": 0.00016307830810546875,
+          "category": "word/subword"
+        },
+        {
+          "text": " eliminate",
+          "token_index": 138,
+          "score": 0.00016117095947265625,
+          "category": "word/subword"
+        },
+        {
+          "text": "0",
+          "token_index": 133,
+          "score": 0.000148773193359375,
+          "category": "number/operator"
+        },
+        {
+          "text": ":",
+          "token_index": 269,
+          "score": 0.00014591217041015625,
+          "category": "punct"
+        },
+        {
+          "text": "space",
+          "token_index": 171,
+          "score": 0.00014019012451171875,
+          "category": "space/newline"
+        },
+        {
+          "text": " p",
+          "token_index": 139,
+          "score": 0.0001239776611328125,
+          "category": "variable/symbol"
+        }
+      ],
+      "top8_top_tokens": [
+        {
+          "text": "2",
+          "token_index": 172,
+          "score": 0.0003871917724609375,
+          "category": "number/operator"
+        },
+        {
+          "text": "7",
+          "token_index": 157,
+          "score": 0.0003414154052734375,
+          "category": "number/operator"
+        },
+        {
+          "text": " are",
+          "token_index": 104,
+          "score": 0.0002956390380859375,
+          "category": "word/subword"
+        },
+        {
+          "text": " and",
+          "token_index": 218,
+          "score": 0.0002727508544921875,
+          "category": "word/subword"
+        },
+        {
+          "text": " eliminate",
+          "token_index": 138,
+          "score": 0.0002651214599609375,
+          "category": "word/subword"
+        },
+        {
+          "text": ".",
+          "token_index": 158,
+          "score": 0.0001983642578125,
+          "category": "punct"
+        },
+        {
+          "text": "stitute",
+          "token_index": 178,
+          "score": 0.00017642974853515625,
+          "category": "word/subword"
+        },
+        {
+          "text": "space",
+          "token_index": 171,
+          "score": 0.0001735687255859375,
+          "category": "space/newline"
+        },
+        {
+          "text": " p",
+          "token_index": 139,
+          "score": 0.00016689300537109375,
+          "category": "variable/symbol"
+        },
+        {
+          "text": "Let",
+          "token_index": 89,
+          "score": 0.00016117095947265625,
+          "category": "word/subword"
+        },
+        {
+          "text": ".",
+          "token_index": 173,
+          "score": 0.00016117095947265625,
+          "category": "punct"
+        },
+        {
+          "text": "0",
+          "token_index": 282,
+          "score": 0.00014781951904296875,
+          "category": "number/operator"
+        }
+      ],
+      "rank_delta": [
+        {
+          "text": "Let",
+          "token_index": 89,
+          "top4_rank": null,
+          "top8_rank": 10
+        },
+        {
+          "text": " are",
+          "token_index": 104,
+          "top4_rank": 3,
+          "top8_rank": 3
+        },
+        {
+          "text": "0",
+          "token_index": 133,
+          "top4_rank": 9,
+          "top8_rank": null
+        },
+        {
+          "text": " eliminate",
+          "token_index": 138,
+          "top4_rank": 8,
+          "top8_rank": 5
+        },
+        {
+          "text": " p",
+          "token_index": 139,
+          "top4_rank": 12,
+          "top8_rank": 9
+        },
+        {
+          "text": "7",
+          "token_index": 157,
+          "top4_rank": 2,
+          "top8_rank": 2
+        },
+        {
+          "text": ".",
+          "token_index": 158,
+          "top4_rank": 4,
+          "top8_rank": 6
+        },
+        {
+          "text": "space",
+          "token_index": 171,
+          "top4_rank": 11,
+          "top8_rank": 8
+        },
+        {
+          "text": "2",
+          "token_index": 172,
+          "top4_rank": 1,
+          "top8_rank": 1
+        },
+        {
+          "text": ".",
+          "token_index": 173,
+          "top4_rank": null,
+          "top8_rank": 11
+        },
+        {
+          "text": "stitute",
+          "token_index": 178,
+          "top4_rank": 5,
+          "top8_rank": 7
+        },
+        {
+          "text": " and",
+          "token_index": 218,
+          "top4_rank": 7,
+          "top8_rank": 4
+        },
+        {
+          "text": ":",
+          "token_index": 269,
+          "top4_rank": 10,
+          "top8_rank": null
+        },
+        {
+          "text": "0",
+          "token_index": 282,
+          "top4_rank": 6,
+          "top8_rank": 12
+        }
+      ]
+    },
+    {
+      "trace_index": 2,
+      "prompt": "Solve this carefully. A rectangle has perimeter 74 cm. Its length is 5 cm more than twice its width. Find both dimensions. Reflect on each algebra step and check the result.",
+      "completion": "Let the width be w. The length is 2w + 5. The perimeter equation is 2(length + width) = 74, so length + width = 37.\n\nSubstitute: (2w + 5) + w = 37, hence 3w + 5 = 37, so 3w = 32 and w = 32/3 cm.\n\nThen length = 2(32/3) + 5 = 64/3 + 15/3 = 79/3 cm.\n\nSelf-check: length + width = 79/3 + 32/3 = 111/3 = 37, so the perimeter is 74. Answer: width 32/3 cm and length 79/3 cm.",
+      "top12_overlap": 9,
+      "top4_top_tokens": [
+        {
+          "text": " so",
+          "token_index": 110,
+          "score": 0.0003376007080078125,
+          "category": "word/subword"
+        },
+        {
+          "text": "2",
+          "token_index": 170,
+          "score": 0.0002536773681640625,
+          "category": "number/operator"
+        },
+        {
+          "text": " width",
+          "token_index": 240,
+          "score": 0.0002460479736328125,
+          "category": "word/subword"
+        },
+        {
+          "text": ",",
+          "token_index": 135,
+          "score": 0.00022983551025390625,
+          "category": "punct"
+        },
+        {
+          "text": ".\\n\\n",
+          "token_index": 199,
+          "score": 0.00021266937255859375,
+          "category": "space/newline"
+        },
+        {
+          "text": "2",
+          "token_index": 100,
+          "score": 0.00020694732666015625,
+          "category": "number/operator"
+        },
+        {
+          "text": " the",
+          "token_index": 231,
+          "score": 0.00014781951904296875,
+          "category": "word/subword"
+        },
+        {
+          "text": "space",
+          "token_index": 234,
+          "score": 0.0001373291015625,
+          "category": "space/newline"
+        },
+        {
+          "text": " perimeter",
+          "token_index": 96,
+          "score": 0.0001354217529296875,
+          "category": "word/subword"
+        },
+        {
+          "text": " be",
+          "token_index": 82,
+          "score": 0.0001277923583984375,
+          "category": "word/subword"
+        },
+        {
+          "text": ",",
+          "token_index": 229,
+          "score": 0.0001277923583984375,
+          "category": "punct"
+        },
+        {
+          "text": "2",
+          "token_index": 155,
+          "score": 0.0001239776611328125,
+          "category": "number/operator"
+        }
+      ],
+      "top8_top_tokens": [
+        {
+          "text": " so",
+          "token_index": 110,
+          "score": 0.000270843505859375,
+          "category": "word/subword"
+        },
+        {
+          "text": ".\\n\\n",
+          "token_index": 199,
+          "score": 0.00022125244140625,
+          "category": "space/newline"
+        },
+        {
+          "text": ",",
+          "token_index": 135,
+          "score": 0.0002117156982421875,
+          "category": "punct"
+        },
+        {
+          "text": "2",
+          "token_index": 170,
+          "score": 0.00020503997802734375,
+          "category": "number/operator"
+        },
+        {
+          "text": "2",
+          "token_index": 100,
+          "score": 0.0001773834228515625,
+          "category": "number/operator"
+        },
+        {
+          "text": " width",
+          "token_index": 240,
+          "score": 0.00016689300537109375,
+          "category": "word/subword"
+        },
+        {
+          "text": " be",
+          "token_index": 82,
+          "score": 0.00014591217041015625,
+          "category": "word/subword"
+        },
+        {
+          "text": " perimeter",
+          "token_index": 96,
+          "score": 0.00011968612670898438,
+          "category": "word/subword"
+        },
+        {
+          "text": "7",
+          "token_index": 107,
+          "score": 0.000118255615234375,
+          "category": "number/operator"
+        },
+        {
+          "text": " the",
+          "token_index": 231,
+          "score": 0.0001163482666015625,
+          "category": "word/subword"
+        },
+        {
+          "text": " cm",
+          "token_index": 254,
+          "score": 0.0001125335693359375,
+          "category": "word/subword"
+        },
+        {
+          "text": "Self",
+          "token_index": 200,
+          "score": 0.00010395050048828125,
+          "category": "word/subword"
+        }
+      ],
+      "rank_delta": [
+        {
+          "text": " be",
+          "token_index": 82,
+          "top4_rank": 10,
+          "top8_rank": 7
+        },
+        {
+          "text": " perimeter",
+          "token_index": 96,
+          "top4_rank": 9,
+          "top8_rank": 8
+        },
+        {
+          "text": "2",
+          "token_index": 100,
+          "top4_rank": 6,
+          "top8_rank": 5
+        },
+        {
+          "text": "7",
+          "token_index": 107,
+          "top4_rank": null,
+          "top8_rank": 9
+        },
+        {
+          "text": " so",
+          "token_index": 110,
+          "top4_rank": 1,
+          "top8_rank": 1
+        },
+        {
+          "text": ",",
+          "token_index": 135,
+          "top4_rank": 4,
+          "top8_rank": 3
+        },
+        {
+          "text": "2",
+          "token_index": 155,
+          "top4_rank": 12,
+          "top8_rank": null
+        },
+        {
+          "text": "2",
+          "token_index": 170,
+          "top4_rank": 2,
+          "top8_rank": 4
+        },
+        {
+          "text": ".\\n\\n",
+          "token_index": 199,
+          "top4_rank": 5,
+          "top8_rank": 2
+        },
+        {
+          "text": "Self",
+          "token_index": 200,
+          "top4_rank": null,
+          "top8_rank": 12
+        },
+        {
+          "text": ",",
+          "token_index": 229,
+          "top4_rank": 11,
+          "top8_rank": null
+        },
+        {
+          "text": " the",
+          "token_index": 231,
+          "top4_rank": 7,
+          "top8_rank": 10
+        },
+        {
+          "text": "space",
+          "token_index": 234,
+          "top4_rank": 8,
+          "top8_rank": null
+        },
+        {
+          "text": " width",
+          "token_index": 240,
+          "top4_rank": 3,
+          "top8_rank": 6
+        },
+        {
+          "text": " cm",
+          "token_index": 254,
+          "top4_rank": null,
+          "top8_rank": 11
+        }
+      ]
+    },
+    {
+      "trace_index": 3,
+      "prompt": "Solve this carefully. A jar has red, blue, and green marbles in the ratio 3:4:5. After adding 8 green marbles, the ratio of blue to green becomes 2:3. How many red marbles are in the jar originally? Revisit the setup if needed.",
+      "completion": "Use the ratio as actual counts scaled by x: red = 3x, blue = 4x, green = 5x.\n\nAfter adding 8 green marbles, blue:green becomes 2:3, so 4x / (5x + 8) = 2/3. Cross multiply: 12x = 10x + 16, so 2x = 16 and x = 8.\n\nThe red marbles originally are 3x = 24.\n\nCheck: blue = 32 and green after adding is 40 + 8 = 48. The ratio 32:48 reduces to 2:3. Answer: 24 red marbles.",
+      "top12_overlap": 10,
+      "top4_top_tokens": [
+        {
+          "text": " +",
+          "token_index": 177,
+          "score": 0.000858306884765625,
+          "category": "number/operator"
+        },
+        {
+          "text": "space",
+          "token_index": 178,
+          "score": 0.0006561279296875,
+          "category": "space/newline"
+        },
+        {
+          "text": "2",
+          "token_index": 216,
+          "score": 0.000396728515625,
+          "category": "number/operator"
+        },
+        {
+          "text": " blue",
+          "token_index": 139,
+          "score": 0.0003795623779296875,
+          "category": "word/subword"
+        },
+        {
+          "text": " ratio",
+          "token_index": 105,
+          "score": 0.0003261566162109375,
+          "category": "word/subword"
+        },
+        {
+          "text": "0",
+          "token_index": 175,
+          "score": 0.0002899169921875,
+          "category": "number/operator"
+        },
+        {
+          "text": "space",
+          "token_index": 214,
+          "score": 0.0002899169921875,
+          "category": "space/newline"
+        },
+        {
+          "text": " green",
+          "token_index": 218,
+          "score": 0.0002841949462890625,
+          "category": "word/subword"
+        },
+        {
+          "text": ".",
+          "token_index": 232,
+          "score": 0.000274658203125,
+          "category": "punct"
+        },
+        {
+          "text": " ratio",
+          "token_index": 234,
+          "score": 0.000274658203125,
+          "category": "word/subword"
+        },
+        {
+          "text": "x",
+          "token_index": 176,
+          "score": 0.000270843505859375,
+          "category": "variable/symbol"
+        },
+        {
+          "text": "space",
+          "token_index": 222,
+          "score": 0.0002536773681640625,
+          "category": "space/newline"
+        }
+      ],
+      "top8_top_tokens": [
+        {
+          "text": " +",
+          "token_index": 177,
+          "score": 0.00099945068359375,
+          "category": "number/operator"
+        },
+        {
+          "text": "space",
+          "token_index": 178,
+          "score": 0.0005645751953125,
+          "category": "space/newline"
+        },
+        {
+          "text": "2",
+          "token_index": 216,
+          "score": 0.000362396240234375,
+          "category": "number/operator"
+        },
+        {
+          "text": "x",
+          "token_index": 176,
+          "score": 0.000324249267578125,
+          "category": "variable/symbol"
+        },
+        {
+          "text": "0",
+          "token_index": 175,
+          "score": 0.0003185272216796875,
+          "category": "number/operator"
+        },
+        {
+          "text": "4",
+          "token_index": 223,
+          "score": 0.0002765655517578125,
+          "category": "number/operator"
+        },
+        {
+          "text": " blue",
+          "token_index": 139,
+          "score": 0.000255584716796875,
+          "category": "word/subword"
+        },
+        {
+          "text": " by",
+          "token_index": 110,
+          "score": 0.000244140625,
+          "category": "word/subword"
+        },
+        {
+          "text": " ratio",
+          "token_index": 105,
+          "score": 0.00023746490478515625,
+          "category": "word/subword"
+        },
+        {
+          "text": ".",
+          "token_index": 232,
+          "score": 0.00022983551025390625,
+          "category": "punct"
+        },
+        {
+          "text": "space",
+          "token_index": 214,
+          "score": 0.00022411346435546875,
+          "category": "space/newline"
+        },
+        {
+          "text": "space",
+          "token_index": 222,
+          "score": 0.0002231597900390625,
+          "category": "space/newline"
+        }
+      ],
+      "rank_delta": [
+        {
+          "text": " ratio",
+          "token_index": 105,
+          "top4_rank": 5,
+          "top8_rank": 9
+        },
+        {
+          "text": " by",
+          "token_index": 110,
+          "top4_rank": null,
+          "top8_rank": 8
+        },
+        {
+          "text": " blue",
+          "token_index": 139,
+          "top4_rank": 4,
+          "top8_rank": 7
+        },
+        {
+          "text": "0",
+          "token_index": 175,
+          "top4_rank": 6,
+          "top8_rank": 5
+        },
+        {
+          "text": "x",
+          "token_index": 176,
+          "top4_rank": 11,
+          "top8_rank": 4
+        },
+        {
+          "text": " +",
+          "token_index": 177,
+          "top4_rank": 1,
+          "top8_rank": 1
+        },
+        {
+          "text": "space",
+          "token_index": 178,
+          "top4_rank": 2,
+          "top8_rank": 2
+        },
+        {
+          "text": "space",
+          "token_index": 214,
+          "top4_rank": 7,
+          "top8_rank": 11
+        },
+        {
+          "text": "2",
+          "token_index": 216,
+          "top4_rank": 3,
+          "top8_rank": 3
+        },
+        {
+          "text": " green",
+          "token_index": 218,
+          "top4_rank": 8,
+          "top8_rank": null
+        },
+        {
+          "text": "space",
+          "token_index": 222,
+          "top4_rank": 12,
+          "top8_rank": 12
+        },
+        {
+          "text": "4",
+          "token_index": 223,
+          "top4_rank": null,
+          "top8_rank": 6
+        },
+        {
+          "text": ".",
+          "token_index": 232,
+          "top4_rank": 9,
+          "top8_rank": 10
+        },
+        {
+          "text": " ratio",
+          "token_index": 234,
+          "top4_rank": 10,
+          "top8_rank": null
+        }
+      ]
+    },
+    {
+      "trace_index": 4,
+      "prompt": "Solve this carefully. The average of five numbers is 18. Removing one number makes the average of the remaining four equal to 16. What number was removed? Explain the invariant and check it.",
+      "completion": "The invariant is total sum. Five numbers average 18, so their total is 5 * 18 = 90.\n\nAfter removing one number, four numbers average 16, so the remaining total is 4 * 16 = 64.\n\nThe removed number is the difference: 90 - 64 = 26.\n\nSelf-check: if 26 is removed from 90, the remaining sum is 64, and 64/4 = 16. Answer: 26.",
+      "top12_overlap": 10,
+      "top4_top_tokens": [
+        {
+          "text": ":",
+          "token_index": 159,
+          "score": 0.0005340576171875,
+          "category": "punct"
+        },
+        {
+          "text": " is",
+          "token_index": 84,
+          "score": 0.000476837158203125,
+          "category": "word/subword"
+        },
+        {
+          "text": " so",
+          "token_index": 122,
+          "score": 0.00045013427734375,
+          "category": "word/subword"
+        },
+        {
+          "text": " if",
+          "token_index": 160,
+          "score": 0.000446319580078125,
+          "category": "word/subword"
+        },
+        {
+          "text": "The",
+          "token_index": 82,
+          "score": 0.0003604888916015625,
+          "category": "word/subword"
+        },
+        {
+          "text": " the",
+          "token_index": 123,
+          "score": 0.0002841949462890625,
+          "category": "word/subword"
+        },
+        {
+          "text": " invariant",
+          "token_index": 83,
+          "score": 0.000274658203125,
+          "category": "word/subword"
+        },
+        {
+          "text": " so",
+          "token_index": 95,
+          "score": 0.00024127960205078125,
+          "category": "word/subword"
+        },
+        {
+          "text": "5",
+          "token_index": 100,
+          "score": 0.00023746490478515625,
+          "category": "number/operator"
+        },
+        {
+          "text": " removed",
+          "token_index": 165,
+          "score": 0.0002155303955078125,
+          "category": "word/subword"
+        },
+        {
+          "text": " difference",
+          "token_index": 143,
+          "score": 0.00020122528076171875,
+          "category": "word/subword"
+        },
+        {
+          "text": "Self",
+          "token_index": 157,
+          "score": 0.00017452239990234375,
+          "category": "word/subword"
+        }
+      ],
+      "top8_top_tokens": [
+        {
+          "text": " is",
+          "token_index": 84,
+          "score": 0.0005340576171875,
+          "category": "word/subword"
+        },
+        {
+          "text": " so",
+          "token_index": 122,
+          "score": 0.0004291534423828125,
+          "category": "word/subword"
+        },
+        {
+          "text": " if",
+          "token_index": 160,
+          "score": 0.0003528594970703125,
+          "category": "word/subword"
+        },
+        {
+          "text": ":",
+          "token_index": 159,
+          "score": 0.00034332275390625,
+          "category": "punct"
+        },
+        {
+          "text": " the",
+          "token_index": 123,
+          "score": 0.0003299713134765625,
+          "category": "word/subword"
+        },
+        {
+          "text": "The",
+          "token_index": 82,
+          "score": 0.000316619873046875,
+          "category": "word/subword"
+        },
+        {
+          "text": " invariant",
+          "token_index": 83,
+          "score": 0.0002899169921875,
+          "category": "word/subword"
+        },
+        {
+          "text": " so",
+          "token_index": 95,
+          "score": 0.000247955322265625,
+          "category": "word/subword"
+        },
+        {
+          "text": " difference",
+          "token_index": 143,
+          "score": 0.00019359588623046875,
+          "category": "word/subword"
+        },
+        {
+          "text": ".\\n\\n",
+          "token_index": 156,
+          "score": 0.00018787384033203125,
+          "category": "space/newline"
+        },
+        {
+          "text": "Self",
+          "token_index": 157,
+          "score": 0.000179290771484375,
+          "category": "word/subword"
+        },
+        {
+          "text": " their",
+          "token_index": 96,
+          "score": 0.00017547607421875,
+          "category": "word/subword"
+        }
+      ],
+      "rank_delta": [
+        {
+          "text": "The",
+          "token_index": 82,
+          "top4_rank": 5,
+          "top8_rank": 6
+        },
+        {
+          "text": " invariant",
+          "token_index": 83,
+          "top4_rank": 7,
+          "top8_rank": 7
+        },
+        {
+          "text": " is",
+          "token_index": 84,
+          "top4_rank": 2,
+          "top8_rank": 1
+        },
+        {
+          "text": " so",
+          "token_index": 95,
+          "top4_rank": 8,
+          "top8_rank": 8
+        },
+        {
+          "text": " their",
+          "token_index": 96,
+          "top4_rank": null,
+          "top8_rank": 12
+        },
+        {
+          "text": "5",
+          "token_index": 100,
+          "top4_rank": 9,
+          "top8_rank": null
+        },
+        {
+          "text": " so",
+          "token_index": 122,
+          "top4_rank": 3,
+          "top8_rank": 2
+        },
+        {
+          "text": " the",
+          "token_index": 123,
+          "top4_rank": 6,
+          "top8_rank": 5
+        },
+        {
+          "text": " difference",
+          "token_index": 143,
+          "top4_rank": 11,
+          "top8_rank": 9
+        },
+        {
+          "text": ".\\n\\n",
+          "token_index": 156,
+          "top4_rank": null,
+          "top8_rank": 10
+        },
+        {
+          "text": "Self",
+          "token_index": 157,
+          "top4_rank": 12,
+          "top8_rank": 11
+        },
+        {
+          "text": ":",
+          "token_index": 159,
+          "top4_rank": 1,
+          "top8_rank": 4
+        },
+        {
+          "text": " if",
+          "token_index": 160,
+          "top4_rank": 4,
+          "top8_rank": 3
+        },
+        {
+          "text": " removed",
+          "token_index": 165,
+          "top4_rank": 10,
+          "top8_rank": null
+        }
+      ]
+    },
+    {
+      "trace_index": 5,
+      "prompt": "Solve this carefully. A worker can finish a job in 12 hours and another can finish it in 18 hours. They work together for 4 hours, then the first worker leaves. How long does the second worker need to finish the job? Include a sanity check.",
+      "completion": "The first worker's rate is 1/12 job per hour. The second worker's rate is 1/18 job per hour. Together they work at 1/12 + 1/18 = 3/36 + 2/36 = 5/36 job per hour.\n\nIn 4 hours they complete 4 * 5/36 = 20/36 = 5/9 of the job. The remaining work is 4/9.\n\nOnly the second worker remains, at 1/18 job per hour. Time needed is (4/9) / (1/18) = (4/9) * 18 = 8 hours.\n\nSanity check: after the first worker leaves, less than half the job remains, and the second worker alone needs 18 hours for a full job, so 8 hours is plausible. Answer: 8 hours.",
+      "top12_overlap": 10,
+      "top4_top_tokens": [
+        {
+          "text": " less",
+          "token_index": 259,
+          "score": 0.0003070831298828125,
+          "category": "word/subword"
+        },
+        {
+          "text": " than",
+          "token_index": 260,
+          "score": 0.0002803802490234375,
+          "category": "word/subword"
+        },
+        {
+          "text": " at",
+          "token_index": 130,
+          "score": 0.0002689361572265625,
+          "category": "word/subword"
+        },
+        {
+          "text": " worker",
+          "token_index": 269,
+          "score": 0.0002574920654296875,
+          "category": "word/subword"
+        },
+        {
+          "text": " hours",
+          "token_index": 167,
+          "score": 0.00023651123046875,
+          "category": "word/subword"
+        },
+        {
+          "text": "2",
+          "token_index": 107,
+          "score": 0.00023365020751953125,
+          "category": "number/operator"
+        },
+        {
+          "text": " Together",
+          "token_index": 127,
+          "score": 0.0001773834228515625,
+          "category": "word/subword"
+        },
+        {
+          "text": ",",
+          "token_index": 258,
+          "score": 0.0001697540283203125,
+          "category": "punct"
+        },
+        {
+          "text": "In",
+          "token_index": 164,
+          "score": 0.00016307830810546875,
+          "category": "word/subword"
+        },
+        {
+          "text": " hours",
+          "token_index": 292,
+          "score": 0.000156402587890625,
+          "category": "word/subword"
+        },
+        {
+          "text": " alone",
+          "token_index": 270,
+          "score": 0.00015354156494140625,
+          "category": "word/subword"
+        },
+        {
+          "text": " plausible",
+          "token_index": 286,
+          "score": 0.0001506805419921875,
+          "category": "word/subword"
+        }
+      ],
+      "top8_top_tokens": [
+        {
+          "text": " less",
+          "token_index": 259,
+          "score": 0.0002727508544921875,
+          "category": "word/subword"
+        },
+        {
+          "text": "2",
+          "token_index": 107,
+          "score": 0.0002651214599609375,
+          "category": "number/operator"
+        },
+        {
+          "text": "space",
+          "token_index": 143,
+          "score": 0.0002536773681640625,
+          "category": "space/newline"
+        },
+        {
+          "text": " at",
+          "token_index": 130,
+          "score": 0.0002460479736328125,
+          "category": "word/subword"
+        },
+        {
+          "text": " than",
+          "token_index": 260,
+          "score": 0.000244140625,
+          "category": "word/subword"
+        },
+        {
+          "text": "In",
+          "token_index": 164,
+          "score": 0.00023746490478515625,
+          "category": "word/subword"
+        },
+        {
+          "text": ",",
+          "token_index": 258,
+          "score": 0.00018405914306640625,
+          "category": "punct"
+        },
+        {
+          "text": " worker",
+          "token_index": 269,
+          "score": 0.0001735687255859375,
+          "category": "word/subword"
+        },
+        {
+          "text": " hours",
+          "token_index": 167,
+          "score": 0.00016498565673828125,
+          "category": "word/subword"
+        },
+        {
+          "text": " Together",
+          "token_index": 127,
+          "score": 0.00015163421630859375,
+          "category": "word/subword"
+        },
+        {
+          "text": " =",
+          "token_index": 142,
+          "score": 0.000148773193359375,
+          "category": "word/subword"
+        },
+        {
+          "text": " plausible",
+          "token_index": 286,
+          "score": 0.000141143798828125,
+          "category": "word/subword"
+        }
+      ],
+      "rank_delta": [
+        {
+          "text": "2",
+          "token_index": 107,
+          "top4_rank": 6,
+          "top8_rank": 2
+        },
+        {
+          "text": " Together",
+          "token_index": 127,
+          "top4_rank": 7,
+          "top8_rank": 10
+        },
+        {
+          "text": " at",
+          "token_index": 130,
+          "top4_rank": 3,
+          "top8_rank": 4
+        },
+        {
+          "text": " =",
+          "token_index": 142,
+          "top4_rank": null,
+          "top8_rank": 11
+        },
+        {
+          "text": "space",
+          "token_index": 143,
+          "top4_rank": null,
+          "top8_rank": 3
+        },
+        {
+          "text": "In",
+          "token_index": 164,
+          "top4_rank": 9,
+          "top8_rank": 6
+        },
+        {
+          "text": " hours",
+          "token_index": 167,
+          "top4_rank": 5,
+          "top8_rank": 9
+        },
+        {
+          "text": ",",
+          "token_index": 258,
+          "top4_rank": 8,
+          "top8_rank": 7
+        },
+        {
+          "text": " less",
+          "token_index": 259,
+          "top4_rank": 1,
+          "top8_rank": 1
+        },
+        {
+          "text": " than",
+          "token_index": 260,
+          "top4_rank": 2,
+          "top8_rank": 5
+        },
+        {
+          "text": " worker",
+          "token_index": 269,
+          "top4_rank": 4,
+          "top8_rank": 8
+        },
+        {
+          "text": " alone",
+          "token_index": 270,
+          "top4_rank": 11,
+          "top8_rank": null
+        },
+        {
+          "text": " plausible",
+          "token_index": 286,
+          "top4_rank": 12,
+          "top8_rank": 12
+        },
+        {
+          "text": " hours",
+          "token_index": 292,
+          "top4_rank": 10,
+          "top8_rank": null
+        }
+      ]
+    }
+  ]
+}
