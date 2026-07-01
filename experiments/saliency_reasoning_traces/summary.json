@@ -1,0 +1,937 @@
+{
+  "model_name": "Qwen/Qwen3-1.7B",
+  "seed": 17,
+  "trace_source": "curated",
+  "num_traces": 6,
+  "max_new_tokens": 384,
+  "top_layers": 4,
+  "attention_block_size": 128,
+  "sink_guard_applied": false,
+  "advantages": "unit positive advantage for every generated trace",
+  "traces": [
+    {
+      "trace_index": 0,
+      "prompt": "Solve this carefully. A train leaves at 2:15 PM traveling 54 mph. Another train leaves the same station at 3:00 PM on the same track traveling 72 mph. When does the second train catch the first? Show your reasoning, revisit assumptions, and self-check the answer.",
+      "completion": "Let the first train's head start be the distance it covers from 2:15 to 3:00. That is 45 minutes = 0.75 hours, so the head start is 54 * 0.75 = 40.5 miles.\n\nNow compare speeds after 3:00. The second train gains at 72 - 54 = 18 mph. Time to close 40.5 miles is 40.5 / 18 = 2.25 hours.\n\nRevisiting the setup: both trains are on the same track and the second starts later from the same station, so relative speed is the right invariant. 2.25 hours after 3:00 PM is 5:15 PM. Answer: 5:15 PM.",
+      "num_saliency_tokens": 177,
+      "attention_top_tokens": [
+        {
+          "text": ".",
+          "token_id": 13,
+          "token_index": 129,
+          "score": 0.71875
+        },
+        {
+          "text": " the",
+          "token_id": 279,
+          "token_index": 106,
+          "score": 0.6875
+        },
+        {
+          "text": ".\\n\\n",
+          "token_id": 382,
+          "token_index": 165,
+          "score": 0.57421875
+        },
+        {
+          "text": " distance",
+          "token_id": 6010,
+          "token_index": 114,
+          "score": 0.455078125
+        },
+        {
+          "text": " be",
+          "token_id": 387,
+          "token_index": 112,
+          "score": 0.447265625
+        },
+        {
+          "text": " start",
+          "token_id": 1191,
+          "token_index": 111,
+          "score": 0.4375
+        },
+        {
+          "text": "Let",
+          "token_id": 10061,
+          "token_index": 105,
+          "score": 0.416015625
+        },
+        {
+          "text": ".\\n\\n",
+          "token_id": 382,
+          "token_index": 220,
+          "score": 0.4140625
+        },
+        {
+          "text": " speeds",
+          "token_id": 24722,
+          "token_index": 168,
+          "score": 0.40625
+        },
+        {
+          "text": ".",
+          "token_id": 13,
+          "token_index": 193,
+          "score": 0.3984375
+        },
+        {
+          "text": " gains",
+          "token_id": 19619,
+          "token_index": 179,
+          "score": 0.37890625
+        },
+        {
+          "text": " train",
+          "token_id": 5426,
+          "token_index": 108,
+          "score": 0.353515625
+        }
+      ],
+      "causal_tangent_top_tokens": [
+        {
+          "text": " close",
+          "token_id": 3265,
+          "token_index": 196,
+          "score": 0.000457763671875
+        },
+        {
+          "text": " start",
+          "token_id": 1191,
+          "token_index": 147,
+          "score": 0.000362396240234375
+        },
+        {
+          "text": ".",
+          "token_id": 13,
+          "token_index": 251,
+          "score": 0.0003414154052734375
+        },
+        {
+          "text": " at",
+          "token_id": 518,
+          "token_index": 180,
+          "score": 0.00029754638671875
+        },
+        {
+          "text": " the",
+          "token_id": 279,
+          "token_index": 106,
+          "score": 0.0002574920654296875
+        },
+        {
+          "text": "Let",
+          "token_id": 10061,
+          "token_index": 105,
+          "score": 0.0002498626708984375
+        },
+        {
+          "text": " be",
+          "token_id": 387,
+          "token_index": 112,
+          "score": 0.0002498626708984375
+        },
+        {
+          "text": "0",
+          "token_id": 15,
+          "token_index": 174,
+          "score": 0.00023937225341796875
+        },
+        {
+          "text": " PM",
+          "token_id": 5851,
+          "token_index": 280,
+          "score": 0.0002346038818359375
+        },
+        {
+          "text": " right",
+          "token_id": 1290,
+          "token_index": 249,
+          "score": 0.00023174285888671875
+        },
+        {
+          "text": " is",
+          "token_id": 374,
+          "token_index": 131,
+          "score": 0.000209808349609375
+        },
+        {
+          "text": " after",
+          "token_id": 1283,
+          "token_index": 169,
+          "score": 0.00015735626220703125
+        }
+      ]
+    },
+    {
+      "trace_index": 1,
+      "prompt": "Solve this carefully. Three notebooks and two pens cost $13.50. Five notebooks and four pens cost $24.50. Find the price of one notebook and one pen. Use deductive reasoning and verify the system.",
+      "completion": "Let n be the notebook price and p be the pen price. The equations are 3n + 2p = 13.50 and 5n + 4p = 24.50.\n\nI want to eliminate p, so double the first equation: 6n + 4p = 27.00. Subtract the second equation from this: n = 2.50.\n\nSubstitute back: 3(2.50) + 2p = 13.50, so 7.50 + 2p = 13.50 and p = 3.00.\n\nCheck: 5(2.50) + 4(3.00) = 12.50 + 12.00 = 24.50. Answer: notebook $2.50, pen $3.00.",
+      "num_saliency_tokens": 195,
+      "attention_top_tokens": [
+        {
+          "text": ".\\n\\n",
+          "token_id": 382,
+          "token_index": 176,
+          "score": 0.57421875
+        },
+        {
+          "text": " n",
+          "token_id": 308,
+          "token_index": 90,
+          "score": 0.5703125
+        },
+        {
+          "text": ".\\n\\n",
+          "token_id": 382,
+          "token_index": 134,
+          "score": 0.53515625
+        },
+        {
+          "text": ".",
+          "token_id": 13,
+          "token_index": 101,
+          "score": 0.52734375
+        },
+        {
+          "text": " =",
+          "token_id": 284,
+          "token_index": 112,
+          "score": 0.52734375
+        },
+        {
+          "text": "space",
+          "token_id": 220,
+          "token_index": 109,
+          "score": 0.443359375
+        },
+        {
+          "text": "3",
+          "token_id": 18,
+          "token_index": 106,
+          "score": 0.431640625
+        },
+        {
+          "text": " eliminate",
+          "token_id": 21725,
+          "token_index": 138,
+          "score": 0.427734375
+        },
+        {
+          "text": "Let",
+          "token_id": 10061,
+          "token_index": 89,
+          "score": 0.404296875
+        },
+        {
+          "text": "n",
+          "token_id": 77,
+          "token_index": 107,
+          "score": 0.40234375
+        },
+        {
+          "text": " +",
+          "token_id": 488,
+          "token_index": 108,
+          "score": 0.396484375
+        },
+        {
+          "text": " equations",
+          "token_id": 37906,
+          "token_index": 103,
+          "score": 0.39453125
+        }
+      ],
+      "causal_tangent_top_tokens": [
+        {
+          "text": "2",
+          "token_id": 17,
+          "token_index": 172,
+          "score": 0.00054931640625
+        },
+        {
+          "text": "7",
+          "token_id": 22,
+          "token_index": 157,
+          "score": 0.0004253387451171875
+        },
+        {
+          "text": " are",
+          "token_id": 525,
+          "token_index": 104,
+          "score": 0.00037384033203125
+        },
+        {
+          "text": "stitute",
+          "token_id": 7660,
+          "token_index": 178,
+          "score": 0.000270843505859375
+        },
+        {
+          "text": ".",
+          "token_id": 13,
+          "token_index": 158,
+          "score": 0.00026702880859375
+        },
+        {
+          "text": "0",
+          "token_id": 15,
+          "token_index": 282,
+          "score": 0.0002422332763671875
+        },
+        {
+          "text": " and",
+          "token_id": 323,
+          "token_index": 218,
+          "score": 0.00020599365234375
+        },
+        {
+          "text": "0",
+          "token_id": 15,
+          "token_index": 133,
+          "score": 0.00018978118896484375
+        },
+        {
+          "text": ":",
+          "token_id": 25,
+          "token_index": 269,
+          "score": 0.00018596649169921875
+        },
+        {
+          "text": " eliminate",
+          "token_id": 21725,
+          "token_index": 138,
+          "score": 0.000171661376953125
+        },
+        {
+          "text": " p",
+          "token_id": 281,
+          "token_index": 139,
+          "score": 0.00013828277587890625
+        },
+        {
+          "text": " to",
+          "token_id": 311,
+          "token_index": 137,
+          "score": 0.0001373291015625
+        }
+      ]
+    },
+    {
+      "trace_index": 2,
+      "prompt": "Solve this carefully. A rectangle has perimeter 74 cm. Its length is 5 cm more than twice its width. Find both dimensions. Reflect on each algebra step and check the result.",
+      "completion": "Let the width be w. The length is 2w + 5. The perimeter equation is 2(length + width) = 74, so length + width = 37.\n\nSubstitute: (2w + 5) + w = 37, hence 3w + 5 = 37, so 3w = 32 and w = 32/3 cm.\n\nThen length = 2(32/3) + 5 = 64/3 + 15/3 = 79/3 cm.\n\nSelf-check: length + width = 79/3 + 32/3 = 111/3 = 37, so the perimeter is 74. Answer: width 32/3 cm and length 79/3 cm.",
+      "num_saliency_tokens": 177,
+      "attention_top_tokens": [
+        {
+          "text": " w",
+          "token_id": 289,
+          "token_index": 83,
+          "score": 0.59375
+        },
+        {
+          "text": " cm",
+          "token_id": 9961,
+          "token_index": 164,
+          "score": 0.5625
+        },
+        {
+          "text": ".",
+          "token_id": 13,
+          "token_index": 94,
+          "score": 0.5390625
+        },
+        {
+          "text": ".\\n\\n",
+          "token_id": 382,
+          "token_index": 118,
+          "score": 0.5234375
+        },
+        {
+          "text": ".\\n\\n",
+          "token_id": 382,
+          "token_index": 165,
+          "score": 0.50390625
+        },
+        {
+          "text": " perimeter",
+          "token_id": 46342,
+          "token_index": 96,
+          "score": 0.46484375
+        },
+        {
+          "text": ".",
+          "token_id": 13,
+          "token_index": 84,
+          "score": 0.4453125
+        },
+        {
+          "text": "Let",
+          "token_id": 10061,
+          "token_index": 79,
+          "score": 0.40234375
+        },
+        {
+          "text": ".\\n\\n",
+          "token_id": 382,
+          "token_index": 199,
+          "score": 0.376953125
+        },
+        {
+          "text": " is",
+          "token_id": 374,
+          "token_index": 87,
+          "score": 0.375
+        },
+        {
+          "text": " width",
+          "token_id": 2374,
+          "token_index": 81,
+          "score": 0.361328125
+        },
+        {
+          "text": " =",
+          "token_id": 284,
+          "token_index": 105,
+          "score": 0.34765625
+        }
+      ],
+      "causal_tangent_top_tokens": [
+        {
+          "text": " so",
+          "token_id": 773,
+          "token_index": 110,
+          "score": 0.000476837158203125
+        },
+        {
+          "text": "2",
+          "token_id": 17,
+          "token_index": 170,
+          "score": 0.0003604888916015625
+        },
+        {
+          "text": " width",
+          "token_id": 2374,
+          "token_index": 240,
+          "score": 0.0003509521484375
+        },
+        {
+          "text": ",",
+          "token_id": 11,
+          "token_index": 135,
+          "score": 0.0003185272216796875
+        },
+        {
+          "text": "2",
+          "token_id": 17,
+          "token_index": 100,
+          "score": 0.00028228759765625
+        },
+        {
+          "text": ".\\n\\n",
+          "token_id": 382,
+          "token_index": 199,
+          "score": 0.00028228759765625
+        },
+        {
+          "text": " the",
+          "token_id": 279,
+          "token_index": 231,
+          "score": 0.00019741058349609375
+        },
+        {
+          "text": " perimeter",
+          "token_id": 46342,
+          "token_index": 96,
+          "score": 0.000186920166015625
+        },
+        {
+          "text": "space",
+          "token_id": 220,
+          "token_index": 234,
+          "score": 0.00018405914306640625
+        },
+        {
+          "text": "2",
+          "token_id": 17,
+          "token_index": 155,
+          "score": 0.00017452239990234375
+        },
+        {
+          "text": " cm",
+          "token_id": 9961,
+          "token_index": 254,
+          "score": 0.0001735687255859375
+        },
+        {
+          "text": " be",
+          "token_id": 387,
+          "token_index": 82,
+          "score": 0.0001544952392578125
+        }
+      ]
+    },
+    {
+      "trace_index": 3,
+      "prompt": "Solve this carefully. A jar has red, blue, and green marbles in the ratio 3:4:5. After adding 8 green marbles, the ratio of blue to green becomes 2:3. How many red marbles are in the jar originally? Revisit the setup if needed.",
+      "completion": "Use the ratio as actual counts scaled by x: red = 3x, blue = 4x, green = 5x.\n\nAfter adding 8 green marbles, blue:green becomes 2:3, so 4x / (5x + 8) = 2/3. Cross multiply: 12x = 10x + 16, so 2x = 16 and x = 8.\n\nThe red marbles originally are 3x = 24.\n\nCheck: blue = 32 and green after adding is 40 + 8 = 48. The ratio 32:48 reduces to 2:3. Answer: 24 red marbles.",
+      "num_saliency_tokens": 154,
+      "attention_top_tokens": [
+        {
+          "text": ".\\n\\n",
+          "token_id": 382,
+          "token_index": 130,
+          "score": 0.53125
+        },
+        {
+          "text": ",",
+          "token_id": 11,
+          "token_index": 138,
+          "score": 0.40625
+        },
+        {
+          "text": " =",
+          "token_id": 284,
+          "token_index": 114,
+          "score": 0.404296875
+        },
+        {
+          "text": ":",
+          "token_id": 25,
+          "token_index": 112,
+          "score": 0.392578125
+        },
+        {
+          "text": ":green",
+          "token_id": 95731,
+          "token_index": 140,
+          "score": 0.3828125
+        },
+        {
+          "text": ".",
+          "token_id": 13,
+          "token_index": 164,
+          "score": 0.375
+        },
+        {
+          "text": " (",
+          "token_id": 320,
+          "token_index": 152,
+          "score": 0.36328125
+        },
+        {
+          "text": ".\\n\\n",
+          "token_id": 382,
+          "token_index": 195,
+          "score": 0.36328125
+        },
+        {
+          "text": " counts",
+          "token_id": 14579,
+          "token_index": 108,
+          "score": 0.359375
+        },
+        {
+          "text": " so",
+          "token_id": 773,
+          "token_index": 147,
+          "score": 0.34765625
+        },
+        {
+          "text": " x",
+          "token_id": 856,
+          "token_index": 111,
+          "score": 0.345703125
+        },
+        {
+          "text": ",",
+          "token_id": 11,
+          "token_index": 118,
+          "score": 0.345703125
+        }
+      ],
+      "causal_tangent_top_tokens": [
+        {
+          "text": " +",
+          "token_id": 488,
+          "token_index": 177,
+          "score": 0.00106048583984375
+        },
+        {
+          "text": "space",
+          "token_id": 220,
+          "token_index": 178,
+          "score": 0.000698089599609375
+        },
+        {
+          "text": "2",
+          "token_id": 17,
+          "token_index": 216,
+          "score": 0.00055694580078125
+        },
+        {
+          "text": " blue",
+          "token_id": 6303,
+          "token_index": 139,
+          "score": 0.00052642822265625
+        },
+        {
+          "text": " ratio",
+          "token_id": 11341,
+          "token_index": 105,
+          "score": 0.0004291534423828125
+        },
+        {
+          "text": " green",
+          "token_id": 6176,
+          "token_index": 218,
+          "score": 0.000400543212890625
+        },
+        {
+          "text": " ratio",
+          "token_id": 11341,
+          "token_index": 234,
+          "score": 0.00038909912109375
+        },
+        {
+          "text": "space",
+          "token_id": 220,
+          "token_index": 214,
+          "score": 0.0003871917724609375
+        },
+        {
+          "text": ".",
+          "token_id": 13,
+          "token_index": 232,
+          "score": 0.0003871917724609375
+        },
+        {
+          "text": "0",
+          "token_id": 15,
+          "token_index": 175,
+          "score": 0.0003719329833984375
+        },
+        {
+          "text": " by",
+          "token_id": 553,
+          "token_index": 110,
+          "score": 0.000339508056640625
+        },
+        {
+          "text": "space",
+          "token_id": 220,
+          "token_index": 222,
+          "score": 0.0003223419189453125
+        }
+      ]
+    },
+    {
+      "trace_index": 4,
+      "prompt": "Solve this carefully. The average of five numbers is 18. Removing one number makes the average of the remaining four equal to 16. What number was removed? Explain the invariant and check it.",
+      "completion": "The invariant is total sum. Five numbers average 18, so their total is 5 * 18 = 90.\n\nAfter removing one number, four numbers average 16, so the remaining total is 4 * 16 = 64.\n\nThe removed number is the difference: 90 - 64 = 26.\n\nSelf-check: if 26 is removed from 90, the remaining sum is 64, and 64/4 = 16. Answer: 26.",
+      "num_saliency_tokens": 114,
+      "attention_top_tokens": [
+        {
+          "text": ".",
+          "token_id": 13,
+          "token_index": 87,
+          "score": 0.5546875
+        },
+        {
+          "text": "The",
+          "token_id": 785,
+          "token_index": 82,
+          "score": 0.5234375
+        },
+        {
+          "text": ".\\n\\n",
+          "token_id": 382,
+          "token_index": 109,
+          "score": 0.486328125
+        },
+        {
+          "text": " sum",
+          "token_id": 2629,
+          "token_index": 86,
+          "score": 0.4765625
+        },
+        {
+          "text": " total",
+          "token_id": 2790,
+          "token_index": 85,
+          "score": 0.435546875
+        },
+        {
+          "text": ".\\n\\n",
+          "token_id": 382,
+          "token_index": 137,
+          "score": 0.43359375
+        },
+        {
+          "text": " average",
+          "token_id": 5461,
+          "token_index": 90,
+          "score": 0.40625
+        },
+        {
+          "text": " is",
+          "token_id": 374,
+          "token_index": 98,
+          "score": 0.404296875
+        },
+        {
+          "text": " *",
+          "token_id": 353,
+          "token_index": 101,
+          "score": 0.376953125
+        },
+        {
+          "text": ".\\n\\n",
+          "token_id": 382,
+          "token_index": 156,
+          "score": 0.34765625
+        },
+        {
+          "text": " is",
+          "token_id": 374,
+          "token_index": 84,
+          "score": 0.333984375
+        },
+        {
+          "text": ",",
+          "token_id": 11,
+          "token_index": 94,
+          "score": 0.3125
+        }
+      ],
+      "causal_tangent_top_tokens": [
+        {
+          "text": ":",
+          "token_id": 25,
+          "token_index": 159,
+          "score": 0.0006561279296875
+        },
+        {
+          "text": " is",
+          "token_id": 374,
+          "token_index": 84,
+          "score": 0.000640869140625
+        },
+        {
+          "text": " so",
+          "token_id": 773,
+          "token_index": 122,
+          "score": 0.000576019287109375
+        },
+        {
+          "text": " if",
+          "token_id": 421,
+          "token_index": 160,
+          "score": 0.00049591064453125
+        },
+        {
+          "text": "The",
+          "token_id": 785,
+          "token_index": 82,
+          "score": 0.0004024505615234375
+        },
+        {
+          "text": "5",
+          "token_id": 20,
+          "token_index": 100,
+          "score": 0.000331878662109375
+        },
+        {
+          "text": " so",
+          "token_id": 773,
+          "token_index": 95,
+          "score": 0.0003204345703125
+        },
+        {
+          "text": " difference",
+          "token_id": 6672,
+          "token_index": 143,
+          "score": 0.00028228759765625
+        },
+        {
+          "text": " the",
+          "token_id": 279,
+          "token_index": 123,
+          "score": 0.0002803802490234375
+        },
+        {
+          "text": " removed",
+          "token_id": 6963,
+          "token_index": 165,
+          "score": 0.000270843505859375
+        },
+        {
+          "text": "6",
+          "token_id": 21,
+          "token_index": 194,
+          "score": 0.00023651123046875
+        },
+        {
+          "text": "Self",
+          "token_id": 12092,
+          "token_index": 157,
+          "score": 0.0002307891845703125
+        }
+      ]
+    },
+    {
+      "trace_index": 5,
+      "prompt": "Solve this carefully. A worker can finish a job in 12 hours and another can finish it in 18 hours. They work together for 4 hours, then the first worker leaves. How long does the second worker need to finish the job? Include a sanity check.",
+      "completion": "The first worker's rate is 1/12 job per hour. The second worker's rate is 1/18 job per hour. Together they work at 1/12 + 1/18 = 3/36 + 2/36 = 5/36 job per hour.\n\nIn 4 hours they complete 4 * 5/36 = 20/36 = 5/9 of the job. The remaining work is 4/9.\n\nOnly the second worker remains, at 1/18 job per hour. Time needed is (4/9) / (1/18) = (4/9) * 18 = 8 hours.\n\nSanity check: after the first worker leaves, less than half the job remains, and the second worker alone needs 18 hours for a full job, so 8 hours is plausible. Answer: 8 hours.",
+      "num_saliency_tokens": 197,
+      "attention_top_tokens": [
+        {
+          "text": " job",
+          "token_id": 2618,
+          "token_index": 108,
+          "score": 0.86328125
+        },
+        {
+          "text": " is",
+          "token_id": 374,
+          "token_index": 102,
+          "score": 0.7109375
+        },
+        {
+          "text": " rate",
+          "token_id": 4379,
+          "token_index": 101,
+          "score": 0.58203125
+        },
+        {
+          "text": ".\\n\\n",
+          "token_id": 382,
+          "token_index": 163,
+          "score": 0.578125
+        },
+        {
+          "text": "The",
+          "token_id": 785,
+          "token_index": 97,
+          "score": 0.5234375
+        },
+        {
+          "text": ".",
+          "token_id": 13,
+          "token_index": 126,
+          "score": 0.5078125
+        },
+        {
+          "text": ".",
+          "token_id": 13,
+          "token_index": 111,
+          "score": 0.5
+        },
+        {
+          "text": " hour",
+          "token_id": 6460,
+          "token_index": 110,
+          "score": 0.466796875
+        },
+        {
+          "text": "/",
+          "token_id": 14,
+          "token_index": 105,
+          "score": 0.45703125
+        },
+        {
+          "text": ".\\n\\n",
+          "token_id": 382,
+          "token_index": 202,
+          "score": 0.455078125
+        },
+        {
+          "text": "8",
+          "token_id": 23,
+          "token_index": 122,
+          "score": 0.423828125
+        },
+        {
+          "text": " =",
+          "token_id": 284,
+          "token_index": 142,
+          "score": 0.41015625
+        }
+      ],
+      "causal_tangent_top_tokens": [
+        {
+          "text": " at",
+          "token_id": 518,
+          "token_index": 130,
+          "score": 0.0003814697265625
+        },
+        {
+          "text": " worker",
+          "token_id": 11864,
+          "token_index": 269,
+          "score": 0.000339508056640625
+        },
+        {
+          "text": " hours",
+          "token_id": 4115,
+          "token_index": 167,
+          "score": 0.0003337860107421875
+        },
+        {
+          "text": " less",
+          "token_id": 2686,
+          "token_index": 259,
+          "score": 0.0003337860107421875
+        },
+        {
+          "text": " than",
+          "token_id": 1091,
+          "token_index": 260,
+          "score": 0.0003261566162109375
+        },
+        {
+          "text": "2",
+          "token_id": 17,
+          "token_index": 107,
+          "score": 0.0003223419189453125
+        },
+        {
+          "text": " hours",
+          "token_id": 4115,
+          "token_index": 292,
+          "score": 0.00022029876708984375
+        },
+        {
+          "text": "In",
+          "token_id": 641,
+          "token_index": 164,
+          "score": 0.00021266937255859375
+        },
+        {
+          "text": " Together",
+          "token_id": 31155,
+          "token_index": 127,
+          "score": 0.00020599365234375
+        },
+        {
+          "text": " first",
+          "token_id": 1156,
+          "token_index": 255,
+          "score": 0.000179290771484375
+        },
+        {
+          "text": ",",
+          "token_id": 11,
+          "token_index": 258,
+          "score": 0.00016880035400390625
+        },
+        {
+          "text": " plausible",
+          "token_id": 49334,
+          "token_index": 286,
+          "score": 0.00016880035400390625
+        }
+      ]
+    }
+  ]
+}
