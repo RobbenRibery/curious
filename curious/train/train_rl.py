@@ -218,7 +218,7 @@ def train(
             )
 
             kl, log_probs_ref, token_clip_high = None, None, None
-            token_saliency, token_clip_multiplier = None, None
+            token_saliency, token_clip_multiplier, token_credit_weight = None, None, None
             ad_cispo_stats: ADCispoStats | None = None
             if args.rl_config.use_ad_cispo:
                 ad_cispo_features = compute_reference_policy_features(
@@ -239,11 +239,17 @@ def train(
                         attention_block_size=args.rl_config.ad_cispo_attention_block_size,
                         sink_token_ids=collect_ad_cispo_sink_token_ids(tokenizer),
                         advantages=advantages,
+                        compute_credit_weights=args.rl_config.use_credit_weighted_cispo,
+                        credit_min_weight=args.rl_config.cw_cispo_min_weight,
+                        credit_max_weight=args.rl_config.cw_cispo_max_weight,
+                        credit_gamma=args.rl_config.cw_cispo_gamma,
                     )
                 )
-                token_clip_high = ad_cispo_features.token_clip_thresholds.values
+                if args.rl_config.ad_cispo_apply_adaptive_bound:
+                    token_clip_high = ad_cispo_features.token_clip_thresholds.values
                 token_saliency = ad_cispo_features.action_saliency.values
                 token_clip_multiplier = ad_cispo_features.token_clip_thresholds.multipliers
+                token_credit_weight = ad_cispo_features.token_credit_weights
                 ad_cispo_stats = ad_cispo_features.stats
 
             if args.rl_config.kl_weight > 0:
@@ -279,6 +285,7 @@ def train(
                 token_clip_high=token_clip_high,
                 token_saliency=token_saliency,
                 token_clip_multiplier=token_clip_multiplier,
+                token_credit_weight=token_credit_weight,
             )
             replay_buffer.append(experience.to(cpu_device))
             
@@ -288,6 +295,7 @@ def train(
             token_clip_high,
             token_saliency,
             token_clip_multiplier,
+            token_credit_weight,
             log_probs,
             entropy,
             attention_mask,

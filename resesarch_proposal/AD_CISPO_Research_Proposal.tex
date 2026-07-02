@@ -7,7 +7,7 @@
 \usepackage{hyperref}
 \usepackage{microtype}
 
-\title{AD-CISPO: Saliency-Budgeted Clipped Importance Sampling for Reasoning RL}
+\title{Beyond Scalar CISPO: Causal-Token Credit Allocation for Reasoning RL}
 \author{}
 \date{}
 
@@ -16,19 +16,19 @@
 
 \begin{abstract}
 Long-chain reasoning reinforcement learning depends on stable policy-gradient
-updates over token sequences, but current clipped objectives usually apply the
-same clipping radius to every generated token. This proposal studies
-AD-CISPO, a token-adaptive extension of MiniMax's clipped importance-sampling
-policy optimization (CISPO). The central hypothesis is that CISPO's dense
-token-gradient property can be preserved while improving sample efficiency by
-allocating a wider upper importance-sampling corridor to tokens that are
-estimated to be important for the sampled trajectory. The proposed novelty is a
-mean-preserving, saliency-budgeted upper clipping rule: the average clipping
-budget remains equal to the scalar CISPO baseline, but the budget is
-redistributed across generated tokens. After observing attention-sink failures
-in future-attention in-degree saliency, the next-generation extractor uses
-causal-tangent saliency: a first-order estimate of how much each token-position
-representation affects the advantage-weighted policy-gradient objective.
+updates over token sequences, but current clipped objectives usually broadcast
+the same sequence advantage and the same trust-region geometry to every
+generated token. This proposal studies a family of CISPO extensions that keep
+MiniMax's clipped importance-sampling policy optimization (CISPO) as the
+stability backbone, while addressing what CISPO does not solve: token-level
+credit allocation under sparse sequence rewards. The first AD-CISPO prototype
+redistributed the upper clipping radius according to token saliency, but
+preliminary runs suggest that bound-only adaptation is a weak lever when few
+policy ratios reach the adaptive bound. The revised next-generation proposal is
+Credit-Weighted CISPO (CW-CISPO): a detached, mean-preserving token-weighted
+CISPO objective whose weights are computed from target-policy causal-tangent
+saliency, optionally gated by token entropy. Adaptive bounds remain as a
+guardrail and ablation rather than the sole use of saliency.
 \end{abstract}
 
 \section{Problem and Motivation}
@@ -43,17 +43,23 @@ reasoning \cite{shao2024deepseekmath,deepseek2025r1}. More recent systems such
 as DAPO and MiniMax-M1 focus on stabilizing long-chain reasoning RL at scale
 \cite{yu2025dapo,minimax2025m1}.
 
-The unresolved problem is that scalar clipping treats every generated token as
-equally deserving of update freedom. In chain-of-thought-style reasoning, this
-is unlikely to be true. A token that introduces an intermediate quantity,
-selects an operation, or anchors a later conclusion may matter more than a
-formatting token or locally redundant phrase. A single global clipping radius
-therefore creates an undesirable tradeoff:
+The unresolved problem is broader than scalar clipping: current outcome-reward
+RL largely broadcasts a sequence-level advantage to every generated token. In
+chain-of-thought-style reasoning, this is unlikely to be true. A token that
+introduces an intermediate quantity, selects an operation, or anchors a later
+conclusion may matter more than a formatting token or locally redundant phrase.
+CISPO fixes one important failure of PPO-style clipping by preserving dense
+gradients under clipped IS weights, but it still leaves token credit largely
+uniform. A single global clipping radius and a uniform token loss weight
+therefore create an undesirable tradeoff:
 \begin{itemize}[leftmargin=*]
   \item if the radius is tight, important reasoning tokens may be prevented
   from moving enough when the reward signal identifies a better trajectory;
   \item if the radius is loose, low-value or unstable tokens receive the same
   update corridor, increasing variance and drift;
+  \item if the same sequence advantage is broadcast to all tokens, deterministic
+  filler tokens can absorb gradient mass that should be spent on uncertain or
+  causally important reasoning decisions;
   \item if PPO/GRPO surrogate clipping suppresses token updates, the model can
   lose useful gradient signal exactly when the sampled policy has moved outside
   the trust corridor.
@@ -62,8 +68,9 @@ therefore creates an undesirable tradeoff:
 CISPO directly targets the third issue by clipping the importance-sampling
 (IS) weight itself and using the detached clipped weight to scale
 $\log \pi_\theta$, so clipped tokens still contribute gradients
-\cite{minimax2025m1}. AD-CISPO asks whether the remaining scalar-budget issue
-can be addressed without abandoning CISPO's dense-gradient design.
+\cite{minimax2025m1}. This proposal asks whether the remaining scalar-budget issue
+and the more general token-credit issue can be addressed without abandoning
+CISPO's dense-gradient design.
 
 \section{Existing Solutions and Limitations}
 
@@ -88,7 +95,35 @@ MiniMax-M1 proposes CISPO, which clips IS weights rather than clipping away
 token updates and reports improved RL efficiency in large-scale reasoning
 training \cite{minimax2025m1}. CISPO is the strongest starting point for this
 proposal because it preserves per-token gradient density. Its limitation for
-this project is that the upper IS clipping radius remains scalar.
+this project is that it still broadcasts the same sequence advantage across
+tokens and uses a scalar IS clipping geometry.
+
+\paragraph{Token-level credit assignment and reward redistribution.}
+The broader RL literature has long treated delayed rewards as a credit
+assignment problem. RUDDER, for example, redistributes delayed returns through
+contribution analysis so that future rewards become easier to predict
+\cite{arjona2019rudder}. In LLM alignment, process supervision and process
+reward models explicitly replace pure outcome supervision with step-level
+feedback \cite{lightman2023verify}. Recent token-level preference methods,
+including TDPO, TIS-DPO, SePO, T-REG, and TI-DPO, also argue that sequence-level
+preference optimization hides important token-level structure
+\cite{zeng2024tdpo,liu2025tisdpo,yang2025sepo,zhou2025treg,yang2025tidpo}.
+These works are important prior art for the revised proposal: they show that
+token-level weighting and token selection are active directions, so the novelty
+cannot simply be ``use token weights.'' The gap is instead online
+verifiable-reward RL built specifically on CISPO's clipped-IS gradient, without
+external token reward labels, pairwise preference data, or a separately trained
+oracle selector.
+
+\paragraph{Entropy and capacity views of RLVR credit.}
+Recent RLVR analysis frames token credit as a reward-conditioned shift from the
+behavior policy toward a hindsight posterior, with token entropy upper-bounding
+where hindsight credit can reside \cite{he2026hindsightcredit}. This suggests
+that saliency alone is incomplete: a token can be locally objective-sensitive
+yet carry little learnable credit if it is already deterministic. A stronger
+CISPO extension should therefore test saliency-only weights against
+entropy-gated weights that focus update mass where the policy has both
+objective sensitivity and uncertainty capacity.
 
 \paragraph{Attention-based saliency.}
 Transformers route information through attention mechanisms
@@ -101,6 +136,21 @@ therefore uses frozen-reference attention only as an update-budget heuristic,
 not as a claim about human-interpretable explanation, and explicitly masks
 prompt and sink tokens.
 
+\paragraph{Mechanistic attribution and gradient saliency.}
+Mechanistic interpretability distinguishes observational signals such as
+attention patterns from intervention-based methods such as activation patching
+and causal tracing \cite{meng2022rome,wang2022ioi}. Attribution patching
+approximates activation-patching effects with first-order gradients, making it
+more scalable but also susceptible to local-linearity failures
+\cite{syed2023attribution,kramar2024atpstar}. Classical attribution methods
+such as Integrated Gradients, DeepLIFT, and SmoothGrad further show that raw
+gradient saliency is scale-sensitive and noisy unless it is anchored to a
+baseline, averaged, or otherwise regularized
+\cite{sundararajan2017ig,shrikumar2017deeplift,smilkov2017smoothgrad}. These
+lessons motivate bounded, detached, mean-preserving weights and local smoothing:
+causal-tangent saliency should be treated as an optimization signal to ablate,
+not as a faithful explanation by default.
+
 \section{Research Gap}
 
 Existing reasoning-RL objectives answer two separate questions only partially:
@@ -108,52 +158,89 @@ Existing reasoning-RL objectives answer two separate questions only partially:
   \item How can policy-gradient updates remain stable under off-policy drift?
   PPO, GRPO, DAPO, and CISPO address this through clipped ratios or clipped
   IS weights.
-  \item Which generated tokens deserve a larger or smaller update corridor?
-  Existing methods largely do not answer this; they apply scalar clipping
-  budgets across all tokens.
+  \item Which generated tokens deserve a larger or smaller learning signal?
+  Existing online RLVR methods largely still broadcast sequence-level rewards,
+  even when they improve clipping, sampling, or normalization.
 \end{enumerate}
 
-The gap is a token-budgeted trust-region objective for language-model RL: one
-that keeps the same average clipping budget as a scalar baseline, but reallocates
-that budget according to a token-importance signal tied to the sampled
-trajectory. AD-CISPO is designed to fill this gap for CISPO-style clipped
-IS-weight policy gradients.
+The gap is a CISPO-native token-credit objective for language-model RL: one
+that keeps CISPO's detached clipped-IS gradient as the stability mechanism, but
+adds a bounded, falsifiable token-credit allocation layer derived from the
+current policy's own computation on the sampled trajectory. This is different
+from process reward modeling, token-level DPO, or token selection in
+preference data because the signal is computed online from the RL rollout and
+used inside the CISPO gradient itself.
 
 \section{Proposed Solution}
 
-AD-CISPO replaces the scalar upper IS clipping radius in CISPO with a
-token-adaptive upper radius. The lower bound remains inactive by default to
-match the MiniMax-style CISPO baseline. Each generated token receives a
-multiplier computed from a saliency extractor, and the multipliers are
-normalized so their mean over valid generated tokens is $1$. This preserves the
-same average clipping budget as scalar CISPO while changing where the budget is
-spent. The first implementation used frozen-reference future-attention
-in-degree; the next-generation implementation should use causal-tangent
-saliency because attention in-degree can be dominated by sink tokens.
+The revised proposal treats CISPO as a stable base objective and studies three
+increasingly strong ways to add token credit:
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{AD-CISPO-Bound:} the original conservative variant, where
+  saliency only redistributes the upper IS clipping radius.
+  \item \textbf{Credit-Weighted CISPO (CW-CISPO):} the lead next-generation
+  variant, where saliency becomes a detached, bounded, mean-one multiplier on
+  each token's CISPO gradient while the scalar CISPO clip remains a guardrail.
+  \item \textbf{Hybrid CW-AD-CISPO:} an ablation where saliency controls both
+  the token loss weight and the upper IS clipping radius, allowing the project
+  to test whether credit allocation or trust-region allocation is the useful
+  mechanism.
+\end{enumerate}
+
+The lower IS bound remains inactive by default to match the MiniMax-style CISPO
+baseline. Each generated token receives a multiplier computed from a saliency
+extractor, and the multipliers are normalized so their mean over valid
+generated tokens is $1$. This preserves the average per-sequence gradient scale
+or clipping budget while changing where the budget is spent. The first
+implementation used frozen-reference future-attention in-degree; the
+next-generation implementation should use target-policy causal-tangent saliency
+because attention in-degree can be dominated by sink tokens and because the
+target policy is the computation graph actually being optimized.
 
 \paragraph{Core hypothesis.}
-For reasoning tasks with sparse sequence-level rewards, reallocating CISPO's
-upper clipping budget toward structurally reused generated tokens will improve
-learning efficiency or stability relative to scalar CISPO, while shuffled or
-uniform multipliers should remove the gain if the saliency signal is doing real
-work.
+For reasoning tasks with sparse sequence-level rewards, CISPO's dense-gradient
+property is necessary but not sufficient: learning efficiency is limited by
+uniform token-credit broadcast. Bounded, mean-preserving causal-token weights
+should improve reward efficiency relative to scalar CISPO if they move gradient
+mass toward objective-sensitive and uncertainty-bearing reasoning tokens. If
+shuffled weights, entropy-only weights, or uniform multipliers match the gain,
+then the method has not demonstrated a saliency-specific advantage.
 
 \paragraph{What is novel.}
 The proposal's novelty is not the use of one particular saliency heuristic by
-itself. The novel contribution is the combination of:
+itself, nor merely the fact of token weighting. The novel contribution is the
+combination of:
 \begin{enumerate}[leftmargin=*]
-  \item CISPO-compatible token-adaptive upper IS clipping that preserves dense
-  token gradients;
-  \item mean-preserving multiplier normalization, so AD-CISPO changes budget
-  allocation rather than increasing the total average clipping budget;
+  \item CISPO-compatible token-credit allocation that preserves the detached
+  clipped-IS dense-gradient structure rather than replacing it with a
+  preference-objective, process reward model, or PPO surrogate;
+  \item mean-preserving weight and multiplier normalization, so CW-CISPO
+  reallocates gradient mass rather than increasing the total average
+  per-sequence learning rate;
+  \item adaptive upper-clip redistribution as a controlled ablation and
+  guardrail, not the only way saliency affects optimization;
   \item an explicit saliency interface, where attention in-degree is a cheap
-  baseline and causal-tangent saliency is the first objective-sensitive
-  replacement;
+  baseline, causal-tangent saliency is the first objective-sensitive
+  replacement, and entropy-gated causal saliency is the first capacity-aware
+  variant;
   \item sink-token diagnostics and guards, so punctuation or boilerplate
-  attention sinks cannot silently absorb the adaptive clipping budget;
+  attention sinks cannot silently absorb the adaptive learning budget;
   \item falsifiable ablations that separate saliency from extra variance,
-  asymmetric clipping, and reference-model overhead.
+  entropy gating, asymmetric clipping, and reference-model overhead.
 \end{enumerate}
+
+\paragraph{Novelty boundary after literature review.}
+The proposal should not claim to invent token-level credit assignment, token
+selection, gradient attribution, or reward redistribution. Those ideas already
+exist in RUDDER, process supervision, token-level DPO variants, selective
+preference optimization, and mechanistic attribution. The narrower novelty
+claim is: \emph{online, verifier-reward CISPO with detached clipped-IS weights,
+augmented by bounded mean-one token-credit weights derived from the target
+policy's causal-tangent sensitivity and optionally gated by entropy}. If a
+prior method is found that already combines all of these elements, the fallback
+novelty becomes empirical: a controlled comparison showing whether
+CISPO-specific credit weighting improves reasoning RL where scalar CISPO is
+already strong.
 
 \section{Notation}
 
@@ -180,7 +267,10 @@ $r_{i,t}(\theta)$ & IS weight
 $\hat{A}_i$ & group-relative sequence advantage for response $i$ & scalar \\
 $M_i$ & valid generated-token action positions for response $i$ & token-position set \\
 $S_{i,t}$ & raw saliency for token $o_{i,t}$ & nonnegative scalar \\
-$m_{i,t}$ & normalized token multiplier & nonnegative scalar, mean $1$ over $M_i$ \\
+$H_{i,t}$ & token entropy under the rollout or target policy & nonnegative scalar \\
+$C_{i,t}$ & optional capacity gate derived from entropy or uncertainty & nonnegative scalar \\
+$m_{i,t}$ & normalized token multiplier used for adaptive clipping & nonnegative scalar, mean $1$ over $M_i$ \\
+$w_{i,t}$ & detached normalized token-credit weight used in CW-CISPO & nonnegative scalar, mean $1$ over $M_i$ \\
 $\epsilon^{IS}_{\mathrm{low}}$ & lower IS clipping radius & nonnegative scalar \\
 $\epsilon^{IS}_{\mathrm{high}}$ & scalar upper IS clipping radius & positive scalar \\
 $\epsilon^{IS}_{i,t,\mathrm{high}}$ & token-adaptive upper IS clipping radius & positive scalar \\
@@ -243,10 +333,10 @@ avoids an active lower IS-weight bound, following the MiniMax-M1 description of
 CISPO \cite{minimax2025m1}. This isolates the effect of the upper clipping
 budget.
 
-\section{AD-CISPO Objective}
+\section{Bound-Only AD-CISPO Objective}
 
-AD-CISPO replaces the scalar upper clipping radius with a token-adaptive upper
-radius:
+The original AD-CISPO variant replaces the scalar upper clipping radius with a
+token-adaptive upper radius:
 \begin{equation}
   \epsilon^{IS}_{i,t,\mathrm{high}}
   =
@@ -297,10 +387,100 @@ they must be followed by renormalization or projection so that
 \end{equation}
 A plain clamp is insufficient because it changes the total clipping budget.
 
+\section{Credit-Weighted CISPO Objective}
+
+The proposed next-generation objective uses saliency as a token-credit weight
+rather than only as an upper-bound modifier. Starting from the CISPO clipped IS
+weight $\hat{r}_{i,t}(\theta)$, define a detached nonnegative token-credit
+weight $w_{i,t}$ satisfying
+\begin{equation}
+  \frac{1}{|M_i|}\sum_{t \in M_i} w_{i,t} = 1,
+  \qquad
+  w_{\min} \leq w_{i,t} \leq w_{\max}.
+\end{equation}
+CW-CISPO optimizes
+\begin{equation}
+  J_{\mathrm{CW\mbox{-}CISPO}}(\theta)
+  =
+  \mathbb{E}
+  \left[
+    \frac{1}{\sum_{i=1}^G |M_i|}
+    \sum_{i=1}^G \sum_{t \in M_i}
+    \operatorname{sg}\!\left(w_{i,t}\right)
+    \operatorname{sg}\!\left(\hat{r}_{i,t}(\theta)\right)
+    \hat{A}_i
+    \log \pi_\theta(o_{i,t}\mid q,o_{i,<t})
+  \right].
+\end{equation}
+
+This objective leaves CISPO's clipped-IS guardrail intact, but changes the
+allocation of gradient mass across tokens. Mean-one normalization is critical:
+without it, a run could improve merely because it increased the effective
+learning rate. Detaching $w_{i,t}$ is also critical: the saliency pass should
+decide how to allocate credit for the sampled trajectory, not create a second
+implicit objective that backpropagates through the saliency extractor during
+the policy update.
+
+The simplest saliency-only weight is
+\begin{equation}
+  \tilde{w}_{i,t}
+  =
+  \left(
+    \frac{S_{i,t}}
+    {\frac{1}{|M_i|}\sum_{u \in M_i} S_{i,u} + \epsilon}
+  \right)^\gamma,
+\end{equation}
+followed by bounded projection to mean $1$. The exponent $\gamma \in [0,1]$
+controls how sharply the weight follows saliency. A conservative first run
+should use $\gamma=1$ with $w_{\min}=0.25$ and $w_{\max}=2.0$, matching the
+existing AD-CISPO multiplier range.
+
+\paragraph{Entropy-gated causal-token credit.}
+Recent RLVR credit analysis suggests that entropy marks where hindsight credit
+can reside, while saliency marks where the current objective is locally
+sensitive \cite{he2026hindsightcredit}. A capacity-aware variant should
+therefore combine both:
+\begin{equation}
+  \tilde{w}^{\mathrm{cap}}_{i,t}
+  =
+  \left(S_{i,t}+\epsilon\right)^\gamma
+  \left(C_{i,t}+\epsilon\right)^\eta,
+  \qquad
+  C_{i,t}
+  =
+  \frac{H_{i,t}}
+  {\frac{1}{|M_i|}\sum_{u \in M_i} H_{i,u}+\epsilon}.
+\end{equation}
+Here $H_{i,t}$ can be the rollout-policy or target-policy entropy for the next
+token distribution at position $t$. The ablation set should include saliency
+only ($\eta=0$), entropy only ($\gamma=0$), and the product gate
+($\gamma,\eta>0$). This prevents the proposal from confusing objective
+sensitivity with learnable credit capacity.
+
+\paragraph{Hybrid clipping and weighting.}
+The hybrid variant uses one multiplier for credit weights and another for the
+upper clipping radius:
+\begin{equation}
+  J_{\mathrm{Hybrid}}(\theta)
+  =
+  J_{\mathrm{CW\mbox{-}CISPO}}(\theta)
+  \quad \text{with} \quad
+  \epsilon^{IS}_{i,t,\mathrm{high}}
+  =
+  \epsilon^{IS}_{\mathrm{high}}m_{i,t}.
+\end{equation}
+This is intentionally not the first hypothesis. Preliminary AD-CISPO runs show
+that upper-bound adaptation affects only the subset of tokens whose ratios
+approach the bound. CW-CISPO is a stronger use of saliency because every token
+gradient is reallocated while CISPO's scalar clip still limits off-policy
+variance.
+
 \section{Saliency Estimation}
 
-The main AD-CISPO implementation uses exact frozen-reference future-attention
-in-degree. For a selected reference layer $\ell$ and head $h$, let
+The first AD-CISPO prototype used exact frozen-reference future-attention
+in-degree. It remains a useful baseline because it is cheap relative to
+target-policy causal-tangent saliency, but it should no longer be treated as
+the primary extractor. For a selected reference layer $\ell$ and head $h$, let
 $a^{(\ell,h)}_{i,j,t}$ denote the causal attention probability from the query at
 token position $j$ to the key/value position $t$. Position $t$ is the saliency
 target; position $j$ is each later valid generated token that attends to $t$.
@@ -350,7 +530,8 @@ attention-centrality score:
   a^{(\ell,h)}_{i,j,t}.
 \end{equation}
 It answers the question ``how much do later generated tokens look back at
-position $t$?'' AD-CISPO, however, ultimately needs a different quantity:
+position $t$?'' A CISPO credit-allocation method, however, ultimately needs a
+different quantity:
 how much changing the representation at position $t$ would change the
 policy-gradient objective. These two quantities can diverge because attention
 mass is not a causal explanation of model behavior \cite{jain2019attention}.
@@ -468,6 +649,26 @@ This suggests a token saliency score
   }{\sqrt{d_{\mathrm{model}}}}.
 \end{equation}
 
+Because tokenization can split one reasoning step across several adjacent
+subtokens, the training signal should use a locally smoothed score rather than
+the raw point estimate alone. The default smoothed score is
+\begin{equation}
+  \bar{S}^{\mathrm{CT}}_{i,t}
+  =
+  \lambda_0 S^{\mathrm{CT}}_{i,t}
+  +
+  \lambda_1 S^{\mathrm{CT}}_{i,t-1}
+  +
+  \lambda_1 S^{\mathrm{CT}}_{i,t+1},
+  \qquad
+  \lambda_0 + 2\lambda_1 = 1,
+\end{equation}
+with neighboring terms dropped and the weights renormalized at sequence
+boundaries or masked positions. This is not meant to blur across whole
+sentences; it is a tokenization-scale regularizer that reduces brittle
+single-token spikes, analogous in spirit to smoothing noisy gradient
+attributions \cite{smilkov2017smoothgrad}.
+
 The geometric intuition behind this score is that
 $\nabla_{h^{(\ell)}_{i,t}}F$ is the normal vector to the local tangent plane of
 the training objective with respect to the token-position representation. The
@@ -498,17 +699,16 @@ selected layers asks whether the token representation remains useful near the
 model's decision surface, rather than whether it was merely read by later
 tokens in an earlier attention computation.
 
-For AD-CISPO, the practical interpretation is:
+For CW-CISPO and AD-CISPO-Bound, the practical interpretation is:
 \begin{quote}
-  allocate more upper IS clipping budget to tokens whose hidden states lie in
-  directions to which the actual policy-gradient objective is locally
-  sensitive.
+  allocate more CISPO learning pressure, and optionally more upper IS clipping
+  budget, to tokens whose hidden states lie in directions to which the actual
+  policy-gradient objective is locally sensitive.
 \end{quote}
-This is why causal-tangent saliency is a better match to adaptive clipping than
-attention centrality. The clip multiplier is no longer driven by how often a
-token is looked at; it is driven by a first-order estimate of how much the
-training objective would change if that token-position representation were
-perturbed.
+This is why causal-tangent saliency is a better match to CISPO extension than
+attention centrality. The multiplier is no longer driven by how often a token
+is looked at; it is driven by a first-order estimate of how much the training
+objective would change if that token-position representation were perturbed.
 
 The proposed next-generation extractor should therefore treat attention
 in-degree as a diagnostic baseline and use causal-tangent saliency, plus
@@ -557,26 +757,34 @@ $\rightarrow$ the advantage-weighted log-prob objective $F$ is backpropagated
 to those hidden states
 $\rightarrow$ causal-tangent saliency $S^{\mathrm{CT}}_{i,t}$ is computed and
 sink-guarded
-$\rightarrow$ saliency is normalized into $m_{i,t}$
+$\rightarrow$ saliency and optional entropy are normalized into $w_{i,t}$
+$\rightarrow$ optional bound-only ablations also derive $m_{i,t}$
 $\rightarrow$ token thresholds
 $\epsilon^{IS}_{i,t,\mathrm{high}}=\epsilon^{IS}_{\mathrm{high}}m_{i,t}$
-$\rightarrow$ CISPO loss uses detached clipped IS weights
+$\rightarrow$ CW-CISPO loss uses detached token weights and detached clipped
+IS weights
 $\rightarrow$ metrics log reward, exact match, clipping, saliency shape,
-sink-guard behavior, and runtime overhead.
+credit-weight shape, sink-guard behavior, and runtime overhead.
 \end{minipage}}
 \end{center}
 
 \paragraph{Implementation contract.}
-A mathematically aligned AD-CISPO implementation should satisfy the following:
+A mathematically aligned CISPO-extension implementation should satisfy the following:
 \begin{enumerate}[leftmargin=*]
   \item CISPO loss must use a detached clipped IS weight multiplying
   $\log\pi_\theta$, not a PPO/GRPO surrogate minimum.
-  \item AD-CISPO must be enabled only with the CISPO loss, unless explicitly
-  naming and evaluating an adaptive-GRPO ablation.
+  \item Adaptive CISPO variants must be enabled only with the CISPO loss,
+  unless explicitly naming and evaluating an adaptive-GRPO ablation.
   \item MiniMax-style CISPO should set KL weight to zero and avoid an active
   lower IS-weight bound.
   \item Token-adaptive clipping should change only the upper IS clipping radius
   unless a lower-bound ablation is deliberately introduced.
+  \item Token-credit weighting should use detached nonnegative weights
+  $w_{i,t}$ projected to mean $1$ per response; raw saliency values should not
+  be multiplied directly into the loss.
+  \item CW-CISPO should first keep scalar CISPO clipping fixed. Bound
+  redistribution should be introduced as a separate AD-CISPO-Bound or hybrid
+  ablation.
   \item Saliency tensors should align with the generated token whose IS weight
   is being clipped. In next-token prediction implementations, generated-token
   saliency must align with next-token log-probability terms, not the preceding
@@ -592,7 +800,7 @@ A mathematically aligned AD-CISPO implementation should satisfy the following:
   from saliency extraction.
   \item Sink guards should be explicit and logged. Separator punctuation,
   whitespace, special tokens, and prompt tokens should either be removed from
-  multiplier assignment or capped at multiplier $1$, while numeric tokens and
+  weight and multiplier assignment or capped at $1$, while numeric tokens and
   mathematical operators should remain eligible unless ablated.
   \item Claims about compute and memory must distinguish active-policy saliency
   overhead from frozen-reference overhead.
@@ -616,11 +824,62 @@ The recommended first implementation is:
   \item Backpropagate $F$, compute $S^{\mathrm{CT}}_{i,t}$ from
   gradient--centered-activation inner products, then detach and clear temporary
   gradients before the policy update.
-  \item Apply sink guards and log the fraction of tokens and saliency mass
+  \item Apply local smoothing, sink guards, and log the fraction of tokens and saliency mass
   removed by those guards.
-  \item Reuse the existing mean-preserving multiplier projection and AD-CISPO
-  clip-high plumbing.
+  \item Add mean-preserving token-credit-weight projection. Reuse the existing
+  multiplier projection for bound-only and hybrid ablations, but keep
+  $w_{i,t}$ and $m_{i,t}$ separately logged.
 \end{enumerate}
+
+\section{Alternative CISPO Extensions}
+
+CW-CISPO is the lead proposal, but the literature review suggests several
+other CISPO-native directions that solve problems CISPO has not yet addressed:
+
+\paragraph{1. Entropy-Capacity CISPO.}
+CISPO clips IS weights but does not decide which tokens can carry useful
+hindsight credit. Entropy-Capacity CISPO would keep the scalar CISPO objective
+and weight tokens by a bounded function of token entropy. This is cheaper than
+causal-tangent saliency and directly tests the hypothesis that reasoning gains
+come from uncertain decision points. Its weakness is that entropy measures
+capacity, not whether the token is actually relevant to the rewarded
+trajectory.
+
+\paragraph{2. Causal-Token CW-CISPO.}
+This is the main proposal: combine causal-tangent saliency with optional entropy
+capacity. It solves a more specific problem than entropy-only weighting: not
+only which tokens \emph{can} change, but which token-position representations
+the current policy-gradient objective is locally sensitive to. Its cost is the
+extra teacher-forced backward pass.
+
+\paragraph{3. Selective-CISPO.}
+Instead of weighting all tokens, optimize only the top-$p$ percent of tokens by
+saliency, entropy, or their product, while still using CISPO's clipped IS
+coefficient. This is analogous in spirit to selective preference optimization
+\cite{yang2025sepo}, but applied online to RLVR rollouts rather than offline
+preference pairs. It could reduce memory and compute, but is riskier because
+hard selection can drop useful connective tokens.
+
+\paragraph{4. Variance-Adaptive CISPO.}
+CISPO clips IS weights to control variance, but the clipping radius is fixed.
+A variance-adaptive extension would tune $\epsilon^{IS}_{\mathrm{high}}$ from
+observed ratio dispersion, clipped-token fraction, and advantage variance,
+rather than from saliency. This is less novel conceptually, but it may be a
+strong practical baseline because recent AD-CISPO runs show that adaptive
+saliency bounds rarely bind.
+
+\paragraph{5. Step-Chunk CISPO.}
+Instead of assigning weights at the subtoken level, group neighboring tokens
+into reasoning chunks using newline, equation, or sentence boundaries and apply
+one CISPO credit weight per chunk. This addresses token-sink artifacts and
+tokenization noise. It is less mechanistically fine-grained, but may better
+match process-supervision intuitions when the reward depends on reasoning
+steps rather than isolated subtokens.
+
+The first experimental priority should be Causal-Token CW-CISPO versus
+Entropy-Capacity CISPO and scalar CISPO. If causal saliency does not beat
+entropy-only weighting, then the causal-tangent extractor is not yet adding
+useful credit information beyond uncertainty capacity.
 
 \section{Evaluation Plan}
 
@@ -634,7 +893,7 @@ benchmark:
   sweeps, and early reward-curve comparisons.
   \item \textbf{SVAMP} should be used as an evaluation-only robustness check for
   arithmetic word-problem variations \cite{patel2021svamp}. This helps test
-  whether AD-CISPO improves reasoning robustness rather than merely fitting
+  whether adaptive CISPO improves reasoning robustness rather than merely fitting
   GSM8K surface patterns.
   \item \textbf{MATH and MATH-500} should be the next difficulty tier.
   MATH provides competition-style problems with step-by-step solutions
@@ -648,9 +907,9 @@ benchmark:
   evaluation-only benchmark \cite{he2024olympiadbench}.
 \end{enumerate}
 Training should begin with GSM8K and expand only after scalar CISPO and
-AD-CISPO have matched data loading, answer extraction, rollout count, and
+adaptive CISPO have matched data loading, answer extraction, rollout count, and
 compute budgets. Harder datasets should be used primarily to measure transfer,
-not to tune the AD-CISPO saliency heuristic.
+not to tune the saliency or token-credit heuristic.
 
 \paragraph{Baselines.}
 The minimum comparison set is:
@@ -659,10 +918,15 @@ The minimum comparison set is:
   \item DAPO-style asymmetric clipping or clip-high baseline.
   \item MiniMax-style CISPO: no KL, no active lower IS bound, scalar upper
   IS radius.
-  \item AD-CISPO with causal-tangent saliency and sink guards.
-  \item AD-CISPO with exact future-attention in-degree saliency.
-  \item AD-CISPO with KV-norm proxy saliency.
-  \item Shuffled-saliency and uniform-multiplier controls.
+  \item AD-CISPO-Bound with causal-tangent saliency and sink guards.
+  \item CW-CISPO with causal-tangent saliency, scalar CISPO clipping, and
+  bounded mean-one token weights.
+  \item CW-CISPO with entropy-only weights.
+  \item CW-CISPO with causal-tangent saliency multiplied by entropy capacity.
+  \item CW-CISPO or AD-CISPO-Bound with exact future-attention in-degree
+  saliency and KV-norm proxy saliency.
+  \item Shuffled-saliency, shuffled-entropy, and uniform-weight controls.
+  \item Hard selective-CISPO top-$p$ token ablation.
   \item Optional adaptive-GRPO ablation, clearly separated from AD-CISPO.
 \end{enumerate}
 
@@ -675,37 +939,44 @@ Report both task performance and optimizer behavior:
   \item upper-clip saturation rate and token update coverage;
   \item entropy, approximate KL to the reference model when logged, and
   response length;
-  \item AD-CISPO multiplier mean, min, max, saliency mean, and saliency
+  \item CW-CISPO weight mean, min, max, saturation fraction, and entropy
   concentration;
+  \item AD-CISPO multiplier mean, min, max, saliency mean, and saliency
+  concentration for bound-only and hybrid variants;
   \item high-saliency token category frequencies, including comma,
   punctuation, numeric, mathematical-operator, and answer-token fractions;
+  \item high-weight token category frequencies, separately from high-saliency
+  frequencies when entropy gating is enabled;
   \item sink-guard removed-token fraction and removed-saliency-mass fraction;
   \item saliency-extractor overhead in wall-clock time and peak memory,
   separately for target-policy causal-tangent and frozen-reference baselines.
 \end{itemize}
 
 \paragraph{Decision rule.}
-AD-CISPO should be considered successful only if it improves exact-match or
+CW-CISPO should be considered successful only if it improves exact-match or
 reward efficiency over scalar CISPO at comparable compute, or if it provides a
 clear stability advantage such as lower collapse rate or smoother reward
-improvement. A gain that also appears for shuffled saliency should be treated
-as evidence for variance injection or changed clipping distribution, not for
-the proposed saliency mechanism.
+improvement. A gain that also appears for shuffled saliency, entropy-only
+weights, or uniform weights should be treated as evidence for generic
+regularization, uncertainty weighting, or changed effective learning rate, not
+for the proposed causal-token mechanism. AD-CISPO-Bound should be retained only
+if it beats both scalar CISPO and CW-CISPO, because bound-only adaptation is the
+weaker mechanistic lever when policy ratios rarely reach the upper bound.
 
 \section{Milestones}
 
 \begin{enumerate}[leftmargin=*]
   \item \textbf{Week 1:} verify MiniMax-style CISPO against GRPO on GSM8K with
   matched model, batch size, rollout count, and reward function.
-  \item \textbf{Week 2:} implement causal-tangent saliency, sink guards, and
-  top-token category logging; run short smoke tests to verify that high-saliency
-  tokens are not dominated by comma or boilerplate punctuation.
-  \item \textbf{Week 3:} run AD-CISPO causal-tangent, scalar CISPO,
-  future-attention in-degree, KV-norm, shuffled, and uniform ablations with
-  matched seeds.
-  \item \textbf{Week 4:} analyze reward curves, clipping dynamics, saliency
-  concentration, sink-guard behavior, runtime overhead, and representative
-  trajectory changes.
+  \item \textbf{Week 2:} implement detached mean-one token-credit weights in
+  the CISPO loss; support uniform, shuffled, entropy-only, causal-tangent, and
+  causal-tangent-times-entropy weight sources.
+  \item \textbf{Week 3:} run scalar CISPO, AD-CISPO-Bound, CW-CISPO
+  causal-tangent, CW-CISPO entropy-only, and CW-CISPO hybrid saliency-entropy
+  ablations with matched seeds.
+  \item \textbf{Week 4:} analyze reward curves, clipping dynamics, token-weight
+  distribution, saliency concentration, sink-guard behavior, runtime overhead,
+  and representative trajectory changes.
 \end{enumerate}
 
 \section{Risks, Ablations, and Fallbacks}
@@ -715,7 +986,8 @@ Attention weights may not explain model behavior \cite{jain2019attention}.
 This is why the next-generation plan treats future-attention in-degree as a
 diagnostic baseline and uses causal-tangent saliency as the primary extractor.
 The shuffled saliency ablation remains required to verify that any gain is
-coming from the token-importance signal rather than from multiplier variance.
+coming from the token-importance signal rather than from weight or multiplier
+variance.
 
 \paragraph{Risk: attention sinks distort saliency.}
 Initial and special tokens can attract attention for non-semantic reasons
@@ -731,22 +1003,36 @@ fallback is to compute it every $N$ rollout batches, use only the final two
 decoder layers, reduce the saliency minibatch size, or fall back to KV-norm or
 future-attention in-degree for cheaper diagnostic runs.
 
+\paragraph{Risk: saliency weighting changes the effective learning rate.}
+Even mean-one token weights can alter gradient variance and interact with
+minibatch composition. The fallback is to keep the response-level mean fixed,
+track per-minibatch gradient norms, and compare against uniform random weights
+with the same marginal distribution. If the random-weight control matches
+CW-CISPO, the gain is not evidence for causal-token credit.
+
+\paragraph{Risk: entropy explains the gain.}
+If entropy-only CW-CISPO matches causal-tangent CW-CISPO, the saliency
+extractor is unnecessary for the next version. In that case, the project should
+pivot to Entropy-Capacity CISPO as the simpler CISPO-native extension, while
+keeping causal saliency as a diagnostic.
+
 \paragraph{Risk: budget concentration increases variance.}
 Large multipliers may overemphasize a small set of tokens. The fallback is a
-bounded multiplier projection with post-clamp renormalization, plus reporting
-clip-min, clip-max, and saturation metrics.
+bounded weight or multiplier projection with post-clamp renormalization, plus
+reporting clip-min, clip-max, weight-min, weight-max, and saturation metrics.
 
 \section{Expected Impact}
 
-If successful, AD-CISPO would provide evidence that reasoning-RL trust regions
-should be token-budgeted rather than uniformly scalar. The contribution would
-be useful even if the exact attention heuristic is later replaced: the broader
-idea is to preserve the average IS clipping budget while assigning update
-freedom where the current model's objective-sensitive token representations
-suggest the update can matter most. A negative result would still be
-informative because it would test whether CISPO's scalar clipping is already
-sufficient, and whether token-level saliency signals are too weak or too noisy
-for optimizer control.
+If successful, this CISPO-extension program would provide evidence that
+reasoning-RL trust regions and token-gradient mass should be token-budgeted
+rather than uniformly scalar.
+The contribution would be useful even if the exact causal-tangent extractor is
+later replaced: the broader idea is to keep CISPO's clipped-IS stability while
+adding a falsifiable token-credit layer derived from the current policy's own
+rollout computation. A negative result would still be informative because it
+would test whether CISPO's scalar gradient allocation is already sufficient,
+whether entropy alone explains token credit in RLVR, and whether mechanistic
+saliency signals are too weak or too noisy for optimizer control.
 
 \begin{thebibliography}{99}
 
@@ -825,6 +1111,81 @@ Aaquib Syed et al.
 \newblock Attribution Patching Outperforms Automated Circuit Discovery.
 \newblock \emph{arXiv:2310.10348}, 2023.
 \newblock \url{https://arxiv.org/abs/2310.10348}.
+
+\bibitem{kramar2024atpstar}
+Janos Kramar, Tom Lieberum, Rohin Shah, and Neel Nanda.
+\newblock AtP*: An efficient and scalable method for localizing LLM behaviour
+to components.
+\newblock \emph{arXiv:2403.00745}, 2024.
+\newblock \url{https://arxiv.org/abs/2403.00745}.
+
+\bibitem{sundararajan2017ig}
+Mukund Sundararajan, Ankur Taly, and Qiqi Yan.
+\newblock Axiomatic Attribution for Deep Networks.
+\newblock \emph{Proceedings of ICML}, 2017.
+\newblock \url{https://arxiv.org/abs/1703.01365}.
+
+\bibitem{shrikumar2017deeplift}
+Avanti Shrikumar, Peyton Greenside, and Anshul Kundaje.
+\newblock Learning Important Features Through Propagating Activation
+Differences.
+\newblock \emph{Proceedings of ICML}, 2017.
+\newblock \url{https://arxiv.org/abs/1704.02685}.
+
+\bibitem{smilkov2017smoothgrad}
+Daniel Smilkov, Nikhil Thorat, Been Kim, Fernanda Viegas, and Martin
+Wattenberg.
+\newblock SmoothGrad: removing noise by adding noise.
+\newblock \emph{arXiv:1706.03825}, 2017.
+\newblock \url{https://arxiv.org/abs/1706.03825}.
+
+\bibitem{arjona2019rudder}
+Jose A. Arjona-Medina, Michael Gillhofer, Michael Widrich, Thomas Unterthiner,
+Johannes Brandstetter, and Sepp Hochreiter.
+\newblock RUDDER: Return Decomposition for Delayed Rewards.
+\newblock \emph{Advances in Neural Information Processing Systems}, 2019.
+\newblock \url{https://arxiv.org/abs/1806.07857}.
+
+\bibitem{zeng2024tdpo}
+Yongcheng Zeng, Guoqing Liu, Weiyu Ma, Ning Yang, Haifeng Zhang, and Jun Wang.
+\newblock Token-level Direct Preference Optimization.
+\newblock \emph{Proceedings of ICML}, 2024.
+\newblock \url{https://arxiv.org/abs/2404.11999}.
+
+\bibitem{liu2025tisdpo}
+Aiwei Liu et al.
+\newblock TIS-DPO: Token-level Importance Sampling for Direct Preference
+Optimization With Estimated Weights.
+\newblock \emph{Proceedings of ICLR}, 2025.
+\newblock \url{https://arxiv.org/abs/2410.04350}.
+
+\bibitem{yang2025sepo}
+Kailai Yang, Zhiwei Liu, Qianqian Xie, Jimin Huang, Erxue Min, and Sophia
+Ananiadou.
+\newblock Selective Preference Optimization via Token-Level Reward Function
+Estimation.
+\newblock \emph{Proceedings of EMNLP}, 2025.
+\newblock \url{https://arxiv.org/abs/2408.13518}.
+
+\bibitem{zhou2025treg}
+Wenxuan Zhou, Shujian Zhang, Lingxiao Zhao, and Tao Meng.
+\newblock T-REG: Preference Optimization with Token-Level Reward
+Regularization.
+\newblock \emph{Proceedings of ACL}, 2025.
+\newblock \url{https://aclanthology.org/2025.acl-long.1353/}.
+
+\bibitem{yang2025tidpo}
+Ning Yang, Hai Lin, Yibo Liu, Baoliang Tian, Guoqing Liu, and Haijun Zhang.
+\newblock Token-Importance Guided Direct Preference Optimization.
+\newblock \emph{arXiv:2505.19653}, 2025.
+\newblock \url{https://arxiv.org/abs/2505.19653}.
+
+\bibitem{he2026hindsightcredit}
+Yuhang He et al.
+\newblock Where Hindsight Credit Can Reside: A Signed-Capacity View of Token
+Updates in RLVR.
+\newblock \emph{arXiv:2604.11056}, 2026.
+\newblock \url{https://arxiv.org/abs/2604.11056}.
 
 \bibitem{cobbe2021gsm8k}
 Karl Cobbe et al.

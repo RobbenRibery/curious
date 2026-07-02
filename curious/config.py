@@ -426,6 +426,17 @@ class RLConfig:
     Whether to use AD-CISPO token-level upper clipping thresholds.
     """
 
+    use_credit_weighted_cispo: bool = False
+    """
+    Whether to use CW-CISPO detached token-credit weights on the CISPO loss.
+    """
+
+    ad_cispo_apply_adaptive_bound: bool = True
+    """
+    Whether AD-CISPO saliency should modify token-level upper clipping thresholds.
+    Disable this for CW-CISPO runs that keep scalar CISPO clipping fixed.
+    """
+
     ad_cispo_saliency_method: str = "future_attention_in_degree"
     """
     The saliency method to use for AD-CISPO. Supported values are future_attention_in_degree, kv_norm, causal_tangent,
@@ -461,6 +472,21 @@ class RLConfig:
     """
     The minibatch size used for AD-CISPO saliency extraction. Set to 0 or lower to reuse logits_minibatch_size.
     Causal-tangent saliency uses an extra backward pass, so H100 launchers should keep this smaller than logits_minibatch_size.
+    """
+
+    cw_cispo_min_weight: float = 0.25
+    """
+    The lower bound for mean-preserving CW-CISPO token-credit weights.
+    """
+
+    cw_cispo_max_weight: Optional[float] = 2.0
+    """
+    The optional upper bound for mean-preserving CW-CISPO token-credit weights.
+    """
+
+    cw_cispo_gamma: float = 1.0
+    """
+    The saliency exponent used to form CW-CISPO token-credit weights.
     """
 
     mini_batch_size: int = 16 * 2

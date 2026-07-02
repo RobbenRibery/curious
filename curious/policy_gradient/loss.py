@@ -109,6 +109,7 @@ class ActorLoss(nn.Module):
         use_fixed_response_length:bool = False,
         use_surrogate_loss:bool = True,
         use_cispo_loss:bool = False,
+        use_credit_weighted_cispo:bool = False,
     ) -> None:
         """
         Args:
@@ -119,6 +120,7 @@ class ActorLoss(nn.Module):
             use_token_level_loss: bool, default to False
             use_fixed_response_length: bool, default to False
             use_cispo_loss: bool, default to False
+            use_credit_weighted_cispo: bool, default to False
         """
         super().__init__()
 
@@ -144,6 +146,7 @@ class ActorLoss(nn.Module):
         self.use_fixed_response_length = False if use_token_level_loss else use_fixed_response_length
         self.use_surrogate_loss = use_surrogate_loss
         self.use_cispo_loss = use_cispo_loss
+        self.use_credit_weighted_cispo = use_credit_weighted_cispo
 
     @torch.compile(dynamic=True)
     def forward(
@@ -197,7 +200,13 @@ class ActorLoss(nn.Module):
             clip_high = 1 + clip_high
 
             clipped_importance_weight = torch.minimum(torch.maximum(ratio, clip_low), clip_high).detach()
-            policy_loss = -clipped_importance_weight * log_probs * advantages
+            if self.use_credit_weighted_cispo and experience.token_credit_weight is not None:
+                token_credit_weight = experience.token_credit_weight
+                assert token_credit_weight.shape == ratio.shape
+                credit_weight = token_credit_weight.to(device=ratio.device, dtype=ratio.dtype).detach()
+            else:
+                credit_weight = torch.ones_like(ratio)
+            policy_loss = -credit_weight * clipped_importance_weight * log_probs * advantages
             loss = policy_loss + kl_loss
         elif self.use_surrogate_loss:
             # importance sampling ratio

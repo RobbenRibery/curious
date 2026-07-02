@@ -72,6 +72,14 @@ def needs_reference_policy(rl_config: RLConfig) -> bool:
 
 
 def normalize_rl_config_for_objective(rl_config: RLConfig) -> None:
+    if rl_config.use_credit_weighted_cispo:
+        if not rl_config.use_cispo_loss:
+            print("CW-CISPO requires CISPO loss; forcing rl_config.use_cispo_loss=True.")
+            rl_config.use_cispo_loss = True
+        if not rl_config.use_ad_cispo:
+            print("CW-CISPO requires saliency features; forcing rl_config.use_ad_cispo=True.")
+            rl_config.use_ad_cispo = True
+
     if rl_config.use_cispo_loss:
         if rl_config.kl_weight != 0:
             print("CISPO uses no KL penalty; forcing rl_config.kl_weight=0.0.")
@@ -161,6 +169,28 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
             raise ValueError("AD-CISPO ad_cispo_max_multiplier must be >= ad_cispo_min_multiplier")
         if config.rl_config.ad_cispo_eps <= 0:
             raise ValueError("AD-CISPO ad_cispo_eps must be positive")
+    if config.rl_config.use_credit_weighted_cispo:
+        if config.rl_config.cw_cispo_min_weight < 0:
+            raise ValueError("CW-CISPO cw_cispo_min_weight must be non-negative")
+        if config.rl_config.cw_cispo_min_weight > 1:
+            raise ValueError("CW-CISPO cw_cispo_min_weight cannot exceed 1")
+        if (
+            config.rl_config.cw_cispo_max_weight is not None
+            and config.rl_config.cw_cispo_max_weight <= 0
+        ):
+            raise ValueError("CW-CISPO cw_cispo_max_weight must be positive when set")
+        if (
+            config.rl_config.cw_cispo_max_weight is not None
+            and config.rl_config.cw_cispo_max_weight < 1
+        ):
+            raise ValueError("CW-CISPO cw_cispo_max_weight cannot be below 1")
+        if (
+            config.rl_config.cw_cispo_max_weight is not None
+            and config.rl_config.cw_cispo_max_weight < config.rl_config.cw_cispo_min_weight
+        ):
+            raise ValueError("CW-CISPO cw_cispo_max_weight must be >= cw_cispo_min_weight")
+        if config.rl_config.cw_cispo_gamma < 0:
+            raise ValueError("CW-CISPO cw_cispo_gamma must be non-negative")
     
     # get the run name
     run_name = config.wandb_config.name.replace("-", "_")
@@ -286,6 +316,7 @@ def set_up_training(config:TrainingConfig) -> Tuple[TrainingSetup, TrainState]:
         use_fixed_response_length=config.rl_config.use_fixed_response_length,
         use_surrogate_loss=config.rl_config.use_surrogate_loss,
         use_cispo_loss=config.rl_config.use_cispo_loss,
+        use_credit_weighted_cispo=config.rl_config.use_credit_weighted_cispo,
     )
     training_setup["actor_loss"] = objective
 

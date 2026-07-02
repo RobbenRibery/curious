@@ -136,6 +136,10 @@ class ReferencePolicyFeatureRequest:
     saliency_minibatch_size: int = 0
     sink_token_ids: frozenset[int] = frozenset()
     advantages: Optional[torch.Tensor] = None
+    compute_credit_weights: bool = False
+    credit_min_weight: float = 0.25
+    credit_max_weight: Optional[float] = 2.0
+    credit_gamma: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -145,6 +149,7 @@ class ReferencePolicyFeatures:
     action_saliency: ActionTokenSaliency
     token_clip_thresholds: TokenClipThresholds
     stats: ADCispoStats
+    token_credit_weights: Optional[torch.Tensor] = None
     diagnostics: dict[str, float] = field(default_factory=dict)
 
 
@@ -556,6 +561,70 @@ def compute_token_clip_thresholds(
     return action_saliency, token_clip_thresholds, stats
 
 
+def compute_token_credit_weights(
+    action_saliency: ActionTokenSaliency,
+    *,
+    min_weight: float,
+    max_weight: Optional[float],
+    gamma: float,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    values = to_ad_cispo_float_dtype(action_saliency.values)
+    mask = action_saliency.action_mask.bool()
+    if values.shape != mask.shape:
+        raise ValueError(
+            "CW-CISPO saliency and mask shapes must match: "
+            f"got saliency {tuple(values.shape)} and mask {tuple(mask.shape)}"
+        )
+    if min_weight < 0:
+        raise ValueError("CW-CISPO min_weight must be non-negative")
+    if min_weight > 1:
+        raise ValueError("CW-CISPO min_weight cannot exceed 1 when mean weight must stay 1")
+    if max_weight is not None and max_weight <= 0:
+        raise ValueError("CW-CISPO max_weight must be positive when set")
+    if max_weight is not None and max_weight < 1:
+        raise ValueError("CW-CISPO max_weight cannot be below 1 when mean weight must stay 1")
+    if max_weight is not None and max_weight < min_weight:
+        raise ValueError("CW-CISPO max_weight must be >= min_weight")
+    if gamma < 0:
+        raise ValueError("CW-CISPO gamma must be non-negative")
+    if eps <= 0:
+        raise ValueError("CW-CISPO eps must be positive")
+
+    finite_positive_values = torch.where(
+        torch.isfinite(values) & (values > 0),
+        values,
+        torch.zeros_like(values),
+    )
+    token_counts = mask.sum(dim=-1, keepdim=True).clamp_min(1).to(dtype=values.dtype)
+    saliency_sums = (finite_positive_values * mask).sum(dim=-1, keepdim=True)
+    saliency_means = saliency_sums / token_counts
+
+    fallback_rows = saliency_sums <= eps
+    weights = finite_positive_values / saliency_means.clamp_min(eps)
+    if gamma != 1.0:
+        weights = weights.to(dtype=torch.float32).pow(gamma).to(dtype=values.dtype)
+    weights = torch.where(mask, weights, torch.zeros_like(weights))
+    weights = torch.where(
+        fallback_rows.expand_as(weights),
+        torch.ones_like(weights),
+        weights,
+    )
+    weights = torch.where(mask, weights, torch.zeros_like(weights))
+
+    if min_weight != 0.0 or max_weight is not None:
+        weights = _project_masked_multipliers(
+            multipliers=weights,
+            mask=mask,
+            min_multiplier=min_weight,
+            max_multiplier=max_weight,
+            eps=eps,
+        )
+
+    weights = torch.where(mask, weights, torch.ones_like(weights))
+    return weights.to(dtype=FLOAT_TENSOR_DTYPE)
+
+
 def derive_adaptive_clip_bounds(
     raw_saliency: RawTokenSaliency,
     action_mask: torch.Tensor,
@@ -665,6 +734,25 @@ def compute_reference_policy_features(
         action_mask=request.action_mask,
         adaptive_clip_mask=adaptive_clip_mask,
     )
+    token_credit_weights = None
+    if request.compute_credit_weights:
+        token_credit_weights = compute_token_credit_weights(
+            action_saliency=action_saliency,
+            min_weight=request.credit_min_weight,
+            max_weight=request.credit_max_weight,
+            gamma=request.credit_gamma,
+            eps=request.eps,
+        )
+        diagnostics["cw_cispo/enabled"] = 1.0
+        diagnostics["cw_cispo/gamma"] = float(request.credit_gamma)
+        diagnostics["cw_cispo/min_weight_config"] = float(request.credit_min_weight)
+        diagnostics["cw_cispo/max_weight_config"] = (
+            float(request.credit_max_weight)
+            if request.credit_max_weight is not None
+            else 0.0
+        )
+    else:
+        diagnostics["cw_cispo/enabled"] = 0.0
     diagnostics[f"ad_cispo/saliency_method_{request.saliency_method}"] = 1.0
     diagnostics["ad_cispo/logits_minibatch_size"] = float(request.logits_minibatch_size)
     diagnostics["ad_cispo/saliency_minibatch_size"] = float(feature_minibatch_size)
@@ -674,6 +762,7 @@ def compute_reference_policy_features(
         action_saliency=action_saliency,
         token_clip_thresholds=token_clip_thresholds,
         stats=stats,
+        token_credit_weights=token_credit_weights,
         diagnostics=diagnostics,
     )
 

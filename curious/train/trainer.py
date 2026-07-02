@@ -45,6 +45,7 @@ AD_CISPO_TOP_TOKEN_COLUMNS = [
     "saliency",
     "clip_high",
     "multiplier",
+    "credit_weight",
     "return",
     "solved",
     "advantage",
@@ -134,6 +135,28 @@ def build_ad_cispo_distribution_metrics(reference_features: ReferencePolicyFeatu
         payload.update(_summarize_distribution("ad_cispo/high_saliency/clip_bound", clip_bounds[high_saliency_mask]))
         payload.update(_summarize_distribution("ad_cispo/high_saliency/saliency", saliency_values[high_saliency_mask]))
         payload.update(_summarize_distribution("ad_cispo/high_saliency/multiplier", multipliers[high_saliency_mask]))
+    credit_weights = reference_features.token_credit_weights
+    if credit_weights is not None:
+        weights = credit_weights.detach()[action_mask].to(dtype=torch.float32)
+        payload.update(_summarize_distribution("cw_cispo/weight", weights))
+        payload["cw_cispo/active_token_count"] = float(active_count)
+        weight_min = weights.min()
+        weight_max = weights.max()
+        atol = torch.finfo(weights.dtype).eps * 8
+        payload["cw_cispo/weight_at_min_fraction"] = torch.isclose(
+            weights,
+            weight_min,
+            atol=atol,
+            rtol=0.0,
+        ).to(dtype=torch.float32).mean().item()
+        payload["cw_cispo/weight_at_max_fraction"] = torch.isclose(
+            weights,
+            weight_max,
+            atol=atol,
+            rtol=0.0,
+        ).to(dtype=torch.float32).mean().item()
+        if high_saliency_mask.any():
+            payload.update(_summarize_distribution("cw_cispo/high_saliency/weight", weights[high_saliency_mask]))
     for existing_key in (
         "ad_cispo/clip_mean",
         "ad_cispo/clip_min",
@@ -207,6 +230,11 @@ def build_ad_cispo_top_token_rows(
     flat_advantages = advantages.detach().cpu().reshape(-1)
     clip_values = token_clip_thresholds.values.detach().cpu()
     multipliers = token_clip_thresholds.multipliers.detach().cpu()
+    credit_weights = (
+        reference_features.token_credit_weights.detach().cpu()
+        if reference_features.token_credit_weights is not None
+        else torch.ones_like(multipliers)
+    )
     sequence_ids_cpu = sequence_ids.detach().cpu()
 
     rows: List[Dict[str, Any]] = []
@@ -234,6 +262,7 @@ def build_ad_cispo_top_token_rows(
                 "saliency": float(saliency_tensor),
                 "clip_high": float(clip_values[sequence_idx, action_idx].item()),
                 "multiplier": float(multipliers[sequence_idx, action_idx].item()),
+                "credit_weight": float(credit_weights[sequence_idx, action_idx].item()),
                 "return": float(flat_returns[sequence_idx].item()),
                 "solved": float(flat_solved[sequence_idx].item()),
                 "advantage": float(flat_advantages[sequence_idx].item()),
@@ -394,6 +423,12 @@ class PolicyGradientTrainer:
                     dtype=ratio.dtype,
                 )
                 tensors["multiplier"] = token_clip_multiplier.detach().cpu()
+            if experience.token_credit_weight is not None:
+                token_credit_weight = experience.token_credit_weight.detach()[action_mask].to(
+                    device=ratio.device,
+                    dtype=ratio.dtype,
+                )
+                tensors["credit_weight"] = token_credit_weight.detach().cpu()
             return tensors
 
     @staticmethod
@@ -425,6 +460,7 @@ class PolicyGradientTrainer:
         nonzero_advantages = self._concat_diagnostic_tensors(tensor_parts, "nonzero_advantages")
         saliency = self._concat_diagnostic_tensors(tensor_parts, "saliency")
         multiplier = self._concat_diagnostic_tensors(tensor_parts, "multiplier")
+        credit_weight = self._concat_diagnostic_tensors(tensor_parts, "credit_weight")
 
         if ratio.numel() == 0:
             ratio = torch.ones(1, dtype=torch.float32)
@@ -476,6 +512,8 @@ class PolicyGradientTrainer:
             payload.update(_summarize_distribution("train/update_saliency", saliency))
         if multiplier.numel() > 0:
             payload.update(_summarize_distribution("train/update_multiplier", multiplier))
+        if credit_weight.numel() > 0:
+            payload.update(_summarize_distribution("train/update_credit_weight", credit_weight))
 
         def add_subset_metrics(name: str, subset_mask: torch.Tensor) -> None:
             payload[f"train/update_{name}_token_count"] = float(subset_mask.sum().item())
@@ -491,6 +529,8 @@ class PolicyGradientTrainer:
                 payload.update(_summarize_distribution(f"train/update_{name}/saliency", saliency[subset_mask]))
             if multiplier.numel() == ratio.numel():
                 payload.update(_summarize_distribution(f"train/update_{name}/multiplier", multiplier[subset_mask]))
+            if credit_weight.numel() == ratio.numel():
+                payload.update(_summarize_distribution(f"train/update_{name}/credit_weight", credit_weight[subset_mask]))
 
         add_subset_metrics("clipped", clipped_mask)
         if saliency.numel() == ratio.numel():
@@ -725,7 +765,7 @@ class PolicyGradientTrainer:
             stats["mean_action_entropy"] = mean_action_entropy
 
         kl, log_probs_ref, token_clip_high = None, None, None
-        token_saliency, token_clip_multiplier = None, None
+        token_saliency, token_clip_multiplier, token_credit_weight = None, None, None
         ad_cispo_features = None
         with self._trace_phase("ad_cispo_saliency_features", batch_indx, train_state["device"]):
             if self.training_setup["rl_config"].use_ad_cispo:
@@ -747,15 +787,24 @@ class PolicyGradientTrainer:
                         attention_block_size=self.training_setup["rl_config"].ad_cispo_attention_block_size,
                         sink_token_ids=collect_ad_cispo_sink_token_ids(self.tokenizer),
                         advantages=advantages,
+                        compute_credit_weights=self.training_setup["rl_config"].use_credit_weighted_cispo,
+                        credit_min_weight=self.training_setup["rl_config"].cw_cispo_min_weight,
+                        credit_max_weight=self.training_setup["rl_config"].cw_cispo_max_weight,
+                        credit_gamma=self.training_setup["rl_config"].cw_cispo_gamma,
                     )
                 )
-                token_clip_high = ad_cispo_features.token_clip_thresholds.values
+                if self.training_setup["rl_config"].ad_cispo_apply_adaptive_bound:
+                    token_clip_high = ad_cispo_features.token_clip_thresholds.values
                 token_saliency = ad_cispo_features.action_saliency.values
                 token_clip_multiplier = ad_cispo_features.token_clip_thresholds.multipliers
+                token_credit_weight = ad_cispo_features.token_credit_weights
                 stats["ad_cispo_stats"] = ad_cispo_features.stats
                 stats["ad_cispo_distribution_metrics"] = build_ad_cispo_distribution_metrics(ad_cispo_features)
                 stats["ad_cispo_distribution_metrics"]["ad_cispo/saliency_source_target_policy"] = 1.0
                 stats["ad_cispo_distribution_metrics"]["ad_cispo/saliency_source_reference_policy"] = 0.0
+                stats["ad_cispo_distribution_metrics"]["ad_cispo/apply_adaptive_bound"] = (
+                    1.0 if self.training_setup["rl_config"].ad_cispo_apply_adaptive_bound else 0.0
+                )
                 stats["ad_cispo_top_token_rows"] = build_ad_cispo_top_token_rows(
                     tokenizer=self.tokenizer,
                     reference_features=ad_cispo_features,
@@ -804,6 +853,7 @@ class PolicyGradientTrainer:
             token_clip_high=token_clip_high,
             token_saliency=token_saliency,
             token_clip_multiplier=token_clip_multiplier,
+            token_credit_weight=token_credit_weight,
         )
         replay_buffer.append_batch(experience)
 
@@ -814,6 +864,7 @@ class PolicyGradientTrainer:
             token_clip_high,
             token_saliency,
             token_clip_multiplier,
+            token_credit_weight,
             log_probs,
             entropy,
             attention_mask,

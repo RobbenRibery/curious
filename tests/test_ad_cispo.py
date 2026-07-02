@@ -21,6 +21,7 @@ from curious.policy_gradient.ad_cispo import (
     collect_ad_cispo_sink_token_ids,
     compute_blockwise_future_indegree,
     compute_reference_policy_features,
+    compute_token_credit_weights,
     compute_token_clip_thresholds,
     extract_causal_tangent_saliency,
     extract_kv_norm_saliency,
@@ -123,6 +124,45 @@ def test_token_clip_thresholds_unbounded_path_preserves_expected_multipliers():
     assert thresholds.multipliers.dtype == torch.bfloat16
     assert torch.allclose(thresholds.multipliers, expected_multipliers, atol=BF16_ATOL)
     assert torch.allclose(thresholds.values[action_mask].mean(), bf16_tensor(0.3), atol=BF16_ATOL)
+
+
+def test_token_credit_weights_project_to_bounded_unit_mean():
+    action_saliency = ActionTokenSaliency(
+        values=torch.tensor([[1.0, 100.0, 1.0, 0.0]]),
+        action_mask=torch.tensor([[True, True, True, False]]),
+    )
+
+    weights = compute_token_credit_weights(
+        action_saliency,
+        min_weight=0.5,
+        max_weight=2.0,
+        gamma=1.0,
+        eps=1e-8,
+    )
+
+    active_weights = weights[action_saliency.action_mask]
+    assert weights.dtype == torch.bfloat16
+    assert torch.allclose(active_weights.mean(), bf16_tensor(1.0), atol=BF16_ATOL)
+    assert active_weights.min() >= 0.5
+    assert active_weights.max() <= 2.0
+    assert torch.allclose(weights[~action_saliency.action_mask], bf16_tensor([1.0]), atol=BF16_ATOL)
+
+
+def test_token_credit_weights_fallback_to_one_for_zero_saliency():
+    action_saliency = ActionTokenSaliency(
+        values=torch.tensor([[0.0, float("nan"), 0.0]]),
+        action_mask=torch.tensor([[True, True, False]]),
+    )
+
+    weights = compute_token_credit_weights(
+        action_saliency,
+        min_weight=0.25,
+        max_weight=2.0,
+        gamma=1.0,
+        eps=1e-8,
+    )
+
+    assert torch.allclose(weights, bf16_tensor([[1.0, 1.0, 1.0]]), atol=BF16_ATOL)
 
 
 def test_action_saliency_aligns_to_next_token_log_prob_positions():
@@ -233,6 +273,7 @@ def test_experience_split_join_preserves_ad_cispo_token_features():
         token_clip_high=torch.arange(6, dtype=torch.float32).reshape(2, 3),
         token_saliency=torch.arange(6, dtype=torch.float32).reshape(2, 3) / 10.0,
         token_clip_multiplier=torch.arange(6, dtype=torch.float32).reshape(2, 3) + 1.0,
+        token_credit_weight=torch.arange(6, dtype=torch.float32).reshape(2, 3) / 5.0 + 0.5,
     )
 
     joined = join_experience_batch(split_experience_batch(experience))
@@ -240,6 +281,7 @@ def test_experience_split_join_preserves_ad_cispo_token_features():
     assert torch.equal(joined.token_clip_high, experience.token_clip_high)
     assert torch.equal(joined.token_saliency, experience.token_saliency)
     assert torch.equal(joined.token_clip_multiplier, experience.token_clip_multiplier)
+    assert torch.equal(joined.token_credit_weight, experience.token_credit_weight)
 
 
 def test_iter_experience_minibatches_slices_batched_experience_without_restacking():
@@ -255,6 +297,7 @@ def test_iter_experience_minibatches_slices_batched_experience_without_restackin
         token_clip_high=torch.full((5, 3), 0.28, dtype=torch.bfloat16),
         token_saliency=torch.arange(15, dtype=torch.bfloat16).reshape(5, 3),
         token_clip_multiplier=torch.full((5, 3), 1.5, dtype=torch.bfloat16),
+        token_credit_weight=torch.arange(15, dtype=torch.bfloat16).reshape(5, 3) / 10.0 + 0.5,
     )
 
     minibatches = list(iter_experience_minibatches(experience, mini_batch_size=2))
@@ -264,6 +307,7 @@ def test_iter_experience_minibatches_slices_batched_experience_without_restackin
     assert torch.equal(minibatches[2].experience.token_clip_high, experience.token_clip_high[4:5])
     assert torch.equal(minibatches[1].experience.token_saliency, experience.token_saliency[2:4])
     assert torch.equal(minibatches[2].experience.token_clip_multiplier, experience.token_clip_multiplier[4:5])
+    assert torch.equal(minibatches[0].experience.token_credit_weight, experience.token_credit_weight[:2])
 
 
 def test_cleanup_policy_keeps_minibatch_empty_cache_off_by_default():
@@ -390,6 +434,81 @@ def test_cispo_loss_does_not_apply_lower_is_weight_clip():
     loss.backward()
 
     assert torch.allclose(log_probs.grad, torch.tensor([[-0.1]]), atol=BF16_ATOL)
+
+
+def test_credit_weighted_cispo_scales_token_gradients():
+    log_probs = torch.zeros(1, 2, requires_grad=True)
+    experience = Experience(
+        sequences=torch.arange(3).reshape(1, 3),
+        attention_mask=torch.ones(1, 3, dtype=torch.bool),
+        action_mask=torch.ones(1, 2, dtype=torch.bool),
+        returns=torch.tensor([1.0]),
+        solved_mask=torch.tensor([1.0]),
+        advantages=torch.tensor([1.0]),
+        action_log_probs=torch.zeros(1, 2),
+        token_credit_weight=torch.tensor([[2.0, 0.5]]),
+    )
+    loss_fn = ActorLoss(
+        epsilon=0.2,
+        kl_weight=0,
+        use_cispo_loss=True,
+        use_credit_weighted_cispo=True,
+    )
+
+    loss, _, _ = loss_fn(log_probs=log_probs, experience=experience)
+    loss.backward()
+
+    assert torch.allclose(log_probs.grad, torch.tensor([[-1.0, -0.25]]), atol=BF16_ATOL)
+
+
+def test_credit_weighted_cispo_matches_cispo_when_weights_missing():
+    log_probs = torch.zeros(1, 2, requires_grad=True)
+    experience = Experience(
+        sequences=torch.arange(3).reshape(1, 3),
+        attention_mask=torch.ones(1, 3, dtype=torch.bool),
+        action_mask=torch.ones(1, 2, dtype=torch.bool),
+        returns=torch.tensor([1.0]),
+        solved_mask=torch.tensor([1.0]),
+        advantages=torch.tensor([1.0]),
+        action_log_probs=torch.zeros(1, 2),
+    )
+    loss_fn = ActorLoss(
+        epsilon=0.2,
+        kl_weight=0,
+        use_cispo_loss=True,
+        use_credit_weighted_cispo=True,
+    )
+
+    loss, _, _ = loss_fn(log_probs=log_probs, experience=experience)
+    loss.backward()
+
+    assert torch.allclose(log_probs.grad, torch.tensor([[-0.5, -0.5]]), atol=BF16_ATOL)
+
+
+def test_credit_weighted_cispo_uses_scalar_clip_when_token_clip_high_missing():
+    log_probs = torch.log(torch.tensor([[1.5]])).requires_grad_()
+    experience = Experience(
+        sequences=torch.arange(2).reshape(1, 2),
+        attention_mask=torch.ones(1, 2, dtype=torch.bool),
+        action_mask=torch.ones(1, 1, dtype=torch.bool),
+        returns=torch.tensor([1.0]),
+        solved_mask=torch.tensor([1.0]),
+        advantages=torch.tensor([1.0]),
+        action_log_probs=torch.zeros(1, 1),
+        token_clip_high=None,
+        token_credit_weight=torch.tensor([[2.0]]),
+    )
+    loss_fn = ActorLoss(
+        epsilon=0.2,
+        kl_weight=0,
+        use_cispo_loss=True,
+        use_credit_weighted_cispo=True,
+    )
+
+    loss, _, _ = loss_fn(log_probs=log_probs, experience=experience)
+    loss.backward()
+
+    assert torch.allclose(log_probs.grad, torch.tensor([[-2.40625]]), atol=BF16_ATOL)
 
 
 def test_cispo_loss_forces_zero_kl_and_token_level_aggregation():

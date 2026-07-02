@@ -20,11 +20,19 @@
 \citation{yu2025dapo}
 \citation{minimax2025m1}
 \citation{minimax2025m1}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Problem and Motivation}{1}{section.1}\protected@file@percent }
 \citation{schulman2017ppo}
 \citation{shao2024deepseekmath}
-\@writefile{toc}{\contentsline {section}{\numberline {1}Problem and Motivation}{1}{section.1}\protected@file@percent }
 \citation{yu2025dapo}
 \citation{minimax2025m1}
+\citation{arjona2019rudder}
+\citation{lightman2023verify}
+\citation{zeng2024tdpo}
+\citation{liu2025tisdpo}
+\citation{yang2025sepo}
+\citation{zhou2025treg}
+\citation{yang2025tidpo}
+\citation{he2026hindsightcredit}
 \citation{vaswani2017attention}
 \citation{jain2019attention}
 \citation{xiao2024streamingllm}
@@ -32,51 +40,75 @@
 \@writefile{toc}{\contentsline {paragraph}{PPO and GRPO.}{2}{section*.1}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{DAPO and asymmetric clipping.}{2}{section*.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{CISPO.}{2}{section*.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Attention-based saliency.}{2}{section*.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {3}Research Gap}{2}{section.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {4}Proposed Solution}{2}{section.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Core hypothesis.}{3}{section*.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{What is novel.}{3}{section*.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {5}Notation}{3}{section.5}\protected@file@percent }
-\citation{minimax2025m1}
-\@writefile{toc}{\contentsline {paragraph}{Index conventions.}{4}{section*.7}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {6}Baseline: MiniMax-Style CISPO}{4}{section.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {7}AD-CISPO Objective}{4}{section.7}\protected@file@percent }
-\citation{jain2019attention}
-\citation{xiao2024streamingllm}
-\@writefile{toc}{\contentsline {section}{\numberline {8}Saliency Estimation}{5}{section.8}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {9}Mathematical Failure Mode: Attention Sinks versus Causal Importance}{5}{section.9}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Token-level credit assignment and reward redistribution.}{2}{section*.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Entropy and capacity views of RLVR credit.}{2}{section*.5}\protected@file@percent }
 \citation{meng2022rome}
 \citation{wang2022ioi}
 \citation{syed2023attribution}
-\@writefile{toc}{\contentsline {paragraph}{Causal-tangent saliency.}{6}{section*.8}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Target policy versus frozen policy.}{7}{section*.9}\protected@file@percent }
+\citation{kramar2024atpstar}
+\citation{sundararajan2017ig}
+\citation{shrikumar2017deeplift}
+\citation{smilkov2017smoothgrad}
+\@writefile{toc}{\contentsline {paragraph}{Attention-based saliency.}{3}{section*.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Mechanistic attribution and gradient saliency.}{3}{section*.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Research Gap}{3}{section.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Proposed Solution}{3}{section.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Core hypothesis.}{4}{section*.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{What is novel.}{4}{section*.9}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Novelty boundary after literature review.}{4}{section*.10}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Notation}{5}{section.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Index conventions.}{5}{section*.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}Baseline: MiniMax-Style CISPO}{5}{section.6}\protected@file@percent }
+\citation{minimax2025m1}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Bound-Only AD-CISPO Objective}{6}{section.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {8}Credit-Weighted CISPO Objective}{6}{section.8}\protected@file@percent }
+\citation{he2026hindsightcredit}
+\@writefile{toc}{\contentsline {paragraph}{Entropy-gated causal-token credit.}{7}{section*.12}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Hybrid clipping and weighting.}{7}{section*.13}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {9}Saliency Estimation}{7}{section.9}\protected@file@percent }
+\citation{jain2019attention}
+\citation{xiao2024streamingllm}
+\@writefile{toc}{\contentsline {section}{\numberline {10}Mathematical Failure Mode: Attention Sinks versus Causal Importance}{8}{section.10}\protected@file@percent }
+\citation{meng2022rome}
+\citation{wang2022ioi}
+\citation{syed2023attribution}
+\citation{smilkov2017smoothgrad}
+\@writefile{toc}{\contentsline {paragraph}{Causal-tangent saliency.}{9}{section*.14}\protected@file@percent }
 \citation{cobbe2021gsm8k}
-\@writefile{toc}{\contentsline {section}{\numberline {10}Implementation Plan}{8}{section.10}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Implementation contract.}{8}{section*.10}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Target policy versus frozen policy.}{10}{section*.15}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {11}Implementation Plan}{11}{section.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Implementation contract.}{11}{section*.16}\protected@file@percent }
+\citation{yang2025sepo}
+\@writefile{toc}{\contentsline {paragraph}{Causal-tangent extractor steps.}{12}{section*.17}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {12}Alternative CISPO Extensions}{12}{section.12}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{1. Entropy-Capacity CISPO.}{12}{section*.18}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{2. Causal-Token CW-CISPO.}{12}{section*.19}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{3. Selective-CISPO.}{12}{section*.20}\protected@file@percent }
 \citation{cobbe2021gsm8k}
 \citation{patel2021svamp}
 \citation{hendrycks2021math}
 \citation{lightman2023verify}
 \citation{he2024olympiadbench}
-\@writefile{toc}{\contentsline {paragraph}{Causal-tangent extractor steps.}{9}{section*.11}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {11}Evaluation Plan}{9}{section.11}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Datasets and tasks.}{9}{section*.12}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Baselines.}{10}{section*.13}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Metrics.}{10}{section*.14}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Decision rule.}{10}{section*.15}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {12}Milestones}{10}{section.12}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{4. Variance-Adaptive CISPO.}{13}{section*.21}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{5. Step-Chunk CISPO.}{13}{section*.22}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {13}Evaluation Plan}{13}{section.13}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Datasets and tasks.}{13}{section*.23}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Baselines.}{13}{section*.24}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Metrics.}{14}{section*.25}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Decision rule.}{14}{section*.26}\protected@file@percent }
 \citation{jain2019attention}
 \citation{xiao2024streamingllm}
+\@writefile{toc}{\contentsline {section}{\numberline {14}Milestones}{15}{section.14}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {15}Risks, Ablations, and Fallbacks}{15}{section.15}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Risk: attention saliency is not causal.}{15}{section*.27}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Risk: attention sinks distort saliency.}{15}{section*.28}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Risk: causal-tangent overhead dominates.}{15}{section*.29}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Risk: saliency weighting changes the effective learning rate.}{15}{section*.30}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Risk: entropy explains the gain.}{15}{section*.31}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Risk: budget concentration increases variance.}{15}{section*.32}\protected@file@percent }
 \bibcite{schulman2017ppo}{1}
 \bibcite{ouyang2022instructgpt}{2}
 \bibcite{shao2024deepseekmath}{3}
-\@writefile{toc}{\contentsline {section}{\numberline {13}Risks, Ablations, and Fallbacks}{11}{section.13}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Risk: attention saliency is not causal.}{11}{section*.16}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Risk: attention sinks distort saliency.}{11}{section*.17}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Risk: causal-tangent overhead dominates.}{11}{section*.18}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Risk: budget concentration increases variance.}{11}{section*.19}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {14}Expected Impact}{11}{section.14}\protected@file@percent }
 \bibcite{deepseek2025r1}{4}
 \bibcite{yu2025dapo}{5}
 \bibcite{minimax2025m1}{6}
@@ -86,9 +118,21 @@
 \bibcite{meng2022rome}{10}
 \bibcite{wang2022ioi}{11}
 \bibcite{syed2023attribution}{12}
-\bibcite{cobbe2021gsm8k}{13}
-\bibcite{patel2021svamp}{14}
-\bibcite{hendrycks2021math}{15}
-\bibcite{lightman2023verify}{16}
-\bibcite{he2024olympiadbench}{17}
-\gdef \@abspage@last{12}
+\bibcite{kramar2024atpstar}{13}
+\bibcite{sundararajan2017ig}{14}
+\@writefile{toc}{\contentsline {section}{\numberline {16}Expected Impact}{16}{section.16}\protected@file@percent }
+\bibcite{shrikumar2017deeplift}{15}
+\bibcite{smilkov2017smoothgrad}{16}
+\bibcite{arjona2019rudder}{17}
+\bibcite{zeng2024tdpo}{18}
+\bibcite{liu2025tisdpo}{19}
+\bibcite{yang2025sepo}{20}
+\bibcite{zhou2025treg}{21}
+\bibcite{yang2025tidpo}{22}
+\bibcite{he2026hindsightcredit}{23}
+\bibcite{cobbe2021gsm8k}{24}
+\bibcite{patel2021svamp}{25}
+\bibcite{hendrycks2021math}{26}
+\bibcite{lightman2023verify}{27}
+\bibcite{he2024olympiadbench}{28}
+\gdef \@abspage@last{17}

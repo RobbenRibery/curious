@@ -40,3 +40,21 @@ def test_ad_cispo_requires_cispo_loss_path():
 
     with pytest.raises(ValueError, match="AD-CISPO requires use_cispo_loss=True"):
         normalize_rl_config_for_objective(rl_config)
+
+
+def test_credit_weighted_cispo_enables_cispo_and_saliency_without_reference_policy():
+    rl_config = RLConfig(
+        kl_weight=0.01,
+        use_credit_weighted_cispo=True,
+        use_cispo_loss=False,
+        use_ad_cispo=False,
+        use_token_level_loss=False,
+    )
+
+    normalize_rl_config_for_objective(rl_config)
+
+    assert rl_config.use_cispo_loss
+    assert rl_config.use_ad_cispo
+    assert rl_config.use_token_level_loss
+    assert rl_config.kl_weight == 0.0
+    assert not needs_reference_policy(rl_config)

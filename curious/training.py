@@ -20,6 +20,7 @@ if __name__ == "__main__":
     wandb.define_metric("train/*", step_metric="num_batches_visited")
     wandb.define_metric("eval/*", step_metric="num_batches_visited")
     wandb.define_metric("ad_cispo/*", step_metric="num_batches_visited")
+    wandb.define_metric("cw_cispo/*", step_metric="num_batches_visited")
 
     trainer = PolicyGradientTrainer(training_setup)
     trainer.logger = wandb.log

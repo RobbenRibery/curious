@@ -46,6 +46,7 @@ class Experience:
     token_clip_high: Optional[torch.Tensor] = None # (num_samples * group_size, seq_len-1)
     token_saliency: Optional[torch.Tensor] = None # (num_samples * group_size, seq_len-1)
     token_clip_multiplier: Optional[torch.Tensor] = None # (num_samples * group_size, seq_len-1)
+    token_credit_weight: Optional[torch.Tensor] = None # (num_samples * group_size, seq_len-1)
     learnability: Optional[torch.Tensor] = None # (num_samples, )
 
     completion: Optional[List[str]] = None
@@ -66,6 +67,7 @@ class Experience:
         "token_clip_high",
         "token_saliency",
         "token_clip_multiplier",
+        "token_credit_weight",
         "returns",
         "solved_mask",
         "advantages",

@@ -3,12 +3,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Share the CISPO config; override AD-CISPO identity plus the safer 1.7B comparison knobs.
-export RUN_NAME="${RUN_NAME:-gsm8k-ad-cispo-qwen3-1p7b-causal-tangent-smoothed-top4-max2-b160-v1}"
-export WANDB_GROUP="${WANDB_GROUP:-ad-cispo-gsm8k}"
-export OBJECTIVE_NAME="AD-CISPO"
+# Share the CISPO config; override CW-CISPO identity plus the safer 1.7B comparison knobs.
+export RUN_NAME="${RUN_NAME:-gsm8k-cw-cispo-qwen3-1p7b-causal-tangent-smoothed-top4-wmax2-b160-v1}"
+export WANDB_GROUP="${WANDB_GROUP:-cw-cispo-gsm8k}"
+export OBJECTIVE_NAME="CW-CISPO"
 export USE_CISPO_LOSS="1"
 export USE_AD_CISPO="1"
+export USE_CREDIT_WEIGHTED_CISPO="${USE_CREDIT_WEIGHTED_CISPO:-1}"
 export MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-1.7B}"
 export TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-32}"
 export GROUP_SIZE="${GROUP_SIZE:-8}"
@@ -23,11 +24,15 @@ export MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-1536}"
 export SGLANG_MEM_FRACTION_STATIC="${SGLANG_MEM_FRACTION_STATIC:-0.12}"
 export SGLANG_REQUEST_BATCH_SIZE="${SGLANG_REQUEST_BATCH_SIZE:-8}"
 export COMPILE_TRAIN_MODEL="${COMPILE_TRAIN_MODEL:-0}"
+export AD_CISPO_APPLY_ADAPTIVE_BOUND="${AD_CISPO_APPLY_ADAPTIVE_BOUND:-0}"
 export AD_CISPO_SALIENCY_METHOD="${AD_CISPO_SALIENCY_METHOD:-causal_tangent_smoothed}"
 export AD_CISPO_TOP_LAYERS="${AD_CISPO_TOP_LAYERS:-4}"
 export AD_CISPO_MIN_MULTIPLIER="${AD_CISPO_MIN_MULTIPLIER:-0.25}"
 export AD_CISPO_MAX_MULTIPLIER="${AD_CISPO_MAX_MULTIPLIER:-2}"
 export AD_CISPO_EPS="${AD_CISPO_EPS:-1e-8}"
 export AD_CISPO_ATTENTION_BLOCK_SIZE="${AD_CISPO_ATTENTION_BLOCK_SIZE:-128}"
+export CW_CISPO_GAMMA="${CW_CISPO_GAMMA:-1}"
+export CW_CISPO_MIN_WEIGHT="${CW_CISPO_MIN_WEIGHT:-0.25}"
+export CW_CISPO_MAX_WEIGHT="${CW_CISPO_MAX_WEIGHT:-2}"
 
 exec "${SCRIPT_DIR}/launch_baseline_gsm8k_training_modal.sh" "$@"
