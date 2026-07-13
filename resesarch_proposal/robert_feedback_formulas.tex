@@ -1,0 +1,882 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,booktabs,longtable,array}
+\usepackage{hyperref}
+\usepackage{microtype}
+
+\title{Robert's Feedback as Formula Proposals}
+\author{}
+\date{}
+
+\newcommand{\sg}{\operatorname{sg}}
+\newcommand{\ProjectMeanOne}{\operatorname{ProjectMeanOne}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\operatorname{Var}}
+\newcommand{\Cov}{\operatorname{Cov}}
+\newcommand{\tr}{\operatorname{tr}}
+
+\begin{document}
+\maketitle
+
+This note translates Robert's comments into mathematical variants that can be
+folded into the AD-CISPO / CW-CISPO proposal.
+
+\section*{Glossary}
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\linewidth}p{0.30\linewidth}p{0.44\linewidth}}
+\toprule
+Symbol & Meaning & Notes \\
+\midrule
+\endhead
+$q$ & Prompt or question & Fixed input before generation starts. \\
+$i$ & Response index & One sampled response within a group of completions for the same prompt. \\
+$G$ & Group size & Number of sampled responses for one prompt. \\
+$o_i$ & Sampled response $i$ & Generated token sequence. \\
+$o_{i,t}$ & Token at position $t$ in response $i$ & A generated token, not a prompt token, when $t \in M_i$. \\
+$T_i$ & Length of response $i$ & Number of generated-token positions before masking. \\
+$t$ & Target token position & Position whose saliency, credit weight, or clip multiplier is being computed. \\
+$j$ & Future token position & Used when a later token attends back to position $t$. \\
+$u$ & Dummy summation index & Used when averaging over all valid positions in $M_i$. \\
+$s_{i,t}$ & Autoregressive state before token $o_{i,t}$ & Prompt plus generated prefix before position $t$. \\
+$M_i$ & Valid generated-token action positions for response $i$ & Excludes prompt tokens, padding, masked-out actions, special tokens, and sink tokens removed by the saliency guard. All token-level means, sums, and mean-one normalizations are over this set. \\
+$\pi_\theta$ & Current policy being optimized & The model receiving the policy-gradient update. \\
+$\pi_{\theta_{\mathrm{old}}}$ & Rollout policy & The policy that produced the sampled batch. \\
+$\rho_{i,t}$ & Token importance-sampling ratio & Current-policy probability divided by rollout-policy probability for token $o_{i,t}$. \\
+$\hat A_i$ & Sequence-level advantage & Usually group-relative for the sampled response. \\
+$r_i$ & Outcome reward for response $i$ & Usually a non-differentiable verifier reward. \\
+$F$ & Teacher-forced scalar objective & Current causal-tangent proxy differentiates this objective, not reward directly. \\
+$h^{(\ell)}_{i,t}$ & Hidden state & Layer $\ell$, response $i$, position $t$. \\
+$S_{i,t}$ & Generic token saliency score & Sections below define attention, causal-tangent, rollout, entropy, and opportunity variants. \\
+$H_{i,t}$ & Token entropy & Uncertainty in the next-token distribution. \\
+$C_{i,t}$ & Controllability score & How much action choice at a state changes downstream return. \\
+$w_{i,t}$ & CW-CISPO token-credit weight & Detached, bounded, and normalized to mean one over $M_i$. \\
+$m_{i,t}$ & AD-CISPO clip multiplier & Used to redistribute the upper clipping radius. \\
+$P_i$ & Token attention transition matrix & Used for PageRank-style multi-step attention saliency. \\
+$c_i$ & PageRank-style token centrality vector & Fixed-point centrality over generated-token positions. \\
+\bottomrule
+\end{longtable}
+
+\section*{Shared Notation}
+
+For prompt $q$, let response index $i$ select one sampled completion:
+\begin{equation}
+  o_i = (o_{i,1}, \ldots, o_{i,T_i}).
+\end{equation}
+
+Let
+\begin{equation}
+  s_{i,t} = (q, o_{i,<t})
+\end{equation}
+be the autoregressive state before token $o_{i,t}$.
+
+The set $M_i$ is the set of valid generated-token action positions for response
+$i$. It is the denominator set for token-level means and the support for credit
+weights. In practice, $M_i$ excludes prompt positions, padding positions,
+masked-out generated actions, special tokens, and separator or punctuation sink
+tokens removed by the saliency guard. Thus $M_i$ is the set of generated
+positions eligible to receive saliency mass, CW-CISPO credit weight, or
+AD-CISPO clipping budget.
+
+The token importance-sampling ratio is
+\begin{equation}
+  \rho_{i,t}(\theta)
+  =
+  \frac{
+    \pi_\theta(o_{i,t} \mid s_{i,t})
+  }{
+    \pi_{\theta_{\mathrm{old}}}(o_{i,t} \mid s_{i,t})
+  }.
+\end{equation}
+
+\section*{1. Current Proxy: Teacher-Forced Objective Sensitivity}
+
+The current causal-tangent saliency is approximately a hidden-state sensitivity
+to a teacher-forced scalar objective $F$, not directly to the outcome reward.
+
+One clean way to write the current objective is
+\begin{equation}
+  F_i(\theta)
+  =
+  |\hat A_i|
+  \frac{1}{|M_i|}
+  \sum_{t \in M_i}
+  \log \pi_\theta(o_{i,t} \mid s_{i,t}),
+\end{equation}
+with batch objective
+\begin{equation}
+  F(\theta)
+  =
+  \sum_i F_i(\theta).
+\end{equation}
+
+The current causal-tangent score is then
+\begin{equation}
+  S^{F}_{i,t}
+  =
+  \frac{1}{|L_{\mathrm{top}}|}
+  \sum_{\ell \in L_{\mathrm{top}}}
+  \frac{
+    \left|
+      \nabla_{h^{(\ell)}_{i,t}} F
+      \cdot
+      \left(
+        h^{(\ell)}_{i,t}
+        -
+        \frac{1}{|M_i|}
+        \sum_{u \in M_i} h^{(\ell)}_{i,u}
+      \right)
+    \right|
+  }{\sqrt{d_{\mathrm{model}}}}.
+\end{equation}
+
+In words:
+\begin{equation}
+  S^{F}_{i,t}
+  \approx
+  \text{local effect of changing } h_{i,t}
+  \text{ on teacher-forced objective } F.
+\end{equation}
+
+Robert's point is that the desired object is closer to reward sensitivity:
+\begin{equation}
+  S^{r}_{i,t}
+  \approx
+  \left\|
+    \nabla_{h_{i,t}} r_i
+  \right\|.
+\end{equation}
+
+Since $r_i$ is usually a non-differentiable verifier reward, the differentiable
+ideal is more like
+\begin{equation}
+  S^{r}_{i,t}
+  \approx
+  \left\|
+    \nabla_{h_{i,t}}
+    \E_{o_{i,>t} \sim \pi_\theta}
+    \left[
+      r(q, o_{i,\le t}, o_{i,>t})
+    \right]
+  \right\|.
+\end{equation}
+
+\section*{2. Rollout-Based Reward Impact, VinePPO-Style}
+
+The expensive but conceptually clean target is the counterfactual effect of
+token $o_{i,t}$ on final reward.
+
+Define the continuation value after prefix $o_{i,\le t}$:
+\begin{equation}
+  Q^\pi(s_{i,t}, o_{i,t})
+  =
+  \E_{o_{i,>t} \sim \pi}
+  \left[
+    r(q, o_{i,\le t}, o_{i,>t})
+  \right].
+\end{equation}
+
+Define the pre-token value
+\begin{equation}
+  V^\pi(s_{i,t})
+  =
+  \E_{a \sim \pi(\cdot \mid s_{i,t})}
+  \left[
+    Q^\pi(s_{i,t}, a)
+  \right].
+\end{equation}
+
+Then a reward-impact saliency is
+\begin{equation}
+  S^{\mathrm{rollout}}_{i,t}
+  =
+  \left|
+    Q^\pi(s_{i,t}, o_{i,t})
+    -
+    V^\pi(s_{i,t})
+  \right|.
+\end{equation}
+
+With $K$ sampled continuations per candidate token, estimate
+\begin{equation}
+  \widehat Q^\pi(s_{i,t}, a)
+  =
+  \frac{1}{K}
+  \sum_{k=1}^{K}
+  r(q, o_{i,<t}, a, o^{(k)}_{>t}).
+\end{equation}
+
+The rollout saliency estimator becomes
+\begin{equation}
+  \widehat S^{\mathrm{rollout}}_{i,t}
+  =
+  \left|
+    \widehat Q^\pi(s_{i,t}, o_{i,t})
+    -
+    \sum_{a}
+    \pi(a \mid s_{i,t})
+    \widehat Q^\pi(s_{i,t}, a)
+  \right|.
+\end{equation}
+
+\section*{3. Learned Offline Predictor for Grad-H $F$ or Reward Impact}
+
+Instead of computing expensive saliency online every batch, train a small
+predictor $g_\phi$ from hidden states and cheap token features.
+
+For vector-gradient prediction:
+\begin{equation}
+  g_\phi(h^{(\ell)}_{i,t}, x_{i,t})
+  \approx
+  \sg
+  \left(
+    \nabla_{h^{(\ell)}_{i,t}} F
+  \right),
+\end{equation}
+with loss
+\begin{equation}
+  \mathcal{L}_{\mathrm{grad}}(\phi)
+  =
+  \E_{i,t,\ell}
+  \left[
+    \left\|
+      g_\phi(h^{(\ell)}_{i,t}, x_{i,t})
+      -
+      \sg
+      \left(
+        \nabla_{h^{(\ell)}_{i,t}} F
+      \right)
+    \right\|_2^2
+  \right].
+\end{equation}
+
+For scalar saliency prediction:
+\begin{equation}
+  \hat S^\phi_{i,t}
+  =
+  g_\phi(h_{i,t}, x_{i,t})
+  \approx
+  S^F_{i,t}
+  \quad \text{or} \quad
+  S^r_{i,t}.
+\end{equation}
+
+Train with
+\begin{equation}
+  \mathcal{L}_{\mathrm{score}}(\phi)
+  =
+  \E_{i,t}
+  \left[
+    \left(
+      g_\phi(h_{i,t}, x_{i,t})
+      -
+      \sg(S^\star_{i,t})
+    \right)^2
+  \right],
+\end{equation}
+where
+\begin{equation}
+  S^\star_{i,t}
+  \in
+  \left\{
+    S^F_{i,t},
+    S^r_{i,t},
+    S^{\mathrm{rollout}}_{i,t}
+  \right\}.
+\end{equation}
+
+Then CW-CISPO can use
+\begin{equation}
+  w_{i,t}
+  =
+  \ProjectMeanOne
+  \left(
+    \left(
+      \hat S^\phi_{i,t} + \epsilon
+    \right)^\gamma
+  \right).
+\end{equation}
+
+\section*{4. Probability-Space Sensitivity}
+
+Robert was unsure about saliency written as $\nabla_{p(o_i)} F$. The concern is
+that perturbing the probability of a sampled token is not the same as
+perturbing a hidden state or a policy parameter.
+
+Let
+\begin{equation}
+  p_{i,t}
+  =
+  \pi_\theta(o_{i,t} \mid s_{i,t}).
+\end{equation}
+
+A probability-coordinate sensitivity would be
+\begin{equation}
+  S^p_{i,t}
+  =
+  \left|
+    p_{i,t}
+    \frac{\partial F}{\partial p_{i,t}}
+  \right|.
+\end{equation}
+
+Equivalently, because
+\begin{equation}
+  \frac{\partial F}{\partial \log p_{i,t}}
+  =
+  p_{i,t}
+  \frac{\partial F}{\partial p_{i,t}},
+\end{equation}
+we can write
+\begin{equation}
+  S^p_{i,t}
+  =
+  \left|
+    \frac{\partial F}{\partial \log \pi_\theta(o_{i,t} \mid s_{i,t})}
+  \right|.
+\end{equation}
+
+For the simple teacher-forced objective above,
+\begin{equation}
+  \frac{\partial F}{\partial \log \pi_\theta(o_{i,t} \mid s_{i,t})}
+  =
+  \frac{|\hat A_i|}{|M_i|}.
+\end{equation}
+That is nearly uniform within a response, so it is not a useful token saliency
+unless $F$ includes richer token-level structure.
+
+\section*{5. Decision-State and Bottleneck-State Formulations}
+
+In deep RL terms, a token position is important if the next action materially
+changes the reachable return distribution.
+
+A decision-state score is
+\begin{equation}
+  D_{i,t}
+  =
+  \Var_{a \sim \pi(\cdot \mid s_{i,t})}
+  \left[
+    Q^\pi(s_{i,t}, a)
+  \right].
+\end{equation}
+
+Equivalently, a max-gap version is
+\begin{equation}
+  D^{\max}_{i,t}
+  =
+  \max_a Q^\pi(s_{i,t}, a)
+  -
+  \min_a Q^\pi(s_{i,t}, a).
+\end{equation}
+
+A bottleneck-state score can be written as the association between visiting a
+state-like feature $z$ and eventual success:
+\begin{equation}
+  B(z)
+  =
+  \Pr(z \in \tau \mid r=1)
+  -
+  \Pr(z \in \tau \mid r=0).
+\end{equation}
+
+For token positions, define a feature map $\psi(s_{i,t})$. Then
+\begin{equation}
+  B_{i,t}
+  =
+  B(\psi(s_{i,t})).
+\end{equation}
+
+The doorway analogy from grid-world RL corresponds to states with both high
+visitation centrality and high success association:
+\begin{equation}
+  S^{\mathrm{bottleneck}}_{i,t}
+  =
+  C^{\mathrm{visit}}_{i,t}
+  \cdot
+  \left|B_{i,t}\right|.
+\end{equation}
+
+\section*{6. Multi-Step Attention Centrality, PageRank-Style}
+
+Current future-attention in-degree is a one-step score:
+\begin{equation}
+  S^{\mathrm{attn},1}_{i,t}
+  =
+  \sum_{\ell,h}
+  \sum_{\substack{j \in M_i \\ j > t}}
+  a^{(\ell,h)}_{i,j,t}.
+\end{equation}
+This implicitly weights every future query token $j$ equally.
+
+Define a row-stochastic token transition matrix $P_i$ over generated positions:
+\begin{equation}
+  P_i[j,t]
+  =
+  \frac{1}{|L_{\mathrm{top}}|}
+  \sum_{\ell \in L_{\mathrm{top}}}
+  \frac{1}{H_\ell}
+  \sum_{h=1}^{H_\ell}
+  a^{(\ell,h)}_{i,j,t}.
+\end{equation}
+
+A PageRank-style equilibrium centrality $c_i$ satisfies
+\begin{equation}
+  c_i
+  =
+  (1-\alpha) \nu_i
+  +
+  \alpha P_i^\top c_i,
+  \qquad
+  0 < \alpha < 1,
+\end{equation}
+where $\nu_i$ can be uniform over $M_i$:
+\begin{equation}
+  \nu_i[t]
+  =
+  \frac{1}{|M_i|}.
+\end{equation}
+
+The multi-step attention saliency is
+\begin{equation}
+  S^{\mathrm{attn},\mathrm{PR}}_{i,t}
+  =
+  c_i[t].
+\end{equation}
+
+Equivalently,
+\begin{equation}
+  c_i
+  =
+  (1-\alpha)
+  \sum_{n=0}^{\infty}
+  \alpha^n
+  \left(P_i^\top\right)^n
+  \nu_i.
+\end{equation}
+
+This is attention paid by future tokens, weighted by those tokens' own
+centrality.
+
+\section*{7. Multiplicative Saliency, Entropy, and Controllability}
+
+The current saliency-only form is
+\begin{equation}
+  \tilde w_{i,t}
+  =
+  \left(S_{i,t} + \epsilon\right)^\gamma.
+\end{equation}
+
+Robert's suggestion is closer to a multiplicative gate: update tokens only
+when they are both important and changeable.
+
+Let token entropy be
+\begin{equation}
+  H_{i,t}
+  =
+  -
+  \sum_a
+  \pi_\theta(a \mid s_{i,t})
+  \log \pi_\theta(a \mid s_{i,t}).
+\end{equation}
+
+Let controllability be
+\begin{equation}
+  C_{i,t}
+  =
+  \Var_{a \sim \pi_\theta(\cdot \mid s_{i,t})}
+  \left[
+    Q^\pi(s_{i,t}, a)
+  \right].
+\end{equation}
+
+A simple multiplicative weight is
+\begin{equation}
+  \tilde w^{\mathrm{mult}}_{i,t}
+  =
+  \left(S_{i,t} + \epsilon\right)^\gamma
+  \left(H_{i,t} + \epsilon\right)^\eta
+  \left(C_{i,t} + \epsilon\right)^\kappa.
+\end{equation}
+
+Then enforce bounded mean-one credit weights:
+\begin{equation}
+  w^{\mathrm{mult}}_{i,t}
+  =
+  \ProjectMeanOne
+  \left(
+    \tilde w^{\mathrm{mult}}_{i,t};
+    w_{\min},
+    w_{\max}
+  \right),
+\end{equation}
+so that
+\begin{equation}
+  \frac{1}{|M_i|}
+  \sum_{t \in M_i}
+  w^{\mathrm{mult}}_{i,t}
+  =
+  1.
+\end{equation}
+
+An Osband-style delight gate can be written as a sigmoid:
+\begin{equation}
+  g_{i,t}
+  =
+  \sigma
+  \left(
+    \beta_0
+    +
+    \beta_{\ell}
+    \left[-\log \pi_\theta(o_{i,t} \mid s_{i,t})\right]
+    +
+    \beta_A \hat A_i
+    +
+    \beta_C \log(C_{i,t}+\epsilon)
+  \right).
+\end{equation}
+
+Then
+\begin{equation}
+  \tilde w^{\mathrm{gate}}_{i,t}
+  =
+  \left(S_{i,t}+\epsilon\right)^\gamma
+  g_{i,t}.
+\end{equation}
+
+The intuition is
+\begin{equation}
+  \text{credit}
+  \approx
+  \text{importance}
+  \times
+  \text{uncertainty}
+  \times
+  \text{controllability}.
+\end{equation}
+
+\section*{8. Cumulative Future Entropy Baseline}
+
+A cheap baseline is cumulative future entropy: tokens are important if many
+uncertain choices remain downstream.
+
+Define entropy-to-go:
+\begin{equation}
+  E^{\mathrm{future}}_{i,t}
+  =
+  \sum_{\substack{j \in M_i \\ j \ge t}}
+  \lambda^{j-t}
+  H_{i,j},
+  \qquad
+  0 < \lambda \le 1.
+\end{equation}
+
+The corresponding mean-one credit weight is
+\begin{equation}
+  w^{\mathrm{futureH}}_{i,t}
+  =
+  \ProjectMeanOne
+  \left(
+    \left(E^{\mathrm{future}}_{i,t}+\epsilon\right)^\eta
+  \right).
+\end{equation}
+
+\section*{9. Token-Dependent Learning Rate View}
+
+CW-CISPO weights can also be read as a token-dependent learning rate.
+
+The scalar CISPO gradient has the form
+\begin{equation}
+  g_{\mathrm{CISPO}}
+  =
+  -
+  \sum_{i,t}
+  \sg(\hat \rho_{i,t})
+  \hat A_i
+  \nabla_\theta
+  \log \pi_\theta(o_{i,t} \mid s_{i,t}).
+\end{equation}
+
+CW-CISPO changes it to
+\begin{equation}
+  g_{\mathrm{CW}}
+  =
+  -
+  \sum_{i,t}
+  \sg(w_{i,t})
+  \sg(\hat \rho_{i,t})
+  \hat A_i
+  \nabla_\theta
+  \log \pi_\theta(o_{i,t} \mid s_{i,t}).
+\end{equation}
+
+This is equivalent to a per-token step size
+\begin{equation}
+  \eta_{i,t}
+  =
+  \eta_0 w_{i,t}.
+\end{equation}
+
+Mean-one normalization preserves the average learning rate:
+\begin{equation}
+  \frac{1}{|M_i|}
+  \sum_{t \in M_i}
+  \eta_{i,t}
+  =
+  \eta_0.
+\end{equation}
+
+Robert's learning-rate point can be stated as an implicit relative-step decay:
+\begin{equation}
+  \frac{\|\Delta \theta\|_2}{\|\theta\|_2}
+  \approx
+  \eta
+  \frac{\|g\|_2}{\|\theta\|_2}.
+\end{equation}
+
+Even with constant $\eta$, this relative step shrinks as $\|\theta\|_2$ grows.
+Token-dependent weights can selectively counteract or amplify this decay at
+important states.
+
+\section*{10. Feature-Space Opportunity Proxy}
+
+Robert's "opportunities opened by this token" idea can be formalized as
+successor-feature dispersion.
+
+Let $\phi(q,o_{\le t},o_{>t})$ be a feature vector of the completed trajectory,
+such as final hidden state, answer embedding, or verifier-side features. Define
+the feature opportunity of prefix $o_{\le t}$:
+\begin{equation}
+  O_{i,t}
+  =
+  \tr
+  \left(
+    \Cov_{o_{>t} \sim \pi}
+    \left[
+      \phi(q,o_{\le t},o_{>t})
+    \right]
+  \right).
+\end{equation}
+
+An action-conditional opportunity gain is
+\begin{equation}
+  \Delta O_{i,t}
+  =
+  O(q,o_{\le t})
+  -
+  \E_{a \sim \pi(\cdot \mid s_{i,t})}
+  \left[
+    O(q,o_{<t},a)
+  \right].
+\end{equation}
+
+Use
+\begin{equation}
+  S^{\mathrm{opp}}_{i,t}
+  =
+  \left|\Delta O_{i,t}\right|
+\end{equation}
+as a proxy for whether token $o_{i,t}$ opens or closes useful future trajectory
+options.
+
+\section*{11. Golden Trajectory, Teacher Logits, and PRM Access}
+
+There are three increasingly rich supervision signals.
+
+\paragraph{Golden trajectory only.}
+Given only a teacher or gold trajectory $o^T$, the objective is
+\begin{equation}
+  F_{\mathrm{gold}}(\theta)
+  =
+  \sum_{t}
+  \log \pi_\theta(o^T_t \mid q,o^T_{<t}).
+\end{equation}
+The saliency is
+\begin{equation}
+  S^{\mathrm{gold}}_t
+  =
+  \left\|
+    \nabla_{h_t} F_{\mathrm{gold}}
+  \right\|.
+\end{equation}
+
+\paragraph{Teacher logits.}
+If teacher logits or a teacher distribution $\tau_t(a)$ are available, use
+\begin{equation}
+  F_{\mathrm{logits}}(\theta)
+  =
+  \sum_t
+  \sum_a
+  \tau_t(a)
+  \log \pi_\theta(a \mid q,o^T_{<t}).
+\end{equation}
+
+Equivalently,
+\begin{equation}
+  F_{\mathrm{logits}}(\theta)
+  =
+  -
+  \sum_t
+  \operatorname{KL}
+  \left(
+    \tau_t(\cdot)
+    \,\|\, 
+    \pi_\theta(\cdot \mid q,o^T_{<t})
+  \right)
+  + \mathrm{const}.
+\end{equation}
+
+The saliency is
+\begin{equation}
+  S^{\mathrm{logits}}_t
+  =
+  \left\|
+    \nabla_{h_t} F_{\mathrm{logits}}
+  \right\|.
+\end{equation}
+
+\paragraph{Process reward model.}
+If a process reward model $R_\psi$ is available, define
+\begin{equation}
+  F_{\mathrm{PRM}}(\theta)
+  =
+  \sum_t
+  R_\psi(q,o_{\le t}).
+\end{equation}
+The saliency is
+\begin{equation}
+  S^{\mathrm{PRM}}_t
+  =
+  \left\|
+    \nabla_{h_t} F_{\mathrm{PRM}}
+  \right\|.
+\end{equation}
+
+The hierarchy is therefore
+\begin{equation}
+  \text{gold trajectory}
+  \;<\;
+  \text{teacher logits}
+  \;\not\equiv\;
+  \text{process reward model}.
+\end{equation}
+
+\section*{12. Cost of Full-Trajectory Grad-H $F$}
+
+The current causal-tangent formulation requires a full teacher-forced forward
+pass over the sampled trajectory:
+\begin{equation}
+  (q,o_i)
+  \longmapsto
+  \{h^{(\ell)}_{i,t}\}_{\ell \in L_{\mathrm{top}},\, t \in M_i}
+  \longmapsto
+  F_i
+  \longmapsto
+  \nabla_{h^{(\ell)}_{i,t}} F_i.
+\end{equation}
+
+The cost scales as
+\begin{equation}
+  \operatorname{cost}
+  \left(
+    S^F
+  \right)
+  \approx
+  \operatorname{Forward}(T_i)
+  +
+  \operatorname{Backward}_{h}(T_i, |L_{\mathrm{top}}|),
+\end{equation}
+with activation storage
+\begin{equation}
+  \operatorname{memory}
+  \left(
+    S^F
+  \right)
+  =
+  O
+  \left(
+    |L_{\mathrm{top}}| \, T_i \, d_{\mathrm{model}}
+  \right).
+\end{equation}
+
+This is why cheap baselines are important:
+\begin{equation}
+  S^{\mathrm{attn},1}_{i,t},
+  \qquad
+  S^{\mathrm{attn},\mathrm{PR}}_{i,t},
+  \qquad
+  S^{\mathrm{futureH}}_{i,t},
+  \qquad
+  \hat S^\phi_{i,t}.
+\end{equation}
+
+\section*{13. Baseline Matrix}
+
+The concrete baseline family can be summarized as
+\begin{align}
+  S^{\mathrm{attn},1}_{i,t}
+  &=
+  \sum_{\ell,h}
+  \sum_{j>t}
+  a^{(\ell,h)}_{i,j,t},
+  \\
+  S^{\mathrm{attn},\mathrm{PR}}_{i,t}
+  &=
+  c_i[t],
+  \quad
+  c_i=(1-\alpha)\nu_i+\alpha P_i^\top c_i,
+  \\
+  S^F_{i,t}
+  &=
+  \left\|
+    \nabla_{h_{i,t}} F
+  \right\|_{\mathrm{tangent}},
+  \\
+  S^r_{i,t}
+  &=
+  \left\|
+    \nabla_{h_{i,t}}
+    \E[r \mid q,o_{\le t}]
+  \right\|,
+  \\
+  S^{\mathrm{rollout}}_{i,t}
+  &=
+  \left|
+    Q^\pi(s_{i,t},o_{i,t})
+    -
+    V^\pi(s_{i,t})
+  \right|,
+  \\
+  S^{\mathrm{futureH}}_{i,t}
+  &=
+  \sum_{j \ge t}
+  \lambda^{j-t}
+  H_{i,j},
+  \\
+  S^{\mathrm{opp}}_{i,t}
+  &=
+  \left|
+    \Delta O_{i,t}
+  \right|.
+\end{align}
+
+Each score becomes a CISPO credit weight through the same bounded mean-one map:
+\begin{equation}
+  w_{i,t}
+  =
+  \ProjectMeanOne
+  \left(
+    (S_{i,t}+\epsilon)^\gamma;
+    w_{\min},
+    w_{\max}
+  \right).
+\end{equation}
+
+The main experimental question is:
+\begin{equation}
+  \text{Does } w(S^F),\; w(S^r),\; \text{or } w(S^{\mathrm{rollout}})
+  \text{ beat }
+  w(S^{\mathrm{futureH}})
+  \text{ and shuffled controls?}
+\end{equation}
+
+\end{document}
